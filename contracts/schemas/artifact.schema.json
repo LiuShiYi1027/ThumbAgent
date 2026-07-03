@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/artifact/v1.json",
+  "title": "Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "kind",
+    "content_type",
+    "relative_path",
+    "size_bytes",
+    "sha256",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "artifact_id": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" },
+    "kind": { "enum": ["screenshot", "ui_tree"] },
+    "content_type": { "enum": ["image/png", "application/xml"] },
+    "relative_path": { "type": "string", "minLength": 1 },
+    "size_bytes": { "type": "integer", "minimum": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}
+

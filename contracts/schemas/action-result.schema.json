@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/action-result/v1.json",
+  "title": "ActionResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action_id", "tool_id", "device_id", "status", "verification", "started_at", "completed_at", "before", "after"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "action_id": { "type": "string", "pattern": "^action_[a-f0-9]{32}$" },
+    "tool_id": { "enum": ["app.launch", "navigation.back", "navigation.home", "input.tap", "input.tap_element"] },
+    "device_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["succeeded", "failed", "unknown_outcome", "rejected"] },
+    "verification": { "enum": ["verified", "not_verified", "inconclusive"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "before": { "$ref": "observation.schema.json" },
+    "after": { "$ref": "observation.schema.json" }
+    ,"ui_match": {
+      "oneOf": [
+        { "$ref": "ui-match.schema.json" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

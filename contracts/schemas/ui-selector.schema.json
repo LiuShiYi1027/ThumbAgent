@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/ui-selector/v1.json",
+  "title": "UiSelector",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["strategy", "value"],
+  "properties": {
+    "strategy": { "enum": ["resource_id", "text", "content_description"] },
+    "value": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "match": { "enum": ["exact", "contains"], "default": "exact" },
+    "clickable": { "type": "boolean" },
+    "enabled": { "type": "boolean", "default": true },
+    "resolve_clickable_ancestor": { "type": "boolean", "default": false },
+    "ancestor_path": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["strategy", "value"],
+        "properties": {
+          "strategy": { "enum": ["resource_id", "text", "content_description"] },
+          "value": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "match": { "enum": ["exact", "contains"], "default": "exact" }
+        }
+      }
+    }
+  }
+}
+

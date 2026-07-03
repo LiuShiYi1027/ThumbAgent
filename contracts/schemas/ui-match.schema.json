@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/ui-match/v1.json",
+  "title": "UiMatch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "selector", "matched_node", "target_node", "tap_x", "tap_y"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "selector": { "$ref": "ui-selector.schema.json" },
+    "matched_node": { "$ref": "ui-node.schema.json" },
+    "target_node": { "$ref": "ui-node.schema.json" },
+    "tap_x": { "type": "integer", "minimum": 0 },
+    "tap_y": { "type": "integer", "minimum": 0 }
+  }
+}
+

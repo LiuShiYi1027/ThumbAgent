@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/navigation-result/v1.json",
+  "title": "NavigationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_call_id", "skill_id", "skill_version", "success", "started_at", "completed_at", "open_app", "tap_action", "verified_observation", "verified_node"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "settings.navigate" },
+    "skill_version": { "const": "1.0.0" },
+    "success": { "const": true },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "open_app": { "$ref": "skill-result.schema.json" },
+    "tap_action": { "$ref": "action-result.schema.json" },
+    "verified_observation": { "$ref": "observation.schema.json" },
+    "verified_node": { "$ref": "ui-node.schema.json" }
+  }
+}
+

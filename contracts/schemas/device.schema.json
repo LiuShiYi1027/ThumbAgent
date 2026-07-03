@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device/v1.json",
+  "title": "Device",
+  "description": "A mobile device visible to the Mobile Agent runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "device_id",
+    "platform",
+    "name",
+    "model",
+    "os_version",
+    "connection",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "enum": ["android", "ios", "harmonyos"]
+    },
+    "name": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "os_version": {
+      "type": "string"
+    },
+    "connection": {
+      "enum": ["online", "offline", "unauthorized", "unknown"]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@1$"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+

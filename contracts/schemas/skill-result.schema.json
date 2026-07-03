@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/skill-result/v1.json",
+  "title": "SkillResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_call_id", "skill_id", "skill_version", "success", "status", "started_at", "completed_at", "action"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "app.open" },
+    "skill_version": { "const": "1.0.0" },
+    "success": { "type": "boolean" },
+    "status": { "enum": ["succeeded", "failed", "unknown_outcome", "rejected"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "action": { "$ref": "action-result.schema.json" }
+  }
+}
+
