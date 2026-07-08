@@ -21,3 +21,15 @@ class ObservationParserTests(unittest.TestCase):
         xml = b'<?xml version="1.0"?><hierarchy rotation="0"></hierarchy>'
         self.assertEqual(xml, extract_ui_xml(b"noise\n" + xml + b"\nfinished"))
         self.assertEqual(b"", extract_ui_xml(b"UI hierarchy unavailable"))
+
+    def test_foreground_app_prefers_primary_display(self) -> None:
+        output = """
+        Display: mDisplayId=1 (organized)
+          mFocusedApp=ActivityRecord{1 u0 com.example.secondary/.Secondary t1}
+        Display: mDisplayId=0 (organized)
+          mCurrentFocus=Window{2 u0 NotificationShade}
+          mFocusedApp=ActivityRecord{3 u0 com.android.settings/.Settings t2}
+        """
+        self.assertEqual(
+            ("com.android.settings", ".Settings"), parse_foreground_app(output)
+        )

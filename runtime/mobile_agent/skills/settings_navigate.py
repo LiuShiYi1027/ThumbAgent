@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from mobile_agent.domain.action import ActionResult, SkillResult
+from mobile_agent.domain.action import (
+    ActionResult,
+    ActionStatus,
+    SkillResult,
+    VerificationStatus,
+)
+from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.observation import Observation
 from mobile_agent.skills.open_app import OpenAppSkill
 from mobile_agent.tools.runtime import ToolRuntime
@@ -65,15 +71,28 @@ class SettingsNavigateSkill:
     ) -> NavigationResult:
         started_at = _now()
         opened = await self._open_app.invoke(device_id, "com.android.settings")
-        await self._tools.wait_for_element(device_id, target_selector)
+        if (
+            not opened.success
+            or opened.status is not ActionStatus.SUCCEEDED
+            or opened.action.verification is not VerificationStatus.VERIFIED
+            or opened.action.after.foreground_app.app_id != "com.android.settings"
+        ):
+            raise MobileAgentError(
+                code="APP_OPEN_FAILED",
+                category=ErrorCategory.EXECUTION,
+                message="无法确认系统设置已打开",
+            )
+        safe_target = self._settings_selector(target_selector)
+        safe_expected = self._settings_selector(expected_selector)
+        await self._tools.wait_for_element(device_id, safe_target)
         tap_action = await self._tools.execute(
             "input.tap_element",
             device_id,
-            {"selector": target_selector},
+            {"selector": safe_target},
             confirmed=confirmed,
         )
         verified_observation, verified_node = await self._tools.wait_for_element(
-            device_id, expected_selector
+            device_id, safe_expected
         )
         return NavigationResult(
             skill_call_id=f"skillcall_{uuid.uuid4().hex}",
@@ -85,3 +104,13 @@ class SettingsNavigateSkill:
             verified_node=verified_node,
         )
 
+    @staticmethod
+    def _settings_selector(selector: dict[str, Any]) -> dict[str, Any]:
+        existing = selector.get("package")
+        if existing is not None and existing != "com.android.settings":
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="设置导航 Selector 不能指向其他应用",
+            )
+        return {**selector, "package": "com.android.settings"}

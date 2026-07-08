@@ -9,7 +9,9 @@ from mobile_agent.devices.adapters.android.adb import CommandResult
 
 
 class FakeProcessRunner:
-    def __init__(self, responses: dict[tuple[str, ...], CommandResult]) -> None:
+    def __init__(
+        self, responses: dict[tuple[str, ...], CommandResult | list[CommandResult]]
+    ) -> None:
         self.responses = responses
         self.calls: list[tuple[Path, tuple[str, ...]]] = []
 
@@ -18,7 +20,12 @@ class FakeProcessRunner:
         self.calls.append((executable, key))
         if key not in self.responses:
             raise AssertionError(f"Unexpected process call: {key!r}")
-        return self.responses[key]
+        response = self.responses[key]
+        if isinstance(response, list):
+            if not response:
+                raise AssertionError(f"No process responses remain for: {key!r}")
+            return response.pop(0)
+        return response
 
 
 def result(

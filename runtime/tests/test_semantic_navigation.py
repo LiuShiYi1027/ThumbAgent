@@ -24,6 +24,11 @@ TARGET = {
 EXPECTED = {"strategy": "text", "value": "Display settings"}
 
 
+class FailedSettingsLaunchAdapter(FakeDeviceAdapter):
+    async def launch_app(self, device_id: str, app_id: str) -> None:
+        self.actions.append(("app.launch", device_id, app_id))
+
+
 class SemanticNavigationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
@@ -64,6 +69,47 @@ class SemanticNavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.success)
         self.assertEqual("Display settings", result.verified_node.text)
         self.assertEqual(".DisplaySettings", result.verified_observation.foreground_app.activity)
+
+    async def test_navigation_result_to_dict_serializes_full_chain(self) -> None:
+        """Regression: UiSelector.to_dict() used super() with slots=True,
+        which crashes on serialization.  The API endpoint calls to_dict()
+        on the full NavigationResult, so this must not raise."""
+        result = await SettingsNavigateSkill(
+            self.tools, OpenAppSkill(self.tools)
+        ).invoke("fake:android-001", TARGET, EXPECTED, confirmed=True)
+
+        serialized = result.to_dict()
+
+        self.assertTrue(serialized["success"])
+        tap_selector = serialized["tap_action"]["ui_match"]["selector"]
+        self.assertEqual("Display", tap_selector["value"])
+        self.assertTrue(tap_selector["resolve_clickable_ancestor"])
+        self.assertEqual("com.android.settings", tap_selector["package"])
+
+    async def test_navigation_stops_when_settings_open_is_not_verified(self) -> None:
+        adapter = FailedSettingsLaunchAdapter()
+        tools = ToolRuntime(
+            adapter,
+            ArtifactStore(Path(self.directory.name)),
+            ToolRegistry(),
+            PolicyEngine(),
+        )
+        with self.assertRaises(MobileAgentError) as raised:
+            await SettingsNavigateSkill(tools, OpenAppSkill(tools)).invoke(
+                "fake:android-001", TARGET, EXPECTED, confirmed=True
+            )
+        self.assertEqual("APP_OPEN_FAILED", raised.exception.code)
+        self.assertEqual(1, len(adapter.actions))
+
+    async def test_navigation_rejects_selector_for_another_package(self) -> None:
+        with self.assertRaises(MobileAgentError) as raised:
+            await SettingsNavigateSkill(self.tools, OpenAppSkill(self.tools)).invoke(
+                "fake:android-001",
+                {**TARGET, "package": "com.example.other"},
+                EXPECTED,
+                confirmed=True,
+            )
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
 
     async def test_wait_is_bounded_and_returns_not_found(self) -> None:
         with self.assertRaises(MobileAgentError) as raised:

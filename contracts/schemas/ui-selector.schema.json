@@ -12,6 +12,7 @@
     "clickable": { "type": "boolean" },
     "enabled": { "type": "boolean", "default": true },
     "resolve_clickable_ancestor": { "type": "boolean", "default": false },
+    "package": { "type": "string", "minLength": 1, "maxLength": 255 },
     "ancestor_path": {
       "type": "array",
       "maxItems": 8,
@@ -28,4 +29,3 @@
     }
   }
 }
-

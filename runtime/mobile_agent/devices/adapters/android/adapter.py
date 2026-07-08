@@ -108,25 +108,14 @@ class AndroidDeviceAdapter:
         app_id, activity = parse_foreground_app(app_result.stdout_text)
 
         screenshot_time = _now()
-        screenshot_result = await self._runner.run("-s", serial, "exec-out", "screencap", "-p")
-        screenshot_data = screenshot_result.stdout
+        screenshot_data = await self._capture_screenshot(serial)
         width, height = self._png_dimensions(screenshot_data)
         screenshot = artifacts.write(
             ArtifactKind.SCREENSHOT, "image/png", screenshot_data, ".png"
         )
 
         ui_time = _now()
-        ui_result = await self._runner.run(
-            "-s", serial, "exec-out", "uiautomator", "dump", "/dev/tty"
-        )
-        ui_xml = extract_ui_xml(ui_result.stdout)
-        if not ui_xml:
-            raise MobileAgentError(
-                code="OBSERVATION_FAILED",
-                category=ErrorCategory.DEVICE,
-                message="无法读取设备 UI hierarchy",
-                retryable=True,
-            )
+        ui_xml = await self._capture_ui_tree(serial)
         ui_tree = artifacts.write(
             ArtifactKind.UI_TREE, "application/xml", ui_xml, ".xml"
         )
@@ -146,6 +135,23 @@ class AndroidDeviceAdapter:
             screen=ScreenObservation(width, height, orientation, screenshot_time, screenshot),
             ui_tree=UiTreeObservation(ui_time, ui_tree),
             device_state=DeviceState.UNKNOWN,
+        )
+
+    async def _capture_ui_tree(self, serial: str) -> bytes:
+        for attempt in range(2):
+            result = await self._runner.run(
+                "-s", serial, "exec-out", "uiautomator", "dump", "/dev/tty"
+            )
+            ui_xml = extract_ui_xml(result.stdout)
+            if ui_xml:
+                return ui_xml
+            if attempt == 0:
+                await asyncio.sleep(0.2)
+        raise MobileAgentError(
+            code="OBSERVATION_FAILED",
+            category=ErrorCategory.DEVICE,
+            message="无法读取设备 UI hierarchy",
+            retryable=True,
         )
 
     @staticmethod
@@ -184,6 +190,31 @@ class AndroidDeviceAdapter:
             )
         return width, height
 
+    async def _capture_screenshot(self, serial: str) -> bytes:
+        result = await self._runner.run("-s", serial, "exec-out", "screencap", "-p")
+        signature = b"\x89PNG\r\n\x1a\n"
+        if result.stdout.startswith(signature):
+            return result.stdout
+        offset = result.stdout.find(signature)
+        prefix = result.stdout[:offset] if offset >= 0 else result.stdout
+        if offset < 0 or b"Multiple displays were found" not in prefix:
+            return result.stdout
+        displays = await self._runner.run(
+            "-s", serial, "shell", "dumpsys", "SurfaceFlinger", "--display-id"
+        )
+        match = re.search(r"Display\s+(\d+)\s+\(HWC display 0\)", displays.stdout_text)
+        if match is None:
+            raise MobileAgentError(
+                code="OBSERVATION_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="无法确定设备内置主屏 display ID",
+                retryable=True,
+            )
+        recaptured = await self._runner.run(
+            "-s", serial, "exec-out", "screencap", "-d", match.group(1), "-p"
+        )
+        return recaptured.stdout
+
     async def launch_app(self, device_id: str, app_id: str) -> None:
         serial = self._serial_from_device_id(device_id)
         if not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+", app_id):
@@ -192,17 +223,29 @@ class AndroidDeviceAdapter:
                 category=ErrorCategory.VALIDATION,
                 message="无效的应用标识",
             )
-        result = await self._runner.run(
-            "-s",
-            serial,
-            "shell",
-            "monkey",
-            "-p",
-            app_id,
-            "-c",
-            "android.intent.category.LAUNCHER",
-            "1",
-        )
+        if app_id == "com.android.settings":
+            result = await self._runner.run(
+                "-s",
+                serial,
+                "shell",
+                "am",
+                "start",
+                "-W",
+                "-a",
+                "android.settings.SETTINGS",
+            )
+        else:
+            result = await self._runner.run(
+                "-s",
+                serial,
+                "shell",
+                "monkey",
+                "-p",
+                app_id,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            )
         self._require_success(result.returncode, "无法启动应用")
 
     async def press_back(self, device_id: str) -> None:

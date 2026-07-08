@@ -79,9 +79,13 @@ class UiLocator:
         if not semantic_match:
             return False
         if isinstance(predicate, UiSelector):
+            if not node.visible:
+                return False
+            if predicate.package is not None and node.package != predicate.package:
+                return False
             if predicate.clickable is not None and node.clickable is not predicate.clickable:
                 return False
-            if predicate.enabled and not node.enabled:
+            if node.enabled is not predicate.enabled:
                 return False
         return True
 

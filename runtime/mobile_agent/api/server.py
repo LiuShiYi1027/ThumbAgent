@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.evidence.artifacts import default_artifact_root
 from mobile_agent.runtime import RuntimeService, build_default_runtime
 
 
@@ -47,6 +52,8 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if not self._authorize_post():
+            return
         match = re.fullmatch(r"/v1/devices/([^/]+)/observe", self.path)
         if match:
             try:
@@ -100,6 +107,35 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             status, payload = HTTPStatus.SERVICE_UNAVAILABLE, {"error": error.to_dict()}
         self._write_json(status, payload)
 
+    def _authorize_post(self) -> bool:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            self._write_json(
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                {"error": {"code": "INVALID_CONTENT_TYPE", "message": "需要 application/json"}},
+            )
+            return False
+        expected = getattr(self.server, "api_token", "")
+        authorization = self.headers.get("Authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        if not expected or not secrets.compare_digest(supplied, expected):
+            self._write_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": {"code": "UNAUTHORIZED", "message": "缺少有效的本地 API 令牌"}},
+            )
+            return False
+        origin = self.headers.get("Origin")
+        allowed_origins = getattr(self.server, "allowed_origins", frozenset())
+        if origin is not None and origin not in allowed_origins:
+            parsed = urlparse(origin)
+            if not (parsed.scheme == "tauri" and parsed.hostname == "localhost"):
+                self._write_json(
+                    HTTPStatus.FORBIDDEN,
+                    {"error": {"code": "ORIGIN_REJECTED", "message": "请求来源未获授权"}},
+                )
+                return False
+        return True
+
     def _read_json(self) -> dict[str, Any]:
         raw_length = self.headers.get("Content-Length", "0")
         length = int(raw_length)
@@ -123,12 +159,27 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def create_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def create_server(
+    host: str = "127.0.0.1", port: int = 8765, api_token: str | None = None
+) -> ThreadingHTTPServer:
     """Create a loopback-only HTTP server."""
 
     if host not in {"127.0.0.1", "::1", "localhost"}:
         raise ValueError("The V1 runtime may only listen on loopback")
-    return ThreadingHTTPServer((host, port), RuntimeRequestHandler)
+    server = ThreadingHTTPServer((host, port), RuntimeRequestHandler)
+    server.api_token = api_token or secrets.token_urlsafe(32)  # type: ignore[attr-defined]
+    server.allowed_origins = frozenset({"tauri://localhost"})  # type: ignore[attr-defined]
+    return server
+
+
+def _write_runtime_token(token: str) -> Path:
+    data_dir = os.environ.get("MOBILE_AGENT_DATA_DIR")
+    root = Path(data_dir) if data_dir else default_artifact_root().parent
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "runtime-token"
+    path.write_text(token, encoding="utf-8")
+    path.chmod(0o600)
+    return path
 
 
 def main() -> None:
@@ -136,14 +187,21 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     args = parser.parse_args()
-    server = create_server(args.host, args.port)
+    configured_token = os.environ.get("MOBILE_AGENT_API_TOKEN")
+    token = configured_token or secrets.token_urlsafe(32)
+    token_file = None if configured_token else _write_runtime_token(token)
+    server = create_server(args.host, args.port, token)
     print(f"Mobile Agent runtime listening on http://{args.host}:{server.server_port}")
+    if token_file is not None:
+        print(f"Local API token written to {token_file}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if token_file is not None:
+            token_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

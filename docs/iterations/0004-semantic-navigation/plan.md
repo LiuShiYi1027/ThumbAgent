@@ -1,7 +1,7 @@
 # ITER-0004: Semantic Navigation
 
-> 状态：Active  
-> 更新日期：2026-07-04  
+> 状态：Completed
+> 更新日期：2026-07-07
 > Owner：Codex
 
 ## 目标

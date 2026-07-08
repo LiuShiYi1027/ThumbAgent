@@ -122,3 +122,39 @@ class UiParserLocatorTests(unittest.TestCase):
         with self.assertRaises(MobileAgentError) as bounds:
             self.parser.parse(invalid)
         self.assertEqual("UI_TREE_INVALID", bounds.exception.code)
+
+    def test_rejects_doctype_after_large_prefix(self) -> None:
+        payload = b" " * 5000 + b"<!DOCTYPE hierarchy><hierarchy/>"
+        with self.assertRaises(MobileAgentError) as raised:
+            self.parser.parse(payload)
+        self.assertEqual("UI_TREE_INVALID", raised.exception.code)
+
+    def test_find_all_excludes_hidden_nodes_and_honors_package(self) -> None:
+        xml = b'''<hierarchy>
+        <node text="Hidden" resource-id="hidden" class="TextView" package="com.android.settings" clickable="false" enabled="true" visible-to-user="false" bounds="[0,0][10,10]"/>
+        <node text="Title" resource-id="other" class="TextView" package="com.example.other" clickable="false" enabled="true" visible-to-user="true" bounds="[0,10][10,20]"/>
+        </hierarchy>'''
+        nodes = self.parser.parse(xml)
+        hidden = UiSelector.from_dict({"strategy": "text", "value": "Hidden"})
+        settings_only = UiSelector.from_dict(
+            {
+                "strategy": "text",
+                "value": "Title",
+                "package": "com.android.settings",
+            }
+        )
+        self.assertEqual([], self.locator.find_all(nodes, hidden))
+        self.assertEqual([], self.locator.find_all(nodes, settings_only))
+
+    def test_selector_rejects_oversized_ancestor_value(self) -> None:
+        with self.assertRaises(MobileAgentError) as raised:
+            UiSelector.from_dict(
+                {
+                    "strategy": "text",
+                    "value": "Target",
+                    "ancestor_path": [
+                        {"strategy": "text", "value": "x" * 1025}
+                    ],
+                }
+            )
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)

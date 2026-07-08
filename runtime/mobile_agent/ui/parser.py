@@ -19,7 +19,7 @@ class UiHierarchyParser:
     def parse(self, data: bytes) -> list[UiNode]:
         if not data or len(data) > self.MAX_BYTES:
             self._invalid("UI hierarchy 大小无效")
-        upper = data[:4096].upper()
+        upper = data.upper()
         if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
             self._invalid("UI hierarchy 包含禁止的实体声明")
         try:
@@ -87,4 +87,3 @@ class UiHierarchyParser:
             category=ErrorCategory.DEVICE,
             message=message,
         )
-

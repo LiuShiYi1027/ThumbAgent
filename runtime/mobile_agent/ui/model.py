@@ -97,6 +97,7 @@ class UiSelector(SelectorPredicate):
     enabled: bool = True
     resolve_clickable_ancestor: bool = False
     ancestor_path: tuple[SelectorPredicate, ...] = ()
+    package: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "UiSelector":
@@ -108,6 +109,7 @@ class UiSelector(SelectorPredicate):
             "enabled",
             "resolve_clickable_ancestor",
             "ancestor_path",
+            "package",
         }
         if set(payload) - allowed:
             cls._invalid("unknown field")
@@ -122,10 +124,15 @@ class UiSelector(SelectorPredicate):
         clickable = payload.get("clickable")
         enabled = payload.get("enabled", True)
         resolve = payload.get("resolve_clickable_ancestor", False)
+        package = payload.get("package")
         if clickable is not None and not isinstance(clickable, bool):
             cls._invalid("clickable")
         if not isinstance(enabled, bool) or not isinstance(resolve, bool):
             cls._invalid("enabled/resolve_clickable_ancestor")
+        if package is not None and (
+            not isinstance(package, str) or not package or len(package) > 255
+        ):
+            cls._invalid("package")
         raw_path = payload.get("ancestor_path", [])
         if not isinstance(raw_path, list) or len(raw_path) > 8:
             cls._invalid("ancestor_path")
@@ -135,7 +142,11 @@ class UiSelector(SelectorPredicate):
                 cls._invalid("ancestor_path item")
             try:
                 ancestor_value = item["value"]
-                if not isinstance(ancestor_value, str) or not ancestor_value:
+                if (
+                    not isinstance(ancestor_value, str)
+                    or not ancestor_value
+                    or len(ancestor_value) > 1024
+                ):
                     raise ValueError
                 ancestors.append(
                     SelectorPredicate(
@@ -146,10 +157,15 @@ class UiSelector(SelectorPredicate):
                 )
             except (KeyError, ValueError, TypeError):
                 cls._invalid("ancestor_path item")
-        return cls(strategy, value, match, clickable, enabled, resolve, tuple(ancestors))
+        return cls(strategy, value, match, clickable, enabled, resolve, tuple(ancestors), package)
 
     def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = super().to_dict()
+        # NOTE: Cannot use zero-arg super() here.  @dataclass(slots=True)
+        # returns a new class object, but the super() closure's __class__
+        # cell still references the original (pre-slots) class, causing
+        # TypeError: super(type, obj): obj must be an instance or subtype
+        # of type.  Calling the parent method directly sidesteps this.
+        payload: dict[str, Any] = SelectorPredicate.to_dict(self)
         payload.update(
             {
                 "enabled": self.enabled,
@@ -159,6 +175,8 @@ class UiSelector(SelectorPredicate):
         )
         if self.clickable is not None:
             payload["clickable"] = self.clickable
+        if self.package is not None:
+            payload["package"] = self.package
         return payload
 
     @staticmethod
@@ -188,4 +206,3 @@ class UiMatch:
             "tap_x": self.tap_x,
             "tap_y": self.tap_y,
         }
-

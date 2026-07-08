@@ -135,12 +135,11 @@ locked unauthorized usb:1-1
             "-s",
             "serial-1",
             "shell",
-            "monkey",
-            "-p",
-            "com.android.settings",
-            "-c",
-            "android.intent.category.LAUNCHER",
-            "1",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            "android.settings.SETTINGS",
         )
         back = ("-s", "serial-1", "shell", "input", "keyevent", "4")
         home = ("-s", "serial-1", "shell", "input", "keyevent", "3")
@@ -169,3 +168,90 @@ locked unauthorized usb:1-1
             await adapter.launch_app("adb:serial-1", "bad package; command")
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
         self.assertEqual([], process.calls)
+
+    async def test_observe_recaptures_explicit_primary_display_when_device_warns(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 1080, 2400) + b"pixels"
+        warning = b"[Warning] Multiple displays were found, but no display id was specified!\n"
+        ui_xml = b'<?xml version="1.0"?><hierarchy rotation="0"></hierarchy>'
+        list_args = ("devices", "-l")
+        version_args = ("-s", "serial-1", "shell", "getprop", "ro.build.version.release")
+        window_args = ("-s", "serial-1", "shell", "dumpsys", "window")
+        initial_capture = ("-s", "serial-1", "exec-out", "screencap", "-p")
+        display_args = (
+            "-s",
+            "serial-1",
+            "shell",
+            "dumpsys",
+            "SurfaceFlinger",
+            "--display-id",
+        )
+        explicit_capture = (
+            "-s",
+            "serial-1",
+            "exec-out",
+            "screencap",
+            "-d",
+            "12345",
+            "-p",
+        )
+        ui_args = ("-s", "serial-1", "exec-out", "uiautomator", "dump", "/dev/tty")
+        process = FakeProcessRunner(
+            {
+                list_args: result(
+                    list_args,
+                    "List of devices attached\nserial-1 device model:Pixel_8 device:pixel\n",
+                ),
+                version_args: result(version_args, "15\n"),
+                window_args: result(
+                    window_args, "mCurrentFocus=Window{1 u0 com.example/.MainActivity}\n"
+                ),
+                initial_capture: result(initial_capture, warning + png),
+                display_args: result(
+                    display_args,
+                    'Display 12345 (HWC display 0): port=1 pnpId=QCM displayName=""\n'
+                    'Display 67890 (HWC display 5): port=2 pnpId=QCM displayName=""\n',
+                ),
+                explicit_capture: result(explicit_capture, png),
+                ui_args: result(ui_args, ui_xml),
+            }
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+        with tempfile.TemporaryDirectory() as directory:
+            observation = await adapter.observe(
+                "adb:serial-1", ArtifactStore(Path(directory))
+            )
+        self.assertEqual(1080, observation.screen.width)
+        self.assertIn(explicit_capture, [call[1] for call in process.calls])
+
+    async def test_observe_retries_one_empty_ui_dump(self) -> None:
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 1080, 2400) + b"pixels"
+        ui_xml = b'<?xml version="1.0"?><hierarchy rotation="0"></hierarchy>'
+        list_args = ("devices", "-l")
+        version_args = ("-s", "serial-1", "shell", "getprop", "ro.build.version.release")
+        window_args = ("-s", "serial-1", "shell", "dumpsys", "window")
+        capture_args = ("-s", "serial-1", "exec-out", "screencap", "-p")
+        ui_args = ("-s", "serial-1", "exec-out", "uiautomator", "dump", "/dev/tty")
+        process = FakeProcessRunner(
+            {
+                list_args: result(
+                    list_args,
+                    "List of devices attached\nserial-1 device model:Pixel_8 device:pixel\n",
+                ),
+                version_args: result(version_args, "15\n"),
+                window_args: result(
+                    window_args, "mCurrentFocus=Window{1 u0 com.example/.MainActivity}\n"
+                ),
+                capture_args: result(capture_args, png),
+                ui_args: [
+                    result(ui_args, "ERROR: null root node"),
+                    result(ui_args, ui_xml),
+                ],
+            }
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+        with tempfile.TemporaryDirectory() as directory:
+            observation = await adapter.observe(
+                "adb:serial-1", ArtifactStore(Path(directory))
+            )
+        self.assertEqual("application/xml", observation.ui_tree.artifact.content_type)
+        self.assertEqual(2, [call[1] for call in process.calls].count(ui_args))

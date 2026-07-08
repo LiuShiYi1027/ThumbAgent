@@ -46,6 +46,18 @@ def parse_adb_devices(output: str) -> list[AdbDeviceRecord]:
 def parse_foreground_app(output: str) -> tuple[str, str]:
     """Extract package and activity from supported dumpsys window/activity formats."""
 
+    primary = re.search(
+        r"Display:\s*mDisplayId=0\b(.*?)(?=Display:\s*mDisplayId=|\Z)",
+        output,
+        re.DOTALL,
+    )
+    if primary:
+        focused = re.search(
+            r"mFocusedApp=.*?\s([A-Za-z0-9._]+)/(\.?[A-Za-z0-9.$_]+)",
+            primary.group(1),
+        )
+        if focused:
+            return focused.group(1), focused.group(2)
     patterns = (
         r"mCurrentFocus=.*?\s([A-Za-z0-9._]+)/(\.?[A-Za-z0-9.$_]+)",
         r"mFocusedApp=.*?\s([A-Za-z0-9._]+)/(\.?[A-Za-z0-9.$_]+)",
