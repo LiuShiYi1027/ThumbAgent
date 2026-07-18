@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-tool-call/v1.json",
+  "title": "AgentToolCall",
+  "type": "object",
+  "required": ["tool_id", "arguments"],
+  "oneOf": [
+    {
+      "properties": {
+        "tool_id": { "const": "app.launch" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["app_id"],
+          "properties": {
+            "app_id": { "type": "string", "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "tool_id": { "const": "input.tap_element" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selector"],
+          "properties": {
+            "selector": {
+              "allOf": [
+                { "$ref": "ui-selector.schema.json" },
+                {
+                  "required": ["resolve_clickable_ancestor"],
+                  "properties": {
+                    "resolve_clickable_ancestor": { "const": true }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "tool_id": { "const": "input.swipe" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["direction", "distance_percent", "duration_ms"],
+          "properties": {
+            "direction": { "enum": ["up", "down", "left", "right"] },
+            "distance_percent": { "type": "number", "minimum": 0.1, "maximum": 0.8 },
+            "duration_ms": { "type": "integer", "minimum": 100, "maximum": 2000 }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "tool_id": { "enum": ["navigation.back", "navigation.home"] },
+        "arguments": { "type": "object", "maxProperties": 0 }
+      }
+    }
+  ]
+}

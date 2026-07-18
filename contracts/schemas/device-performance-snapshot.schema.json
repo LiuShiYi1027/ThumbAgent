@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-performance-snapshot/v1.json",
+  "title": "Device Performance Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "snapshot_id", "device_id", "captured_at", "cpu", "memory", "battery", "system"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "snapshot_id": { "type": "string", "pattern": "^perf_[a-f0-9]{32}$" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "cpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_usage_percent"],
+      "properties": {
+        "total_usage_percent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_bytes", "free_bytes", "used_percent"],
+      "properties": {
+        "total_bytes": { "type": "integer", "minimum": 1 },
+        "free_bytes": { "type": "integer", "minimum": 0 },
+        "used_percent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "battery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level_percent", "temperature_celsius", "status", "plugged"],
+      "properties": {
+        "level_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "temperature_celsius": {
+          "oneOf": [
+            { "type": "number", "minimum": -100, "maximum": 200 },
+            { "type": "null" }
+          ]
+        },
+        "status": { "enum": ["unknown", "charging", "discharging", "not_charging", "full"] },
+        "plugged": { "enum": ["none", "ac", "usb", "wireless", "dock", "unknown"] }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uptime_seconds", "load_average_1m", "load_average_5m", "load_average_15m"],
+      "properties": {
+        "uptime_seconds": { "type": "number", "minimum": 0 },
+        "load_average_1m": { "type": "number", "minimum": 0 },
+        "load_average_5m": { "type": "number", "minimum": 0 },
+        "load_average_15m": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

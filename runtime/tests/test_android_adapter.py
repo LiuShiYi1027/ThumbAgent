@@ -8,6 +8,7 @@ import tempfile
 from mobile_agent.devices.adapters.android import AdbRunner, AndroidDeviceAdapter
 from mobile_agent.domain.device import ConnectionState, Platform
 from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.evidence.artifacts import ArtifactStore
 from runtime.tests.fakes import FakeProcessRunner, result
 
@@ -44,6 +45,10 @@ locked unauthorized usb:1-1
                 "navigation.back@1",
                 "navigation.home@1",
                 "input.tap@1",
+                "input.swipe@1",
+                "input.text@1",
+                "logs.collect@1",
+                "performance.snapshot@1",
             ),
             devices[0].capabilities,
         )
@@ -140,16 +145,33 @@ locked unauthorized usb:1-1
             "-W",
             "-a",
             "android.settings.SETTINGS",
+            "-f",
+            "0x14000000",
         )
         back = ("-s", "serial-1", "shell", "input", "keyevent", "4")
         home = ("-s", "serial-1", "shell", "input", "keyevent", "3")
-        tap = ("-s", "serial-1", "shell", "input", "tap", "10", "20")
+        tap = ("-s", "serial-1", "shell", "input", "touchscreen", "tap", "10", "20")
+        text = ("-s", "serial-1", "shell", "input", "text", "hello_1")
+        swipe = (
+            "-s",
+            "serial-1",
+            "shell",
+            "input",
+            "swipe",
+            "100",
+            "900",
+            "100",
+            "300",
+            "250",
+        )
         process = FakeProcessRunner(
             {
                 launch: result(launch),
                 back: result(back),
                 home: result(home),
                 tap: result(tap),
+                text: result(text),
+                swipe: result(swipe),
             }
         )
         adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
@@ -158,8 +180,10 @@ locked unauthorized usb:1-1
         await adapter.press_back("adb:serial-1")
         await adapter.press_home("adb:serial-1")
         await adapter.tap("adb:serial-1", 10, 20)
+        await adapter.input_text("adb:serial-1", "hello_1")
+        await adapter.swipe("adb:serial-1", 100, 900, 100, 300, 250)
 
-        self.assertEqual([launch, back, home, tap], [call[1] for call in process.calls])
+        self.assertEqual([launch, back, home, tap, text, swipe], [call[1] for call in process.calls])
 
     async def test_launch_rejects_invalid_package_before_process_call(self) -> None:
         process = FakeProcessRunner({})
@@ -168,6 +192,106 @@ locked unauthorized usb:1-1
             await adapter.launch_app("adb:serial-1", "bad package; command")
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
         self.assertEqual([], process.calls)
+
+    async def test_log_capture_uses_fixed_bounded_logcat_arguments(self) -> None:
+        logcat = (
+            "-s",
+            "serial-1",
+            "logcat",
+            "-d",
+            "-t",
+            "500",
+            "-v",
+            "threadtime",
+            "*:W",
+        )
+        process = FakeProcessRunner({logcat: result(logcat, b"one safe line\n")})
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        captured = await adapter.collect_logs(
+            "adb:serial-1", 500, DeviceLogLevel.WARN
+        )
+
+        self.assertEqual(b"one safe line\n", captured)
+        self.assertEqual([logcat], [call[1] for call in process.calls])
+
+    async def test_log_capture_rejects_unbounded_lines_before_process_call(self) -> None:
+        process = FakeProcessRunner({})
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await adapter.collect_logs(
+                "adb:serial-1", 2001, DeviceLogLevel.INFO
+            )
+
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+        self.assertEqual([], process.calls)
+
+    async def test_log_capture_maps_nonzero_exit_without_leaking_stderr(self) -> None:
+        logcat = (
+            "-s",
+            "serial-1",
+            "logcat",
+            "-d",
+            "-t",
+            "100",
+            "-v",
+            "threadtime",
+            "*:I",
+        )
+        process = FakeProcessRunner(
+            {logcat: result(logcat, stderr="token=secret-value", code=1)}
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await adapter.collect_logs("adb:serial-1", 100, DeviceLogLevel.INFO)
+
+        self.assertEqual("LOG_CAPTURE_FAILED", raised.exception.code)
+        self.assertNotIn("secret-value", str(raised.exception.to_dict()))
+
+    async def test_performance_snapshot_uses_only_fixed_aggregate_commands(self) -> None:
+        commands = (
+            ("-s", "serial-1", "shell", "dumpsys", "cpuinfo"),
+            ("-s", "serial-1", "shell", "dumpsys", "meminfo"),
+            ("-s", "serial-1", "shell", "dumpsys", "battery"),
+            ("-s", "serial-1", "shell", "cat", "/proc/uptime"),
+            ("-s", "serial-1", "shell", "cat", "/proc/loadavg"),
+        )
+        outputs = (
+            " 7.5% TOTAL: 3% user + 4.5% kernel\n",
+            " Total RAM: 8,000,000K\n Free RAM: 3,000,000K\n",
+            " status: 2\n level: 80\n scale: 100\n plugged: 2\n temperature: 310\n",
+            "3600.50 1200.00\n",
+            "1.00 0.80 0.60 1/100 123\n",
+        )
+        process = FakeProcessRunner(
+            {args: result(args, output) for args, output in zip(commands, outputs)}
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        snapshot = await adapter.capture_performance("adb:serial-1")
+
+        self.assertEqual(7.5, snapshot.cpu_total_usage_percent)
+        self.assertEqual(8_192_000_000, snapshot.memory_total_bytes)
+        self.assertEqual(31.0, snapshot.battery_temperature_celsius)
+        self.assertEqual(list(commands), [call[1] for call in process.calls])
+
+    async def test_input_security_exception_maps_to_device_unauthorized(self) -> None:
+        tap = ("-s", "serial-1", "shell", "input", "touchscreen", "tap", "10", "20")
+        stderr = (
+            "Exception occurred while executing 'tap':\n"
+            "java.lang.SecurityException: Injecting input events requires the caller "
+            "to have the INJECT_EVENTS permission."
+        )
+        process = FakeProcessRunner({tap: result(tap, stderr=stderr, code=255)})
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await adapter.tap("adb:serial-1", 10, 20)
+
+        self.assertEqual("DEVICE_UNAUTHORIZED", raised.exception.code)
+        self.assertEqual("input_event_injection_denied", raised.exception.details["reason"])
 
     async def test_observe_recaptures_explicit_primary_display_when_device_warns(self) -> None:
         png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 1080, 2400) + b"pixels"

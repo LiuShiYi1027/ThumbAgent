@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-performance-comparison/v1.json",
+  "title": "Device Performance Comparison",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "comparison_id", "device_id", "baseline", "candidate",
+    "interval_seconds", "same_device_session", "method", "metrics", "summary"
+  ],
+  "$defs": {
+    "snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "snapshot_id", "captured_at", "device_session_id"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+        "snapshot_id": { "type": "string", "pattern": "^perf_[a-f0-9]{32}$" },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "device_session_id": {
+          "oneOf": [
+            { "type": "string", "pattern": "^session_[a-f0-9]{32}$" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "metric_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_value", "candidate_value", "delta", "unit", "stable_threshold", "trend"],
+      "properties": {
+        "baseline_value": { "type": ["number", "null"] },
+        "candidate_value": { "type": ["number", "null"] },
+        "delta": { "type": ["number", "null"] },
+        "unit": { "enum": ["percentage_points", "bytes", "celsius", "load"] },
+        "stable_threshold": { "type": "number", "minimum": 0 },
+        "trend": { "enum": ["increased", "decreased", "stable", "unavailable"] }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "comparison_id": { "type": "string", "pattern": "^perfcompare_[a-f0-9]{32}$" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "baseline": { "$ref": "#/$defs/snapshot_ref" },
+    "candidate": { "$ref": "#/$defs/snapshot_ref" },
+    "interval_seconds": { "type": "number", "minimum": 0 },
+    "same_device_session": { "type": ["boolean", "null"] },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "single_point_samples"],
+      "properties": {
+        "kind": { "const": "two_point_delta" },
+        "single_point_samples": { "const": true }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_total_usage_percent", "memory_used_percent", "memory_free_bytes",
+        "battery_level_percent", "battery_temperature_celsius", "load_average_1m"
+      ],
+      "properties": {
+        "cpu_total_usage_percent": { "$ref": "#/$defs/metric_delta" },
+        "memory_used_percent": { "$ref": "#/$defs/metric_delta" },
+        "memory_free_bytes": { "$ref": "#/$defs/metric_delta" },
+        "battery_level_percent": { "$ref": "#/$defs/metric_delta" },
+        "battery_temperature_celsius": { "$ref": "#/$defs/metric_delta" },
+        "load_average_1m": { "$ref": "#/$defs/metric_delta" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["increased", "decreased", "stable", "unavailable"],
+      "properties": {
+        "increased": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "decreased": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "stable": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "unavailable": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    }
+  }
+}

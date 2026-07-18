@@ -13,6 +13,8 @@ ARTIFACT_SCHEMA_VERSION = "1.0.0"
 class ArtifactKind(str, Enum):
     SCREENSHOT = "screenshot"
     UI_TREE = "ui_tree"
+    DEVICE_LOG = "device_log"
+    DEVICE_PERFORMANCE = "device_performance"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,4 +45,3 @@ class ArtifactWriter(Protocol):
     def write(
         self, kind: ArtifactKind, content_type: str, data: bytes, extension: str
     ) -> Artifact: ...
-

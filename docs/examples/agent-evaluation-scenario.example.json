@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "settings.display.live.v1",
+  "goal": "进入显示和亮度页面",
+  "acceptance": {
+    "foreground_app_id": "com.android.settings",
+    "expected_selector": {
+      "strategy": "text",
+      "value": "显示和亮度",
+      "match": "contains",
+      "package": "com.android.settings"
+    }
+  },
+  "forbidden_tools": [],
+  "max_rounds": 6
+}

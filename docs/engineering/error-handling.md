@@ -1,7 +1,7 @@
 # 错误与诊断规范
 
-> 状态：Active  
-> 更新日期：2026-07-03
+> 状态：Active
+> 更新日期：2026-07-08
 
 ## 1. 目标
 
@@ -50,20 +50,40 @@ DEVICE_OFFLINE
 DEVICE_UNAUTHORIZED
 DEVICE_LOCKED
 CAPABILITY_UNAVAILABLE
+TOOL_REQUIRES_SKILL
 TARGET_NOT_FOUND
 TARGET_AMBIGUOUS
+TARGET_NOT_CLICKABLE
+TARGET_NOT_EDITABLE
+TARGET_NOT_INTERACTABLE
+TARGET_OUT_OF_BOUNDS
 ACTION_REJECTED_BY_POLICY
 CONFIRMATION_REQUIRED
 ACTION_TIMEOUT
 ACTION_OUTCOME_UNKNOWN
 OBSERVATION_FAILED
+LOG_CAPTURE_EMPTY
+LOG_CAPTURE_FAILED
+PERFORMANCE_SNAPSHOT_FAILED
 MODEL_UNAVAILABLE
 MODEL_OUTPUT_INVALID
 NO_PROGRESS
 TASK_CANCELLED
+TASK_DEADLINE_EXCEEDED
+TASK_INTERRUPTED
+TASK_STATE_CONFLICT
+IDEMPOTENCY_CONFLICT
+TASK_NOT_FOUND
 STORAGE_ERROR
+RUNTIME_UNAVAILABLE
+RUNTIME_RESPONSE_TOO_LARGE
+MCP_RATE_LIMITED
 INTERNAL_ERROR
 ```
+
+`RUNTIME_UNAVAILABLE`、`RUNTIME_RESPONSE_TOO_LARGE` 与 `MCP_RATE_LIMITED` 属于本地 MCP Interface
+诊断错误，不替代 Runtime 返回的领域错误。MCP 必须优先透传安全 Error Contract；只有连接失败、
+响应无法解析、响应越界或 Interface 限流时才生成这些错误，且不得内联原始 HTTP body 或 token。
 
 ## 4. 异常映射
 
@@ -110,6 +130,40 @@ HTTP 状态不替代领域错误码。
 - Task 预算与取消状态
 
 Policy 拒绝、输入错误和 unknown outcome 默认不可自动重试。
+
+Agent 页面定位和 `finish` 验证中，若 Runtime 能确定错误发生在设备动作派发前，可将该轮记为
+failed 并继续规划；不得将可能已产生副作用的错误按此方式恢复。`MODEL_UNAVAILABLE.details.failure_kind`
+使用 `timeout | http_status | connection | invalid_json`，只保留 HTTP status、timeout 和重试次数等脱敏元数据。
+`MODEL_OUTPUT_INVALID` 的 Selector 诊断只允许记录字段名、未知键、参数键和修复次数，不记录
+Selector 值、模型响应体或密钥。模型输出省略非安全关键的 `reason` 时不产生错误，由 Runtime
+写入固定审计说明；非字符串或超长 `reason` 仍使用 `MODEL_OUTPUT_INVALID`。
+
+调用方提供 `AgentGoalAcceptance` 时，Runtime 对成功条件的只读验证失败继续使用
+`TARGET_NOT_FOUND` 或 `TARGET_AMBIGUOUS`，并以 `verification_source=runtime_acceptance`
+标识来源。该失败可作为 failed round 反馈 Planner，但不能被模型自述覆盖；请求结构无效则在
+调用模型或设备动作前返回 `INVALID_ARGUMENT`。
+
+`source=llm` 的 GoalSpec 未确认时返回 `CONFIRMATION_REQUIRED`，且必须发生在 Observation、模型
+Planner 和设备动作之前。Compiler 输出结构无效使用 `MODEL_OUTPUT_INVALID`，诊断只记录字段名
+和形状，不记录完整目标、模型响应、成功条件值或密钥。
+
+异步排队取消使用 `TASK_CANCELLED`，表示后续工作已停止，不表示撤销已经完成的设备动作。
+Runtime 重启时，未开始的排队任务以 `TASK_INTERRUPTED/known_failure` 结束；已经运行或取消中的
+任务使用 `TASK_INTERRUPTED/unknown_outcome`，禁止自动重放。相同 `Idempotency-Key` 用于不同
+请求时返回 `IDEMPOTENCY_CONFLICT` 和 HTTP 409；终态任务重复取消是幂等读取，不返回冲突。
+
+设备写租约冲突使用 `DEVICE_LOCKED` 和 HTTP 409，details 只允许 owner_id 与 lease_expired 等
+非敏感协调信息。任务总预算耗尽使用 `TASK_DEADLINE_EXCEEDED`，TaskRun/TaskExecution 状态为
+`timed_out`；它不表示已经完成的设备动作被撤销。
+
+任务绑定的设备断连或以同一 device_id 重连后使用 `DEVICE_SESSION_CHANGED`，旧任务不得自动在
+新 Session 继续执行。共享同一数据目录启动第二个 Runtime 使用 `RUNTIME_ALREADY_RUNNING`，
+启动过程不得覆盖现有 token 或创建第二个服务实例。
+
+`RuntimeReadiness` 将已知错误映射为只读诊断 Issue。`blocked` 是可展示的就绪状态，不等同 HTTP
+错误；因此 `/v1/readiness` 在 ADB 缺失、无设备或未授权时仍返回 HTTP 200。具体原因继续使用
+`ADB_NOT_FOUND`、`DEVICE_NOT_FOUND`、`DEVICE_OFFLINE`、`DEVICE_UNAUTHORIZED` 或
+`DEVICE_LOCKED`，客户端不得通过解析 message 推断状态。
 
 ## 8. 日志与诊断
 

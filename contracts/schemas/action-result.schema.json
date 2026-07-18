@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "action_id": { "type": "string", "pattern": "^action_[a-f0-9]{32}$" },
-    "tool_id": { "enum": ["app.launch", "navigation.back", "navigation.home", "input.tap", "input.tap_element"] },
+    "tool_id": { "enum": ["app.launch", "navigation.back", "navigation.home", "input.tap", "input.tap_element", "input.swipe", "input.text"] },
     "device_id": { "type": "string", "minLength": 1 },
     "status": { "enum": ["succeeded", "failed", "unknown_outcome", "rejected"] },
     "verification": { "enum": ["verified", "not_verified", "inconclusive"] },

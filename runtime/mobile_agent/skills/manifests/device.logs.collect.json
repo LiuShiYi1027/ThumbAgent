@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "id": "device.logs.collect",
+  "version": "1.0.0",
+  "name": "Collect bounded device logs",
+  "description": "Collect a finite Android logcat snapshot, redact common identifiers, and return a local Artifact reference without inline log content.",
+  "kind": "deterministic",
+  "input_schema": {
+    "$ref": "../../../../contracts/schemas/device-log-capture-input.schema.json"
+  },
+  "output_schema": {
+    "$ref": "../../../../contracts/schemas/device-log-capture-result.schema.json"
+  },
+  "required_capabilities": ["logs.collect@1"],
+  "tool_allowlist": ["device.logs.capture"],
+  "risk": "medium",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "non_empty_redacted_artifact"
+}

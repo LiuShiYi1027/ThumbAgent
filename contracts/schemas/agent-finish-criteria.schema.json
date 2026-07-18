@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-finish-criteria/v1.json",
+  "title": "AgentFinishCriteria",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["expected_selector"],
+  "properties": {
+    "expected_selector": { "$ref": "ui-selector.schema.json" },
+    "expected_foreground_app": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "app_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "activity": { "type": "string", "minLength": 1, "maxLength": 500 }
+      },
+      "anyOf": [
+        { "required": ["app_id"] },
+        { "required": ["activity"] }
+      ]
+    }
+  }
+}

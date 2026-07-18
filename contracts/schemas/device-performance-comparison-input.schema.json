@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-performance-comparison-input/v1.json",
+  "title": "Device Performance Comparison Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["baseline_task_id", "candidate_task_id"],
+  "properties": {
+    "baseline_task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+    "candidate_task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" }
+  }
+}

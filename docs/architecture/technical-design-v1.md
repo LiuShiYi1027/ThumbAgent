@@ -1,8 +1,8 @@
 # Mobile Agent V1 技术方案
 
-> 状态：Active  
-> 版本：V1.0  
-> 更新日期：2026-07-03  
+> 状态：Active
+> 版本：V1.0
+> 更新日期：2026-07-03
 > 关联文档：[产品定位](../product/positioning.md) · [第一版产品方案](../product/solution-v1.md)
 
 ## 1. 技术目标
@@ -144,6 +144,114 @@ Tauri 负责窗口、应用生命周期、Runtime sidecar 启停和本地能力�
 
 V1 的重点是执行可靠性与边界，不是构建任意自主 Agent。
 
+ITER-0013 起，Runtime 提供 `agent.run` 预览任务入口。该入口先使用 deterministic Planner 验证 Observe–Plan–Act–Report 骨架：Planner 输出结构化决策，Runner 再做 allowlist 校验并调用既有 Skill。真实 LLM 接入时只替换 Planner Provider，不能绕过 Tool Registry、Policy Engine、Device Gateway 或 Task Store。
+
+ITER-0015 起，Runtime 增加 LLM Planner 内部预览契约。模型式输出先解析为 `AgentDecision`，字段、类型、`confidence` 范围和必要 selector 均需校验；即使结构合法，Runner 仍必须执行 Skill allowlist 校验。该阶段只提供 `MockLLMPlanner`，不调用真实模型服务。
+
+ITER-0016 起，Runtime 增加默认关闭的 OpenAI-compatible Planner Provider 预览。Provider 负责构造最小 chat-completions 请求、注入 transport、解析结构化 JSON 响应并复用 Planner 契约校验。默认 Runtime 仍使用 deterministic Planner；真实 Provider 启用必须经过后续显式配置和授权。
+
+ITER-0017 起，Runtime 提供模型 Provider 配置门。`ModelProviderSettings(enabled=false)` 必须返回无模型的 `RuleBasedPlanner`；启用 OpenAI-compatible Provider 时，配置只保存 `api_key_ref`，真实密钥由注入的 `SecretResolver` 提供。默认 Runtime 不读取环境变量、配置文件或 Keychain，也不自动启用云模型。
+
+ITER-0018 起，Runtime 和本地 Web UI 提供模型 Provider 只读状态面板。状态 API 只返回 provider/model、启用状态和密钥引用是否存在，不返回真实密钥或 `api_key_ref` 原文。该面板用于产品可见性，不承担配置编辑或模型启用职责。
+
+ITER-0019 起，Runtime 可从 `<data-dir>/model-provider.json` 或 `MOBILE_AGENT_MODEL_CONFIG` 指定文件读取模型 Provider 配置，并允许 `MOBILE_AGENT_MODEL_*` 环境变量覆盖字段。配置文件只保存密钥引用；开发预览的 `EnvironmentSecretResolver` 仅解析 `env:MOBILE_AGENT_MODEL_SECRET_*`，避免形成任意环境变量读取通道。默认 Agent Runner 仍不因配置存在而自动调用真实模型。
+
+ITER-0020 起，默认 Runtime 会将模型配置映射为 Agent Runner 使用的 Planner：关闭时使用 `RuleBasedPlanner`；配置可用时使用 OpenAI-compatible Planner；配置启用但不可用时使用 `UnavailablePlanner` 返回 `MODEL_UNAVAILABLE`。该设计避免静默回退造成误导，同时保持模型输出必须经过 AgentDecision 解析、Skill allowlist、Policy Engine 和 Device Gateway。
+
+ITER-0021 起，本地 Web UI 将模型 Provider 运行态展示为用户可理解的状态卡片。`active` 状态提示模型输出仍受 allowlist 和 Policy 约束；`unavailable` 状态展示脱敏错误摘要，并提示检查本地配置和 `MOBILE_AGENT_MODEL_SECRET_*`。配置示例位于 `docs/examples/model-provider.example.json`。
+
+ITER-0022 起，Agent Preview 支持多轮 Tool 决策。Planner 可以输出 `run_tool` 与 `finish`；Runtime 在每轮执行前校验 Tool allowlist、Capability 和 Policy，执行后重新 Observation。`finish` 不能只依赖模型自述，必须携带 `expected_selector` 并由 Runtime 在当前 UI hierarchy 中确定性验证。旧的 `run_skill` 决策保留为兼容路径。
+
+ITER-0023 起，Agent 每轮报告中的 `AgentObservationSummary`、`AgentDecision` 和 `AgentStepResult` 纳入公共 JSON Schema。`TaskRun` Schema 正式支持 `agent.run`、`agent_round` 和 `agent.round`，每轮结果固定包含 `action_result`、`skill_result`、`verified_node` 三类可空输出槽位，便于桌面端、CLI 和未来 MCP 外部接口稳定渲染 Observe–Plan–Act 时间线。
+
+ITER-0024 起，Agent Runner 在 Tool 执行后比较前后 foreground app 与 UI tree，生成 `AgentActionFeedback`。该反馈进入下一轮 Observation，帮助 Planner 在页面无变化时调整方向或动作；若 Planner 仍重复完全相同的无进展 ToolCall，Runtime 在再次派发前以 `NO_PROGRESS` 停止。Runtime 不替模型改写动作参数，保持 Planner 决策与执行安全边界清晰。
+
+ITER-0025 起，Agent Observation 不再按 UI hierarchy 原始顺序截取前 30 个节点，而是先过滤结构噪声、脱敏常见标识符、按语义与可操作性排序并去重，再生成有界摘要。摘要公开候选总数、截断状态和可点击祖先信息；完整 UI Tree 继续只作为本地证据与确定性定位输入，不直接发送给模型 Provider。
+
+ITER-0026 起，`run_tool` 使用独立的 `AgentToolCall` JSON Schema 和 Runtime 参数校验。`input.tap_element` 必须显式携带 `resolve_clickable_ancestor=true`，避免模型看到文本节点却点击到不可点击的子节点。OpenAI-compatible Provider 遇到 `MODEL_OUTPUT_INVALID` 时最多追加一次脱敏、结构化的修复请求；修复期间不派发设备动作。只有通过 Contract 与 allowlist 校验的决策才进入执行；此后的 Tool 失败会在失败 step 中保留当轮 Observation 和 Decision，便于定位语义、参数或设备问题。
+
+ITER-0027 起，Agent 评测不以历史 ToolCall 序列作为正确答案。`AgentEvaluationScenario` 只定义用户目标、独立成功判定、禁用 Tool 和轮次预算；真实设备 E2E 仍使用当前模型对最新 Observation 逐轮规划。`AgentEvaluator` 只消费已持久化的 `TaskRun`，不调用 Adapter、不重放设备动作，并输出目标是否达成、轮次、Tool 数、页面进展、模型修复、策略违规和耗时等指标。历史轨迹只用于 Runtime/Contract/Policy 的确定性回归，不用来声称模型对改版 App 的泛化能力。
+
+ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
+
+ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍
+负责基于实时页面动态规划，并决定何时请求 `finish`；一旦存在外部成功条件，Runtime 使用
+app id、Activity 和唯一 Selector 的 all-of 结果作为权威终态，不采信模型临时生成的完成
+Selector。验证失败发生在只读阶段，可反馈模型继续规划；未提供成功条件时保持原有兼容行为。
+TaskRun 持久化 `goal_acceptance` 和 `completion_source`，使客户端能够区分模型条件、Runtime
+条件和 Skill 结果。详见 [ADR-0007](../adr/0007-runtime-owned-goal-verification.md)。
+
+ITER-0030 起，自然语言目标可以先经过无设备副作用的 `GoalCompiler` 生成 `AgentGoalSpec`
+草案。模型只提供增强执行目标、显式假设、置信度和可选成功条件；Runtime 注入编译来源并强制
+`source=llm` 的草案要求确认。确认后 Agent Runner 以 `execution_goal` 规划，但 TaskRun 保存
+原始 `source_goal` 和完整 GoalSpec。该阶段不生成 ToolCall 序列，不把编译器变成固定路径规划器。
+详见 [ADR-0008](../adr/0008-confirmed-goal-compilation.md)。
+
+ITER-0031 起，长耗时 Agent 任务可以通过独立异步资源提交。`TaskExecution` 保存排队、运行、
+取消中和终态快照，增量 TaskEvent 在每轮结束时持久化；终态 TaskRun 仍是完整报告真源。
+V1 由单工作线程串行执行异步任务，取消只在安全边界阻止后续动作。Runtime 重启会终止非终态
+执行并记录 `TASK_INTERRUPTED`，不会重放 ToolCall。原同步 API 保留兼容，Web 默认使用异步
+入口并通过 REST 重建状态。详见 [ADR-0009](../adr/0009-durable-async-task-execution.md)。
+
+ITER-0032 起，Runtime Application 层为公开设备写入口持有独占 `DeviceLease`。Agent 在完整任务
+期间持有租约，内部 Tool 不重复加锁；直接 Tool/Skill 使用短租约。租约期限只用于诊断，不能在
+未知设备动作仍可能运行时自动抢占。Agent 同时持有总 `deadline_seconds`，Runner 在安全边界
+检查预算并以 timed_out 终止后续动作。详见 [ADR-0010](../adr/0010-device-lease-task-deadline.md)。
+
+ITER-0033 起，同一 Runtime 数据目录通过非阻塞文件锁限制为单实例，避免不同端口的两个进程
+共享 SQLite、令牌和设备。Device Gateway 用 `session_id` 标识一段连续在线连接；Task 在取得
+DeviceLease 时绑定当前 Session，并在每次 Observation 与动作前复核。设备消失、离线后重连会
+生成新 Session，旧任务以 `DEVICE_SESSION_CHANGED` 停止且不会自动续跑。详见
+[ADR-0011](../adr/0011-runtime-instance-device-session.md)。
+
+ITER-0034 起，Runtime 提供只读 `RuntimeReadiness` 快照，由 Application 层组合 Device Gateway、
+Device Session 和 DeviceLease 状态。ADB 缺失时默认 Runtime 使用拒绝所有设备访问的
+UnavailableDeviceAdapter 保持 Web/CLI 诊断接口可启动；客户端不得据此绕过 Gateway。Readiness
+不执行 Observation、模型调用或设备动作，blocked 也是 HTTP 200 的可渲染产品状态。
+
+ITER-0035 起，Capability Catalog 成为能力风险、幂等性、验证要求和限制的元数据真源，Tool
+Registry 从中派生执行定义。DeviceInspection 只组合设备发现、Session、Lease、Catalog 与 Tool
+映射，不触发 Observation 或动作；展示的 confirmation_required 不能替代 Policy Engine 授权。
+
+ITER-0036 起，`device.logs.collect` 作为首个工程诊断 Skill 接入。底层
+`device.logs.capture` 虽登记在 Tool Registry，但标记为不可从通用 UI Action 入口直接调用；Skill
+完成 Capability、Policy、Session 和 Lease 校验后由 Device Gateway 调用平台 Adapter。Android
+只构造固定、有界 logcat 快照参数，输出脱敏后保存为 `device_log` Artifact，公共结果不内联正文。
+
+ITER-0037 起，AsyncTaskExecutor 支持代码内显式登记的 `agent.run` 与 `device.logs.collect`，但不
+接受客户端动态 task_type 或 handler。日志任务复用 TaskExecution、TaskEvent、TaskRun、Deadline、
+Session、Lease、幂等与 Runtime 重启恢复；同步 Skill 保持兼容，Web 默认提交异步诊断任务。详见
+[ADR-0013](../adr/0013-explicit-multi-type-async-execution.md)。
+
+ITER-0038 起，`device.performance.snapshot` 通过固定 Android diagnostics 生成平台无关聚合指标。
+Adapter 内解析并丢弃包含进程明细的原始输出；上层只接收 percent、bytes、seconds 和 Celsius
+字段，并保存规范化 JSON Artifact。日志与性能任务共享内部 DiagnosticTaskRunner，但 Task 类型和
+Skill Handler 仍由 Runtime 显式注册。详见 [ADR-0014](../adr/0014-aggregate-performance-snapshot.md)。
+
+ITER-0039 起，Runtime Application 层提供只读性能比较 Use Case。调用方提交两个已经完成的
+`device.performance.snapshot` task_id；Runtime 通过 TaskStore 验证任务类型、成功状态、同设备和
+采集顺序，再由 Domain 计算带单位和公开稳定阈值的两点 delta。比较不调用 Adapter、模型或原始
+Artifact，也不将动态业务任务固化为回放 Workflow；结果只描述方向，不自动判定回退或因果。
+
+ITER-0040 起，MCP stdio 作为独立 Interface Adapter 调用已启动 Runtime 的固定 localhost REST
+端点，不直接构造 Runtime、访问 SQLite、读取 Artifact 或执行 ADB。MCP 只公开目标级 Tools；耗时
+设备操作提交为现有异步 TaskExecution 并返回 task_id。协议支持严格初始化、Schema 校验、调用限流
+和 structured error，同时保持 Policy、Capability、Session 与 Lease 为 Runtime 权威边界。详见
+[ADR-0015](../adr/0015-mcp-stdio-local-api-adapter.md)。
+
+模型输出中的 `reason` 是审计元数据，不参与 Tool 授权和完成验证。模型省略或返回空白
+`reason` 时，解析器生成固定非空审计说明，保持公共 `AgentDecision` Contract 不变且不增加一次
+付费修复请求；非字符串或超长 `reason` 仍视为无效输出。决策类型、参数、Selector、allowlist
+和 Policy 不因该兜底而放宽。
+
+长期 Agent 决策动作模型采用三类语义：
+
+- `run_tool`：Agent Loop 的默认动作形态，用于页面探索、点击、滑动、返回、等待等需要逐轮观察和动态调整的原子动作。
+- `run_skill`：保留为目标级受控能力入口，用于安装包、采集日志、导出诊断包、性能采样等边界稳定、输入输出明确、验证器稳定的复合能力。
+- `finish`：模型请求结束任务，但成功与否必须由 Runtime 根据结构化验证条件确定，不能只依赖模型自述。
+
+页面路径探索、滚动方向选择、点击目标选择和失败恢复优先通过 `run_tool` 多轮完成；不得为了简化 prompt 将这类动态决策隐藏进 Skill。详见 [ADR-0005](../adr/0005-agent-decision-action-model.md)。
+
 ### 5.4 Android Adapter
 
 - Android Platform Tools / ADB
@@ -218,6 +326,8 @@ mobile-agent/
 ```
 
 `device_id` 是 Runtime 内的稳定复合标识，不直接假设所有平台都使用 serial。
+`session_id` 不是设备永久身份，而是一段连续在线连接的短期身份；执行与审计使用
+`(device_id, session_id)` 防止断连前任务跨到重连后的设备状态。
 
 ### 7.2 Observation
 
@@ -450,6 +560,9 @@ class DeviceAdapter(Protocol):
     async def input_text(self, device_id: str, text: str) -> ActionResult: ...
     async def swipe(self, device_id: str, gesture: Swipe) -> ActionResult: ...
     async def key_event(self, device_id: str, key: Key) -> ActionResult: ...
+    async def collect_logs(
+        self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
+    ) -> bytes: ...
 ```
 
 ### 11.2 ADB Runner
@@ -511,6 +624,22 @@ GET    /v1/tasks/{task_id}/artifacts
 ```
 
 所有变更操作支持 `Idempotency-Key`。任务创建返回 `202 Accepted` 与 `task_id`，不保持长 HTTP 请求等待任务完成。
+
+ITER-0006 期间先提供一个预览型同步任务运行端点：
+
+```text
+POST   /v1/tasks/settings.scroll_navigate/run
+GET    /v1/tasks/{task_id}
+GET    /v1/tasks/{task_id}/events
+GET    /v1/tasks?limit=N
+GET    /ui
+```
+
+这些端点只包装已有 `settings.scroll_navigate` Skill，并保存 `TaskRun` 与紧凑 `TaskEvent`；它们不替代后续正式异步 `/v1/tasks` 队列、实时事件流和运行中任务恢复语义。
+
+ITER-0011 提供 `/ui` 本地 Web 页面，作为桌面端任务历史和报告详情的无构建原型。该页面只调用 GET API，不触发设备动作。
+
+ITER-0012 在 `/ui` 中加入固定安全 demo 任务按钮。浏览器 POST 仍需要 Runtime token，且只允许同源 loopback Origin；任意外部 Web Origin 不能触发设备动作。
 
 ### 12.2 WebSocket 事件
 
@@ -586,6 +715,14 @@ V1 支持系统识别多台设备，但同一时刻只允许一个 active task�
 - `settings`：非敏感配置引用
 
 密钥不进入 SQLite 明文，使用操作系统 Keychain 保存。
+
+ITER-0009 当前先落地最小持久化表：
+
+- `schema_migrations`：记录已应用 migration。
+- `tasks`：保存已完成 `TaskRun` JSON 快照和常用索引字段。
+- `task_events`：保存紧凑 `TaskEvent` JSON 快照和 sequence。
+
+后续正式异步任务队列、运行中任务恢复和复杂查询再扩展为更细粒度表结构。
 
 ### 14.2 Artifact Store
 

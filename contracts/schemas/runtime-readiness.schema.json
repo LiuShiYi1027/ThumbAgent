@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/runtime-readiness/v1.json",
+  "title": "RuntimeReadiness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "status", "gateway", "devices", "summary", "issues"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["ready", "attention", "blocked"] },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "transport", "status", "issue"],
+      "properties": {
+        "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "transport": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "status": { "enum": ["available", "unavailable"] },
+        "issue": {
+          "oneOf": [
+            { "$ref": "#/$defs/issue" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/device_availability" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "ready", "busy", "attention"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "ready": { "type": "integer", "minimum": 0 },
+        "busy": { "type": "integer", "minimum": 0 },
+        "attention": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } }
+  },
+  "$defs": {
+    "device_availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device", "status", "lease_owner_id", "lease_session_id", "lease_expired", "issues"],
+      "properties": {
+        "device": { "$ref": "device.schema.json" },
+        "status": { "enum": ["ready", "busy", "offline", "unauthorized", "unknown"] },
+        "lease_owner_id": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "lease_session_id": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "lease_expired": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "suggested_action"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "suggested_action": { "type": "string", "maxLength": 300 }
+      }
+    }
+  }
+}

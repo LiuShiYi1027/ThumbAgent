@@ -1,6 +1,6 @@
 # 数据与迁移规范
 
-> 状态：Active  
+> 状态：Active
 > 更新日期：2026-07-03
 
 ## 1. 适用范围
@@ -94,3 +94,12 @@
 - 迁移中断后行为可预测。
 - 数据库过新时安全拒绝。
 - Artifact 写入和数据库提交任一失败时保持一致。
+
+## 11. 当前迁移
+
+- `0001_task_store`：终态 TaskRun 与派生事件。
+- `0002_task_executions`：异步执行状态、实时事件、幂等键和请求指纹。该迁移不改写已有 TaskRun；
+  Runtime 启动后会将遗留非终态执行标记为中断，且不会调用设备或模型恢复动作。
+
+ITER-0033 的 `device_session_id` 只增加到版本化 Task JSON。TaskExecution 读取旧 JSON 时使用
+`null`，TaskRun 字段可选，因此不增加 SQL migration，也不回填历史任务的连接会话。

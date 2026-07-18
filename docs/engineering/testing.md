@@ -1,6 +1,6 @@
 # 测试规范
 
-> 状态：Active  
+> 状态：Active
 > 更新日期：2026-07-03
 
 ## 1. 测试金字塔
@@ -74,6 +74,29 @@
 - 步数和时间预算
 
 Prompt 或模型变更至少比较成功率、平均步数、耗时、人工介入率和策略违规数。
+
+在线 E2E 评测与离线轨迹回归必须明确区分：
+
+- 在线 E2E 使用真实设备、当前 App 版本和待评模型，每次从最新 Observation 自主规划；场景不规定固定 ToolCall 序列。
+- 在线场景以独立的最终状态、禁用动作、预算和人工介入作为评判依据，不以历史路径相似度打分。
+- 离线轨迹只用于复现 Parser、Contract、Policy、Runner 和错误处理问题，不用于衡量模型对高频改版 App 的真实成功率。
+- Runtime-owned 成功条件必须覆盖：all-of 成功、条件不满足后的可恢复反馈、歧义 Selector、无效请求在设备动作前被拒绝，以及未提供条件时的兼容路径。
+- Goal 编译必须覆盖：严格 Contract、编译阶段零设备动作、LLM 草案未确认拒绝、确认后使用 execution_goal、TaskRun 保留 source_goal，以及旧直接运行路径兼容。
+- 异步任务必须覆盖：202 提交、逐轮事件顺序、排队取消零设备动作、运行中安全边界取消、
+  Idempotency-Key 重放与冲突、SQLite 重启中断，以及同步端点兼容。
+- 设备租约与 deadline 必须覆盖：同步/异步/直接 Tool 冲突、释放后重入、过期不抢占、无动作
+  deadline、动作验证后 deadline、timed_out 持久化，以及无效预算在设备调用前拒绝。
+- Runtime 单实例与 Device Session 必须覆盖：同数据目录锁竞争、释放后重启、连续在线 Session
+  稳定、消失/离线后重连生成新 Session，以及旧 Session 在设备动作前被拒绝。
+- Runtime Readiness 必须覆盖：ADB 缺失仍可启动、无设备、offline、unauthorized、busy、ready，
+  并断言诊断过程中没有 Observation、模型调用或设备写动作。
+- Device Inspection 必须覆盖：Capability Catalog 与 Tool Registry 元数据一致、Medium 确认、
+  ready/busy/offline 映射、缺失设备，以及检查过程中没有 Observation 或设备写动作。
+- 性能比较必须覆盖：同设备成功、不同设备、任务类型/状态错误、时间倒序、缺失可选指标、Session
+  差异和稳定阈值，并断言比较过程没有设备或模型调用。
+- MCP 必须覆盖：初始化顺序、协议版本协商、Tool Catalog、严格输入、确认缺失、未知 Tool、限流、
+  structured error、stdout framing 和 MCP→API→Runtime→TaskStore 跨层链路。默认测试使用无 socket
+  Handler Transport，不依赖已启动 Runtime 或网络权限。
 
 ## 7. Bug 回归
 

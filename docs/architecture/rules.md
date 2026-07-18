@@ -1,6 +1,6 @@
 # 架构边界规范
 
-> 状态：Active  
+> 状态：Active
 > 更新日期：2026-07-03
 
 ## 1. 分层
@@ -27,6 +27,9 @@ Interface → Application → Domain → Device Gateway → Adapter
 - 直接写数据库
 - 包含 Skill 或策略业务逻辑
 - 根据客户端类型绕过权限
+
+独立 MCP stdio 进程只能通过固定 loopback Runtime API 调用 Application，不得另建共享数据目录的
+Runtime 实例，也不得读取 SQLite、Artifact 文件或平台 Adapter。
 
 ## 3. Application Layer
 
@@ -76,6 +79,8 @@ Tool 是原子、确定性、受策略约束的动作。Skill 是目标级能力
 - Agentic Skill 必须设置 Tool allowlist、最大步数、超时和连续失败阈值。
 - Tool 不接收自由格式 Shell。
 - Skill 完成必须有可验证证据，不能仅依赖模型自述。
+- Agent 决策动作分为 `run_tool`、`run_skill` 和 `finish`。`run_tool` 是页面探索和动态交互的默认路径；`run_skill` 只用于边界稳定、可复用、可验证的目标级能力；`finish` 必须由 Runtime 确定性验证。
+- 不得将滚动方向选择、页面路径探索、点击目标选择和失败恢复等动态 Agent 决策隐藏进普通 Skill 黑盒。
 
 ## 8. 依赖检查
 

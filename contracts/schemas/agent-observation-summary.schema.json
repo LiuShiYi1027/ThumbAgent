@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-observation-summary/v1.json",
+  "title": "AgentObservationSummary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "observation_id", "foreground_app", "device_state", "ui_summary"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "observation_id": { "type": "string", "pattern": "^obs_[a-f0-9]{32}$" },
+    "foreground_app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_id", "activity", "captured_at"],
+      "properties": {
+        "app_id": { "type": "string" },
+        "activity": { "type": "string" },
+        "captured_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "device_state": { "enum": ["interactive", "locked", "unknown"] },
+    "ui_summary_total_candidates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "ui_summary_truncated": { "type": "boolean" },
+    "last_action_feedback": {
+      "oneOf": [
+        { "$ref": "agent-action-feedback.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "ui_summary": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "content_description", "resource_id", "class_name", "clickable", "enabled"],
+        "properties": {
+          "text": { "type": "string", "maxLength": 120 },
+          "content_description": { "type": "string", "maxLength": 120 },
+          "resource_id": { "type": "string", "maxLength": 160 },
+          "class_name": { "type": "string", "maxLength": 120 },
+          "clickable": { "type": "boolean" },
+          "clickable_ancestor": { "type": "boolean" },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

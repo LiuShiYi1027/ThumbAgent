@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,15 +132,29 @@ class AdbRunner:
 
     @staticmethod
     def _resolve_adb() -> Path:
-        resolved = shutil.which("adb")
-        if not resolved:
+        configured = os.environ.get("MOBILE_AGENT_ADB_PATH", "").strip()
+        if configured:
+            candidate = Path(configured).expanduser()
+            if candidate.is_file():
+                return candidate.resolve()
             raise MobileAgentError(
                 code="ADB_NOT_FOUND",
                 category=ErrorCategory.DEVICE,
-                message="未找到 Android Platform Tools",
-                suggested_action="安装 adb 或配置可执行文件路径",
+                message="配置的 Android Platform Tools 路径不存在",
+                suggested_action="检查 MOBILE_AGENT_ADB_PATH 是否指向 adb 可执行文件",
             )
-        return Path(resolved).resolve()
+        resolved = shutil.which("adb")
+        if resolved:
+            return Path(resolved).resolve()
+        for candidate in _common_adb_paths():
+            if candidate.is_file():
+                return candidate.resolve()
+        raise MobileAgentError(
+            code="ADB_NOT_FOUND",
+            category=ErrorCategory.DEVICE,
+            message="未找到 Android Platform Tools",
+            suggested_action="安装 adb、将 adb 加入 PATH，或设置 MOBILE_AGENT_ADB_PATH",
+        )
 
     @staticmethod
     def _validate_args(args: Sequence[str]) -> None:
@@ -156,3 +171,11 @@ class AdbRunner:
                     category=ErrorCategory.VALIDATION,
                     message="ADB 参数包含非法字符",
                 )
+
+
+def _common_adb_paths() -> tuple[Path, ...]:
+    return (
+        Path("/usr/local/platform-tools/adb"),
+        Path("/opt/homebrew/bin/adb"),
+        Path.home() / "Library/Android/sdk/platform-tools/adb",
+    )

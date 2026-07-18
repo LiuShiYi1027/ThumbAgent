@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/mcp-tool-inputs/v1.json",
+  "title": "Mobile Agent MCP Tool Inputs",
+  "$defs": {
+    "empty": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "agent_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "goal", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "confirmed": {
+          "const": true,
+          "description": "The MCP host must obtain explicit user confirmation before setting this to true."
+        },
+        "max_rounds": { "type": "integer", "minimum": 1, "maximum": 6, "default": 6 },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 600 }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" }
+      }
+    },
+    "task_list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+      }
+    },
+    "logs_collect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "max_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 500 },
+        "minimum_level": {
+          "enum": ["verbose", "debug", "info", "warn", "error", "fatal"],
+          "default": "info"
+        },
+        "confirmed": {
+          "const": true,
+          "description": "The MCP host must obtain explicit user confirmation before setting this to true."
+        },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 60 }
+      }
+    },
+    "performance_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 90 }
+      }
+    },
+    "performance_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_task_id", "candidate_task_id"],
+      "properties": {
+        "baseline_task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+        "candidate_task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" }
+      }
+    }
+  }
+}

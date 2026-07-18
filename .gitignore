@@ -13,7 +13,7 @@ dist/
 *.egg-info/
 data/
 artifacts/
+local/
 *.db
 *.sqlite*
 *.log
-

@@ -1,6 +1,6 @@
 # 安全开发规范
 
-> 状态：Active  
+> 状态：Active
 > 更新日期：2026-07-03
 
 ## 1. 安全目标
@@ -40,6 +40,11 @@ Mobile Agent 能够影响真实设备，所有模型、客户端输入和设备�
 - 变更操作进行认证、幂等和参数校验。
 - WebSocket 建立时认证，断线重连不能绕过权限。
 - MCP 调用与桌面端使用同一 Policy Engine。
+- MCP stdio 子进程只允许连接固定 HTTP loopback Runtime 地址，令牌通过进程环境注入，不写入仓库、
+  stdout、错误或任务记录。
+- MCP Host 必须在传入 `confirmed=true` 前展示目标和参数并取得用户确认；布尔字段不能降低 Runtime
+  注册表定义的风险，Policy Engine 仍可拒绝调用。
+- MCP stdout 只允许 JSON-RPC，Tool 输入限制大小和调用频率，Runtime 响应必须限制、解析并脱敏。
 
 ## 6. 风险策略
 

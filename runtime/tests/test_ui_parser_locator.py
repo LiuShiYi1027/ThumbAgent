@@ -158,3 +158,43 @@ class UiParserLocatorTests(unittest.TestCase):
                 }
             )
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+
+    def test_rejects_tap_center_inside_bottom_gesture_margin(self) -> None:
+        nodes = self.parser.parse(
+            b'<hierarchy><node text="Bottom" resource-id="bottom" class="TextView" '
+            b'package="android" clickable="true" enabled="true" '
+            b'visible-to-user="true" bounds="[0,2666][1256,2808]"/></hierarchy>'
+        )
+
+        with self.assertRaises(MobileAgentError) as raised:
+            self.locator.locate(
+                nodes,
+                UiSelector.from_dict({"strategy": "text", "value": "Bottom"}),
+                1256,
+                2808,
+            )
+
+        self.assertEqual("TARGET_OUT_OF_BOUNDS", raised.exception.code)
+        self.assertEqual(2737, raised.exception.details["tap_y"])
+        self.assertLess(raised.exception.details["safe_bottom"], 2737)
+
+    def test_rejects_tap_center_inside_top_system_margin(self) -> None:
+        nodes = self.parser.parse(
+            b'<hierarchy><node text="Display and brightness" resource-id="android:id/title" '
+            b'class="TextView" package="com.android.settings" clickable="true" enabled="true" '
+            b'visible-to-user="true" bounds="[0,0][1256,166]"/></hierarchy>'
+        )
+
+        with self.assertRaises(MobileAgentError) as raised:
+            self.locator.locate(
+                nodes,
+                UiSelector.from_dict(
+                    {"strategy": "text", "value": "Display and brightness"}
+                ),
+                1256,
+                2808,
+            )
+
+        self.assertEqual("TARGET_OUT_OF_BOUNDS", raised.exception.code)
+        self.assertEqual(83, raised.exception.details["tap_y"])
+        self.assertGreater(raised.exception.details["safe_top"], 83)

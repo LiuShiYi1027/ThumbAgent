@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-evaluation-result/v1.json",
+  "title": "AgentEvaluationResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "evaluation_id", "scenario_id", "task_id", "passed", "failure_reasons", "metrics"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "evaluation_id": { "type": "string", "pattern": "^evaluation_[a-f0-9]{32}$" },
+    "scenario_id": { "type": "string", "minLength": 3, "maxLength": 120 },
+    "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+    "passed": { "type": "boolean" },
+    "failure_reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "goal_mismatch",
+          "task_failed",
+          "round_budget_exceeded",
+          "foreground_app_mismatch",
+          "foreground_activity_mismatch",
+          "expected_selector_not_met",
+          "forbidden_tool_used",
+          "policy_violation"
+        ]
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["round_count", "tool_call_count", "changed_action_count", "unchanged_action_count", "model_repair_count", "policy_violation_count", "duration_ms", "used_tools"],
+      "properties": {
+        "round_count": { "type": "integer", "minimum": 0 },
+        "tool_call_count": { "type": "integer", "minimum": 0 },
+        "changed_action_count": { "type": "integer", "minimum": 0 },
+        "unchanged_action_count": { "type": "integer", "minimum": 0 },
+        "model_repair_count": { "type": "integer", "minimum": 0 },
+        "policy_violation_count": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "used_tools": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

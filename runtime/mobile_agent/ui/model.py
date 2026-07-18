@@ -111,14 +111,15 @@ class UiSelector(SelectorPredicate):
             "ancestor_path",
             "package",
         }
-        if set(payload) - allowed:
-            cls._invalid("unknown field")
+        unknown_fields = sorted(str(key) for key in set(payload) - allowed)
+        if unknown_fields:
+            cls._invalid("unknown_fields", unknown_fields=unknown_fields)
         try:
             strategy = SelectorStrategy(payload["strategy"])
             value = payload["value"]
             match = MatchMode(payload.get("match", "exact"))
         except (KeyError, ValueError, TypeError):
-            cls._invalid("strategy/value/match")
+            cls._invalid("strategy_value_match")
         if not isinstance(value, str) or not value or len(value) > 1024:
             cls._invalid("value")
         clickable = payload.get("clickable")
@@ -128,7 +129,7 @@ class UiSelector(SelectorPredicate):
         if clickable is not None and not isinstance(clickable, bool):
             cls._invalid("clickable")
         if not isinstance(enabled, bool) or not isinstance(resolve, bool):
-            cls._invalid("enabled/resolve_clickable_ancestor")
+            cls._invalid("enabled_or_resolve_clickable_ancestor")
         if package is not None and (
             not isinstance(package, str) or not package or len(package) > 255
         ):
@@ -139,7 +140,7 @@ class UiSelector(SelectorPredicate):
         ancestors: list[SelectorPredicate] = []
         for item in raw_path:
             if not isinstance(item, dict) or set(item) - {"strategy", "value", "match"}:
-                cls._invalid("ancestor_path item")
+                cls._invalid("ancestor_path_item")
             try:
                 ancestor_value = item["value"]
                 if (
@@ -156,7 +157,7 @@ class UiSelector(SelectorPredicate):
                     )
                 )
             except (KeyError, ValueError, TypeError):
-                cls._invalid("ancestor_path item")
+                cls._invalid("ancestor_path_item")
         return cls(strategy, value, match, clickable, enabled, resolve, tuple(ancestors), package)
 
     def to_dict(self) -> dict[str, Any]:
@@ -180,11 +181,12 @@ class UiSelector(SelectorPredicate):
         return payload
 
     @staticmethod
-    def _invalid(field: str) -> None:
+    def _invalid(field: str, *, unknown_fields: list[str] | None = None) -> None:
         raise MobileAgentError(
             code="INVALID_ARGUMENT",
             category=ErrorCategory.VALIDATION,
             message=f"无效的 UI Selector：{field}",
+            details={"field": field, "unknown_fields": unknown_fields or []},
         )
 
 

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-inspection/v1.json",
+  "title": "DeviceInspection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "availability", "capabilities"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "availability": {
+      "$ref": "runtime-readiness.schema.json#/$defs/device_availability"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability_descriptor" }
+    }
+  },
+  "$defs": {
+    "capability_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "availability", "risk", "idempotency", "verification", "confirmation_required", "tools", "requirements", "limitations", "provider"],
+      "properties": {
+        "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*@1$" },
+        "availability": { "enum": ["available", "temporarily_unavailable", "unsupported", "unknown"] },
+        "risk": { "enum": ["low", "medium", "high", "prohibited"] },
+        "idempotency": { "enum": ["safe", "conditional", "unsafe"] },
+        "verification": { "enum": ["required", "supported", "unavailable"] },
+        "confirmation_required": { "type": "boolean" },
+        "tools": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$" }, "uniqueItems": true },
+        "requirements": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 160 }, "uniqueItems": true },
+        "limitations": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 200 }, "uniqueItems": true },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["platform", "transport"],
+          "properties": {
+            "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "transport": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        }
+      }
+    }
+  }
+}

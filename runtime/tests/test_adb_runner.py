@@ -25,8 +25,17 @@ class AdbRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
 
     def test_missing_adb_is_a_structured_error(self) -> None:
-        with patch("shutil.which", return_value=None):
+        with patch.dict("os.environ", {}, clear=True), patch("shutil.which", return_value=None), patch(
+            "pathlib.Path.is_file", return_value=False
+        ):
             with self.assertRaises(MobileAgentError) as raised:
                 AdbRunner()
         self.assertEqual("ADB_NOT_FOUND", raised.exception.code)
 
+    def test_uses_configured_adb_path(self) -> None:
+        with patch.dict("os.environ", {"MOBILE_AGENT_ADB_PATH": "/custom/adb"}), patch(
+            "pathlib.Path.is_file", return_value=True
+        ):
+            runner = AdbRunner(process_runner=FakeProcessRunner({}))
+
+        self.assertEqual(Path("/custom/adb"), runner.executable)

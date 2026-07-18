@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-decision/v1.json",
+  "title": "AgentDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "decision_id", "decision_type", "skill_id", "tool_id", "arguments", "reason", "planner_id", "confidence", "source"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "decision_id": { "type": "string", "pattern": "^decision_[a-f0-9]{32}$" },
+    "decision_type": { "enum": ["run_skill", "run_tool", "finish"] },
+    "skill_id": { "type": "string" },
+    "tool_id": { "type": "string" },
+    "arguments": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "planner_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "confidence": {
+      "oneOf": [
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "null" }
+      ]
+    },
+    "source": { "enum": ["planner", "rule", "llm"] },
+    "repair_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "provider_retry_count": { "type": "integer", "minimum": 0, "maximum": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision_type": { "const": "run_skill" } },
+        "required": ["decision_type"]
+      },
+      "then": {
+        "properties": { "skill_id": { "type": "string", "minLength": 1 } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision_type": { "const": "run_tool" } },
+        "required": ["decision_type"]
+      },
+      "then": {
+        "allOf": [
+          { "$ref": "agent-tool-call.schema.json" }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision_type": { "const": "finish" } },
+        "required": ["decision_type"]
+      },
+      "then": {
+        "properties": {
+          "arguments": { "$ref": "agent-finish-criteria.schema.json" }
+        }
+      }
+    }
+  ]
+}

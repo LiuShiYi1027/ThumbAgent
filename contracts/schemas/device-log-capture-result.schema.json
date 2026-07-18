@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-log-capture-result/v1.json",
+  "title": "Device Log Capture Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_call_id",
+    "skill_id",
+    "skill_version",
+    "device_id",
+    "success",
+    "status",
+    "verification",
+    "source",
+    "minimum_level",
+    "requested_max_lines",
+    "captured_bytes",
+    "truncated",
+    "redaction_count",
+    "evidence_refs",
+    "artifact",
+    "started_at",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "device.logs.collect" },
+    "skill_version": { "const": "1.0.0" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "success": { "const": true },
+    "status": { "const": "succeeded" },
+    "verification": { "const": "verified" },
+    "source": { "const": "android_logcat" },
+    "minimum_level": { "enum": ["verbose", "debug", "info", "warn", "error", "fatal"] },
+    "requested_max_lines": { "type": "integer", "minimum": 1, "maximum": 2000 },
+    "captured_bytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+    "truncated": { "type": "boolean" },
+    "redaction_count": { "type": "integer", "minimum": 0 },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" }
+    },
+    "artifact": { "$ref": "artifact.schema.json" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  }
+}

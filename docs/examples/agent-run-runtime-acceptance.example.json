@@ -1,0 +1,10 @@
+{
+  "device_id": "adb:YOUR_DEVICE_SERIAL",
+  "goal": "进入显示和亮度页面",
+  "confirmed": true,
+  "max_rounds": 6,
+  "acceptance": {
+    "foreground_app_id": "com.android.settings",
+    "foreground_activity": ".Settings$DisplaySettingsActivity"
+  }
+}

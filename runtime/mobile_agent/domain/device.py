@@ -34,6 +34,7 @@ class Device:
     os_version: str
     connection: ConnectionState
     capabilities: tuple[str, ...] = ()
+    session_id: str | None = None
     schema_version: str = DEVICE_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -53,6 +54,6 @@ class Device:
             "model": self.model,
             "os_version": self.os_version,
             "connection": self.connection.value,
+            "session_id": self.session_id,
             "capabilities": list(self.capabilities),
         }
-

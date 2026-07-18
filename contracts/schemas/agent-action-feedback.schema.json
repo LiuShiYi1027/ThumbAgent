@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-action-feedback/v1.json",
+  "title": "AgentActionFeedback",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool_id", "arguments", "effect", "basis", "message"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "tool_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "arguments": { "type": "object", "maxProperties": 20 },
+    "effect": { "enum": ["changed", "unchanged", "unknown"] },
+    "basis": { "enum": ["ui_tree_and_foreground", "pre_dispatch_validation", "finish_verification", "runtime_acceptance", "not_evaluated"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "error_code": { "type": "string", "maxLength": 120 },
+    "details": { "type": "object", "maxProperties": 20 }
+  }
+}

@@ -13,6 +13,7 @@
     "model",
     "os_version",
     "connection",
+    "session_id",
     "capabilities"
   ],
   "properties": {
@@ -38,6 +39,12 @@
     "connection": {
       "enum": ["online", "offline", "unauthorized", "unknown"]
     },
+    "session_id": {
+      "oneOf": [
+        { "type": "string", "pattern": "^session_[a-f0-9]{32}$" },
+        { "type": "null" }
+      ]
+    },
     "capabilities": {
       "type": "array",
       "items": {
@@ -48,4 +55,3 @@
     }
   }
 }
-

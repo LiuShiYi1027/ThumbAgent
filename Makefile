@@ -1,7 +1,7 @@
 PYTHON ?= python3.11
 PYTHONPATH := runtime
 
-.PHONY: format lint typecheck test test-contract test-integration check run
+.PHONY: format lint typecheck test test-contract test-integration check run run-mcp
 
 format:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/quality.py format
@@ -26,3 +26,5 @@ check: lint typecheck test
 run:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mobile_agent.api.server
 
+run-mcp:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mobile_agent.mcp

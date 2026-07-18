@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-log-capture-input/v1.json",
+  "title": "Device Log Capture Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1 },
+    "max_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 500 },
+    "minimum_level": {
+      "enum": ["verbose", "debug", "info", "warn", "error", "fatal"],
+      "default": "info"
+    },
+    "confirmed": { "type": "boolean", "default": false }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "source_goal": "进入蓝牙设置页面",
+  "execution_goal": "打开系统设置，找到蓝牙入口，点击进入蓝牙设置页面，并确认当前已到达蓝牙页面",
+  "assumptions": [
+    "蓝牙指系统设置中的蓝牙页面"
+  ],
+  "confidence": 0.9,
+  "compiler_id": "openai_compatible.goal_compiler.preview",
+  "source": "llm",
+  "confirmation_required": true
+}

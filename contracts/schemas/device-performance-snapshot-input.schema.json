@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-performance-snapshot-input/v1.json",
+  "title": "Device Performance Snapshot Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["device_id"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1 }
+  }
+}

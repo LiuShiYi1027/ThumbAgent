@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/task-event/v1.json",
+  "title": "TaskEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "task_id", "device_id", "sequence", "event_type", "occurred_at", "payload"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "event_id": { "type": "string", "pattern": "^event_[a-f0-9]{32}$" },
+    "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "event_type": { "enum": ["task.queued", "task.started", "task.step_completed", "task.cancel_requested", "task.completed"] },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  }
+}

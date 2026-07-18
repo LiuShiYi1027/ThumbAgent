@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-step-result/v1.json",
+  "title": "AgentStepResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "round", "observation", "decision", "action_result", "skill_result", "verified_node"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "round": { "type": "integer", "minimum": 1, "maximum": 6 },
+    "observation": { "$ref": "agent-observation-summary.schema.json" },
+    "decision": { "$ref": "agent-decision.schema.json" },
+    "action_feedback": {
+      "oneOf": [
+        { "$ref": "agent-action-feedback.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "action_result": {
+      "oneOf": [
+        { "$ref": "action-result.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "skill_result": {
+      "oneOf": [
+        { "$ref": "navigation-result.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "verified_node": {
+      "oneOf": [
+        { "$ref": "ui-node.schema.json" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

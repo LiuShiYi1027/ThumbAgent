@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "id": "device.performance.snapshot",
+  "version": "1.0.0",
+  "name": "Capture aggregate device performance",
+  "description": "Capture aggregate Android CPU, memory, battery temperature, uptime, and load metrics without retaining process or application details.",
+  "kind": "deterministic",
+  "input_schema": {
+    "$ref": "../../../../contracts/schemas/device-performance-snapshot-input.schema.json"
+  },
+  "output_schema": {
+    "$ref": "../../../../contracts/schemas/device-performance-snapshot-result.schema.json"
+  },
+  "required_capabilities": ["performance.snapshot@1"],
+  "tool_allowlist": ["device.performance.capture"],
+  "risk": "low",
+  "timeout_seconds": 60,
+  "max_steps": 1,
+  "verification": "all_aggregate_metrics_parsed_and_artifact_persisted"
+}

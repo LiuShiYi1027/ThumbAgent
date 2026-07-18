@@ -1,6 +1,6 @@
 # Skill 开发规范
 
-> 状态：Active  
+> 状态：Active
 > 更新日期：2026-07-03
 
 ## 1. Skill 定义
@@ -13,6 +13,7 @@ Skill 不是：
 - Shell 脚本包装
 - 没有验证的 Tool 别名
 - 将多个不相关操作塞进一个万能入口
+- 把页面探索、滚动方向选择、点击路径恢复等 Agent 动态决策隐藏起来的黑盒
 
 ## 2. 分类
 
@@ -21,6 +22,13 @@ Skill 不是：
 - Workflow：多个 Skill 的持久化编排，不属于 V1 Skill Handler。
 
 优先实现 Deterministic Skill；只有路径确实需要环境理解时才使用 Agentic Skill。
+
+在 Agent Loop 中，`run_tool` 是页面交互和不确定导航的默认动作形态；`run_skill` 只用于边界稳定、可复用、可验证的目标级能力。Skill 可以封装复杂工程能力，但不能以“方便调用”为理由吞掉本应由 Agent 基于 Observation 逐步决策的过程。
+
+典型划分：
+
+- 适合 `run_tool`：向上滑动、向下滑动、点击某个语义元素、返回、等待、观察后改方向。
+- 适合 `run_skill`：安装应用、卸载应用、采集 logcat、导出诊断包、采集性能样本、执行已产品化且验证器稳定的复合流程。
 
 ## 3. 命名与版本
 
@@ -61,6 +69,7 @@ verification: foreground_app_matches
 - 使用 Runtime 提供的 Clock、Cancellation 和 Evidence 接口。
 - 每个外部 I/O 等待点必须响应取消和超时。
 - 不捕获并吞掉领域错误。
+- 不把模型本应逐轮决定的页面路径、滚动方向和恢复策略固化为不可观察的内部黑盒；如果必须内置恢复策略，应说明原因、预算和验证方式。
 
 ## 6. Agentic Skill 额外要求
 

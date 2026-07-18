@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/task-run/v1.json",
+  "title": "TaskRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "task_type", "device_id", "goal", "status", "started_at", "completed_at", "steps", "evidence_summary", "error"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
+    "task_type": { "enum": ["settings.scroll_navigate", "agent.run", "device.logs.collect", "device.performance.snapshot"] },
+    "device_id": { "type": "string", "minLength": 1 },
+    "device_session_id": { "type": "string", "pattern": "^session_[a-f0-9]{32}$" },
+    "goal": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "goal_spec": { "$ref": "agent-goal-spec.schema.json" },
+    "goal_acceptance": { "$ref": "agent-goal-acceptance.schema.json" },
+    "completion_source": {
+      "enum": ["planner_finish", "runtime_acceptance", "skill_result"]
+    },
+    "status": { "enum": ["succeeded", "failed", "cancelled", "timed_out"] },
+    "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "steps": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step_id", "sequence", "kind", "name", "status", "started_at", "completed_at", "result", "error"],
+        "properties": {
+          "step_id": { "type": "string", "pattern": "^step_[a-f0-9]{32}$" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "kind": { "enum": ["skill", "agent_round", "diagnostic"] },
+          "name": { "enum": ["settings.scroll_navigate", "agent.round", "device.logs.collect", "device.performance.snapshot"] },
+          "status": { "enum": ["succeeded", "failed"] },
+          "started_at": { "type": "string", "format": "date-time" },
+          "completed_at": { "type": "string", "format": "date-time" },
+          "result": {
+            "oneOf": [
+              { "$ref": "navigation-result.schema.json" },
+              { "$ref": "agent-step-result.schema.json" },
+              { "$ref": "device-log-capture-result.schema.json" },
+              { "$ref": "device-performance-snapshot-result.schema.json" },
+              { "type": "null" }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              { "type": "object" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "evidence_summary": { "type": "object" },
+    "error": {
+      "oneOf": [
+        { "type": "object" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

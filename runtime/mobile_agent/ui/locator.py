@@ -53,6 +53,26 @@ class UiLocator:
                 message="目标 UI 元素超出屏幕边界",
             )
         x, y = target.bounds.center
+        # Tiny synthetic screens used by adapters/tests do not model system UI insets.
+        system_margin = max(1, round(screen_height * 0.04)) if screen_height >= 100 else 0
+        safe_top = system_margin
+        safe_bottom = screen_height - system_margin
+        if safe_top and y <= safe_top:
+            raise MobileAgentError(
+                code="TARGET_OUT_OF_BOUNDS",
+                category=ErrorCategory.DEVICE,
+                message="目标位于屏幕顶部系统区域",
+                suggested_action="先滑动使目标进入安全可点击区域",
+                details={"tap_y": y, "safe_top": safe_top},
+            )
+        if y >= safe_bottom:
+            raise MobileAgentError(
+                code="TARGET_OUT_OF_BOUNDS",
+                category=ErrorCategory.DEVICE,
+                message="目标位于屏幕底部手势区域",
+                suggested_action="先滑动使目标进入安全可点击区域",
+                details={"tap_y": y, "safe_bottom": safe_bottom},
+            )
         return UiMatch(selector, matched, target, x, y)
 
     def find_all(self, nodes: list[UiNode], selector: UiSelector) -> list[UiNode]:

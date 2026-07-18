@@ -15,8 +15,12 @@ from mobile_agent.devices.adapters.android.parser import (
     parse_adb_devices,
     parse_foreground_app,
 )
+from mobile_agent.devices.adapters.android.performance_parser import (
+    parse_performance_snapshot,
+)
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
 from mobile_agent.domain.device import ConnectionState, Device, Platform
+from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.observation import (
     DeviceState,
@@ -26,6 +30,7 @@ from mobile_agent.domain.observation import (
     ScreenObservation,
     UiTreeObservation,
 )
+from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
 
 def _now() -> str:
@@ -64,6 +69,10 @@ class AndroidDeviceAdapter:
                 "navigation.back@1",
                 "navigation.home@1",
                 "input.tap@1",
+                "input.swipe@1",
+                "input.text@1",
+                "logs.collect@1",
+                "performance.snapshot@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(
@@ -233,6 +242,8 @@ class AndroidDeviceAdapter:
                 "-W",
                 "-a",
                 "android.settings.SETTINGS",
+                "-f",
+                "0x14000000",
             )
         else:
             result = await self._runner.run(
@@ -246,7 +257,7 @@ class AndroidDeviceAdapter:
                 "android.intent.category.LAUNCHER",
                 "1",
             )
-        self._require_success(result.returncode, "无法启动应用")
+        self._require_success(result.returncode, "无法启动应用", result.stderr_text)
 
     async def press_back(self, device_id: str) -> None:
         await self._key_event(device_id, "4")
@@ -256,17 +267,138 @@ class AndroidDeviceAdapter:
 
     async def tap(self, device_id: str, x: int, y: int) -> None:
         serial = self._serial_from_device_id(device_id)
-        result = await self._runner.run("-s", serial, "shell", "input", "tap", str(x), str(y))
-        self._require_success(result.returncode, "设备点击失败")
+        result = await self._runner.run(
+            "-s", serial, "shell", "input", "touchscreen", "tap", str(x), str(y)
+        )
+        self._require_success(result.returncode, "设备点击失败", result.stderr_text)
+
+    async def swipe(
+        self, device_id: str, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int
+    ) -> None:
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s",
+            serial,
+            "shell",
+            "input",
+            "swipe",
+            str(start_x),
+            str(start_y),
+            str(end_x),
+            str(end_y),
+            str(duration_ms),
+        )
+        self._require_success(result.returncode, "设备滑动失败", result.stderr_text)
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run("-s", serial, "shell", "input", "text", text)
+        self._require_success(result.returncode, "设备文本输入失败", result.stderr_text)
+
+    async def collect_logs(
+        self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
+    ) -> bytes:
+        """Capture a finite logcat snapshot using only validated, constructed arguments."""
+
+        if (
+            not isinstance(max_lines, int)
+            or isinstance(max_lines, bool)
+            or max_lines < 1
+            or max_lines > 2000
+        ):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="日志行数必须在 1 到 2000 之间",
+            )
+        if not isinstance(minimum_level, DeviceLogLevel):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="日志级别无效",
+            )
+        priority = {
+            DeviceLogLevel.VERBOSE: "V",
+            DeviceLogLevel.DEBUG: "D",
+            DeviceLogLevel.INFO: "I",
+            DeviceLogLevel.WARN: "W",
+            DeviceLogLevel.ERROR: "E",
+            DeviceLogLevel.FATAL: "F",
+        }[minimum_level]
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s",
+            serial,
+            "logcat",
+            "-d",
+            "-t",
+            str(max_lines),
+            "-v",
+            "threadtime",
+            f"*:{priority}",
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="LOG_CAPTURE_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备日志采集失败",
+                retryable=True,
+                suggested_action="确认设备在线、调试授权有效后重试",
+            )
+        if not result.stdout:
+            raise MobileAgentError(
+                code="LOG_CAPTURE_EMPTY",
+                category=ErrorCategory.DEVICE,
+                message="设备没有返回符合条件的日志",
+                retryable=True,
+                suggested_action="降低最低日志级别或稍后重试",
+            )
+        return result.stdout
+
+    async def capture_performance(
+        self, device_id: str
+    ) -> DevicePerformanceSnapshot:
+        """Read fixed aggregate diagnostics and discard all process-level output."""
+
+        serial = self._serial_from_device_id(device_id)
+        commands = (
+            ("shell", "dumpsys", "cpuinfo"),
+            ("shell", "dumpsys", "meminfo"),
+            ("shell", "dumpsys", "battery"),
+            ("shell", "cat", "/proc/uptime"),
+            ("shell", "cat", "/proc/loadavg"),
+        )
+        results = []
+        for command in commands:
+            result = await self._runner.run("-s", serial, *command)
+            if result.returncode != 0:
+                raise MobileAgentError(
+                    code="PERFORMANCE_SNAPSHOT_FAILED",
+                    category=ErrorCategory.DEVICE,
+                    message="设备聚合性能采集失败",
+                    retryable=True,
+                    suggested_action="确认设备在线、调试授权有效后重试",
+                )
+            results.append(result.stdout_text)
+        return parse_performance_snapshot(device_id, *results)
 
     async def _key_event(self, device_id: str, key_code: str) -> None:
         serial = self._serial_from_device_id(device_id)
         result = await self._runner.run("-s", serial, "shell", "input", "keyevent", key_code)
-        self._require_success(result.returncode, "设备按键失败")
+        self._require_success(result.returncode, "设备按键失败", result.stderr_text)
 
     @staticmethod
-    def _require_success(returncode: int, message: str) -> None:
+    def _require_success(returncode: int, message: str, stderr: str = "") -> None:
         if returncode != 0:
+            if "SecurityException" in stderr and "INJECT_EVENTS" in stderr:
+                raise MobileAgentError(
+                    code="DEVICE_UNAUTHORIZED",
+                    category=ErrorCategory.DEVICE,
+                    message="设备当前未授权 ADB 注入输入事件",
+                    retryable=False,
+                    suggested_action="检查设备系统限制、开发者选项或更换允许 ADB 输入注入的测试设备",
+                    details={"reason": "input_event_injection_denied"},
+                )
             raise MobileAgentError(
                 code="ACTION_FAILED",
                 category=ErrorCategory.EXECUTION,

@@ -1,7 +1,7 @@
 # Capability 模型
 
-> 状态：Active  
-> 更新日期：2026-07-03
+> 状态：Active
+> 更新日期：2026-07-15
 
 ## 1. 目的
 
@@ -27,6 +27,8 @@ input.text
 input.swipe
 navigation.back
 navigation.home
+logs.collect
+performance.snapshot
 ```
 
 不在 ID 中放平台名或版本，例如不用 `android.adb.tap`。
@@ -122,9 +124,24 @@ input.text@1
 input.swipe@1
 navigation.back@1
 navigation.home@1
+logs.collect@1
+performance.snapshot@1
 ```
 
 ITER-0001 只需实现 `device.inspect@1` 及设备发现所需内部能力，其余在后续迭代启用。
+
+ITER-0035 起，Runtime 使用平台无关 Capability Catalog 保存基础八项能力的风险、幂等性、验证、
+要求和限制。Tool Registry 只保存 Tool→Capability 映射，并从 Catalog 派生风险与幂等性；Policy
+Engine 仍在执行时独立授权。DeviceInspection 将 Adapter 当前 advertised capabilities 与
+DeviceAvailability 合并：ready 映射 available/unsupported，busy 将已广告能力映射为
+temporarily_unavailable，offline/unauthorized 映射 unknown，禁止根据 platform 猜测支持。
+
+ITER-0036 增加 `logs.collect@1`。它是 Medium 风险、safe 幂等的工程诊断能力，只允许采集有界快照；
+原始平台日志必须先脱敏并保存为本地 Artifact。关联底层 Tool 不允许通过通用 UI Action 入口直接
+调用，只能由声明该 Tool allowlist 的 `device.logs.collect` Skill 编排。
+
+ITER-0038 增加 `performance.snapshot@1`。它是 Low 风险、safe 幂等的聚合只读能力，只保留总
+CPU、内存、电池与系统负载；进程、应用和平台原始诊断输出不进入 Capability 消费者或 Artifact。
 
 ## 10. 测试要求
 

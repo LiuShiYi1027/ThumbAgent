@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
 from mobile_agent.domain.device import ConnectionState, Device, Platform
+from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.observation import (
     DeviceState,
@@ -17,6 +18,7 @@ from mobile_agent.domain.observation import (
     ScreenObservation,
     UiTreeObservation,
 )
+from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
 
 def _now() -> str:
@@ -50,6 +52,12 @@ def _fake_ui_xml(app_id: str, activity: str) -> bytes:
             'package="com.example.fake" clickable="false" enabled="true" '
             'visible-to-user="true" bounds="[0,0][2,3]"/>'
         )
+    if app_id == "com.example.form":
+        body = (
+            '<node text="" resource-id="search_box" class="android.widget.EditText" '
+            'package="com.example.form" clickable="true" enabled="true" '
+            'visible-to-user="true" bounds="[0,0][2,1]"/>'
+        )
     return f'<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">{body}</hierarchy>'.encode()
 
 
@@ -60,7 +68,8 @@ class FakeDeviceAdapter:
         self.foreground_app = "com.example.fake"
         self.foreground_activity = ".MainActivity"
         self.actions: list[tuple[object, ...]] = []
-        self._devices = devices or [
+        self.custom_ui_xml: bytes | None = None
+        self._devices = devices if devices is not None else [
             Device(
                 device_id="fake:android-001",
                 platform=Platform.ANDROID,
@@ -75,6 +84,10 @@ class FakeDeviceAdapter:
                     "navigation.back@1",
                     "navigation.home@1",
                     "input.tap@1",
+                    "input.swipe@1",
+                    "input.text@1",
+                    "logs.collect@1",
+                    "performance.snapshot@1",
                 ),
             )
         ]
@@ -97,7 +110,9 @@ class FakeDeviceAdapter:
         ui_tree = artifacts.write(
             ArtifactKind.UI_TREE,
             "application/xml",
-            _fake_ui_xml(self.foreground_app, self.foreground_activity),
+            self.custom_ui_xml
+            if self.custom_ui_xml is not None
+            else _fake_ui_xml(self.foreground_app, self.foreground_activity),
             ".xml",
         )
         app_time = _now()
@@ -136,3 +151,41 @@ class FakeDeviceAdapter:
             and (x, y) == (1, 1)
         ):
             self.foreground_activity = ".DisplaySettings"
+
+    async def swipe(
+        self, device_id: str, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int
+    ) -> None:
+        self.actions.append(("input.swipe", device_id, start_x, start_y, end_x, end_y, duration_ms))
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        self.actions.append(("input.text", device_id, text))
+
+    async def collect_logs(
+        self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
+    ) -> bytes:
+        self.actions.append(("device.logs.capture", device_id, max_lines, minimum_level.value))
+        return (
+            b"07-15 10:00:00.000  100  100 I MobileAgent: connected user@example.com\n"
+            b"07-15 10:00:00.001  100  100 I MobileAgent: ready\n"
+        )
+
+    async def capture_performance(
+        self, device_id: str
+    ) -> DevicePerformanceSnapshot:
+        self.actions.append(("device.performance.capture", device_id))
+        return DevicePerformanceSnapshot(
+            snapshot_id=f"perf_{uuid.uuid4().hex}",
+            device_id=device_id,
+            captured_at=_now(),
+            cpu_total_usage_percent=12.5,
+            memory_total_bytes=8_000_000_000,
+            memory_free_bytes=3_000_000_000,
+            battery_level_percent=80.0,
+            battery_temperature_celsius=31.0,
+            battery_status="charging",
+            battery_plugged="usb",
+            uptime_seconds=3600.0,
+            load_average_1m=1.0,
+            load_average_5m=0.8,
+            load_average_15m=0.6,
+        )

@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
-    "skill_id": { "const": "settings.navigate" },
+    "skill_id": { "enum": ["settings.navigate", "settings.scroll_navigate"] },
     "skill_version": { "const": "1.0.0" },
     "success": { "const": true },
     "started_at": { "type": "string", "format": "date-time" },
@@ -19,4 +19,3 @@
     "verified_node": { "$ref": "ui-node.schema.json" }
   }
 }
-

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mobile-agent": {
+      "command": "python3.11",
+      "args": ["-m", "mobile_agent.mcp"],
+      "cwd": "/absolute/path/to/mobile-agent",
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/mobile-agent/runtime",
+        "MOBILE_AGENT_MCP_BASE_URL": "http://127.0.0.1:8765",
+        "MOBILE_AGENT_API_TOKEN": "<same-local-token-used-to-start-runtime>"
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # 可靠性与执行语义
 
-> 状态：Active  
-> 更新日期：2026-07-03
+> 状态：Active
+> 更新日期：2026-07-14
 
 ## 1. 目标
 
@@ -71,6 +71,16 @@ Task 进入 `unknown_outcome` 时必须停止后续写动作，先尝试只读 O
 
 内层超时必须小于外层预算，并预留清理和证据采集时间。不能依赖单一全局 timeout。
 
+V1 Agent 默认 deadline 为 600 秒，可配置范围 1–1800 秒，从任务真正开始运行时计时。Deadline
+不会强杀未知状态的设备调用；调用返回并完成确定性验证后，Runtime 在安全边界停止下一步动作。
+
+ITER-0037 的异步日志快照使用相同 Task deadline，默认 60 秒。取消或 Deadline 发生在 ADB 调用
+期间时不强杀设备命令；调用返回后停止后续步骤，并保留已经生成的 Artifact 与完成步骤证据。
+
+性能基线比较只消费两个已经进入 succeeded 终态的 TaskRun，不参与设备动作重试、取消或恢复。
+不同设备、失败任务和时间倒序在读取阶段明确拒绝；Device Session 不同作为结果事实公开，不被
+静默当作同一连续测量。两点趋势使用公开噪声阈值，不能自动升级为性能回退结论。
+
 ## 7. 取消
 
 - 取消请求必须持久化并传播到当前执行上下文。
@@ -91,6 +101,10 @@ Task 进入 `unknown_outcome` 时必须停止后续写动作，先尝试只读 O
 
 设备重连产生新 Session。未经用户或验证器确认，不在新 Session 自动续跑旧写动作。
 
+V1 由 Device Gateway 的平台无关 Session Tracking 装饰器维护连续在线状态。Task 在每次
+Observation 和写动作前核对绑定 Session；设备消失、非 online 或重新出现均使旧绑定失效并返回
+`DEVICE_SESSION_CHANGED`。Session 变化不触发自动重试。
+
 ## 9. Runtime 崩溃恢复
 
 - 启动时扫描非终态 Task。
@@ -107,6 +121,12 @@ Task 进入 `unknown_outcome` 时必须停止后续写动作，先尝试只读 O
 - 续租失败停止新动作。
 - 人工接管持有更高优先级锁并暂停 Agent。
 - 锁过期不代表设备动作可安全重试，只代表需要重新协调所有权。
+
+V1 租约由单 Runtime 进程管理，公开写 Tool、Skill 和 Task 共享同一 device_id 锁。租约到期只
+产生诊断信息，不自动释放或抢占；持有者离开执行上下文时明确释放。详见 ADR-0010。
+
+同一数据目录另由 Runtime 单实例文件锁保护。单实例锁解决跨进程所有权，Device Session 解决
+重连身份，DeviceLease 解决写任务并发；三者不可互相替代。详见 ADR-0011。
 
 ## 11. Verification
 
