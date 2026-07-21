@@ -717,6 +717,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("repair_count", decision_schema["properties"])
         self.assertIn("provider_retry_count", decision_schema["properties"])
+        self.assertIn("provider_latency_ms", decision_schema["properties"])
+        self.assertIn("provider_attempt_count", decision_schema["properties"])
         self.assertEqual(
             "https://mobile-agent.local/schemas/agent-finish-criteria/v1.json",
             finish_schema["$id"],

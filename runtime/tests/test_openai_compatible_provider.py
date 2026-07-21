@@ -4,6 +4,7 @@ import json
 import unittest
 from typing import Any
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from mobile_agent.agent import AgentObservationSummary
 from mobile_agent.domain.errors import MobileAgentError
@@ -195,6 +196,10 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual("MODEL_UNAVAILABLE", raised.exception.code)
         self.assertEqual("connection", raised.exception.details["failure_kind"])
         self.assertEqual(1, raised.exception.details["provider_retry_count"])
+        self.assertEqual("transport", raised.exception.details["failure_phase"])
+        self.assertEqual(2, raised.exception.details["provider_attempt_count"])
+        self.assertIsInstance(raised.exception.details["elapsed_ms"], int)
+        self.assertIsInstance(raised.exception.details["total_elapsed_ms"], int)
         self.assertEqual(2, transport.calls)
         self.assertNotIn("test-secret-token", str(raised.exception.to_dict()))
 
@@ -205,6 +210,8 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         decision = planner.decide("open display settings", observation_summary(), 1)
 
         self.assertEqual(1, decision.provider_retry_count)
+        self.assertEqual(2, decision.provider_attempt_count)
+        self.assertIsInstance(decision.provider_latency_ms, int)
         self.assertEqual(2, len(transport.bodies))
 
     def test_http_transport_preserves_safe_timeout_diagnostics(self) -> None:
@@ -225,7 +232,74 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertEqual("MODEL_UNAVAILABLE", raised.exception.code)
         self.assertTrue(raised.exception.retryable)
         self.assertEqual("timeout", raised.exception.details["failure_kind"])
+        self.assertEqual("response_headers", raised.exception.details["failure_phase"])
+        self.assertIsInstance(raised.exception.details["elapsed_ms"], int)
         self.assertNotIn("test-secret-token", str(raised.exception.to_dict()))
+
+    def test_http_transport_classifies_response_body_timeout(self) -> None:
+        transport = HttpModelTransport()
+
+        with patch(
+            "mobile_agent.providers.openai_compatible.urlopen",
+            return_value=BodyTimeoutResponse(),
+        ):
+            with self.assertRaises(MobileAgentError) as raised:
+                transport.post_json(
+                    "https://model.example/v1/chat/completions",
+                    {"Authorization": "Bearer test-secret-token"},
+                    {"model": "m"},
+                    30,
+                )
+
+        self.assertEqual("timeout", raised.exception.details["failure_kind"])
+        self.assertEqual("response_body", raised.exception.details["failure_phase"])
+        self.assertIsInstance(raised.exception.details["elapsed_ms"], int)
+        self.assertNotIn("test-secret-token", str(raised.exception.to_dict()))
+
+    def test_http_transport_classifies_http_status_without_response_body(self) -> None:
+        transport = HttpModelTransport()
+        failure = HTTPError(
+            "https://model.example/v1/chat/completions",
+            503,
+            "secret test-secret-token",
+            None,
+            None,
+        )
+
+        with patch(
+            "mobile_agent.providers.openai_compatible.urlopen", side_effect=failure
+        ):
+            with self.assertRaises(MobileAgentError) as raised:
+                transport.post_json(
+                    "https://model.example/v1/chat/completions",
+                    {"Authorization": "Bearer test-secret-token"},
+                    {"model": "m"},
+                    30,
+                )
+
+        self.assertEqual("http_status", raised.exception.details["failure_kind"])
+        self.assertEqual("response_headers", raised.exception.details["failure_phase"])
+        self.assertEqual(503, raised.exception.details["http_status"])
+        self.assertNotIn("test-secret-token", str(raised.exception.to_dict()))
+
+    def test_http_transport_classifies_invalid_json_decode(self) -> None:
+        transport = HttpModelTransport()
+
+        with patch(
+            "mobile_agent.providers.openai_compatible.urlopen",
+            return_value=StaticResponse(b"not-json"),
+        ):
+            with self.assertRaises(MobileAgentError) as raised:
+                transport.post_json(
+                    "https://model.example/v1/chat/completions",
+                    {"Authorization": "Bearer test-secret-token"},
+                    {"model": "m"},
+                    30,
+                )
+
+        self.assertEqual("invalid_json", raised.exception.details["failure_kind"])
+        self.assertEqual("response_decode", raised.exception.details["failure_phase"])
+        self.assertNotIn("not-json", str(raised.exception.to_dict()))
 
     def test_provider_allows_bounded_multi_rounds(self) -> None:
         planner = OpenAICompatiblePlanner(test_config(), FakeTransport(valid_response()))
@@ -422,6 +496,31 @@ class FailingTransport:
     ) -> dict[str, Any]:
         self.calls += 1
         raise OSError("network unavailable with secret test-secret-token")
+
+
+class BodyTimeoutResponse:
+    def __enter__(self) -> BodyTimeoutResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        raise TimeoutError("body timeout with secret test-secret-token")
+
+
+class StaticResponse:
+    def __init__(self, payload: bytes) -> None:
+        self._payload = payload
+
+    def __enter__(self) -> StaticResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._payload
 
 
 def test_config() -> OpenAICompatiblePlannerConfig:

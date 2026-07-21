@@ -162,9 +162,13 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
 
         task["steps"][0]["result"]["decision"]["repair_count"] = 1
         task["steps"][0]["result"]["decision"]["provider_retry_count"] = 1
+        task["steps"][0]["result"]["decision"]["provider_attempt_count"] = 2
+        task["steps"][0]["result"]["decision"]["provider_latency_ms"] = 1234
         repaired_report = render_task_report(task, events)
         self.assertIn("repair_count=1", repaired_report)
         self.assertIn("provider_retry_count=1", repaired_report)
+        self.assertIn("provider_attempt_count=2", repaired_report)
+        self.assertIn("provider_latency_ms=1234", repaired_report)
 
     def test_renders_only_whitelisted_error_diagnostics(self) -> None:
         task = {
@@ -180,6 +184,10 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
                 "code": "MODEL_OUTPUT_INVALID",
                 "message": "input.tap_element selector 无效",
                 "details": {
+                    "failure_phase": "response_headers",
+                    "elapsed_ms": 60001,
+                    "total_elapsed_ms": 120005,
+                    "provider_attempt_count": 2,
                     "selector_error_field": "unknown_fields",
                     "selector_unknown_keys": ["unexpected"],
                     "secret_response": "must-not-appear",
@@ -190,6 +198,8 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
         report = render_task_report(task, [])
 
         self.assertIn("selector_error_field=unknown_fields", report)
+        self.assertIn("failure_phase=response_headers", report)
+        self.assertIn("total_elapsed_ms=120005", report)
         self.assertIn('selector_unknown_keys=["unexpected"]', report)
         self.assertNotIn("must-not-appear", report)
 

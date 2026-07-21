@@ -133,7 +133,10 @@ Policy 拒绝、输入错误和 unknown outcome 默认不可自动重试。
 
 Agent 页面定位和 `finish` 验证中，若 Runtime 能确定错误发生在设备动作派发前，可将该轮记为
 failed 并继续规划；不得将可能已产生副作用的错误按此方式恢复。`MODEL_UNAVAILABLE.details.failure_kind`
-使用 `timeout | http_status | connection | invalid_json`，只保留 HTTP status、timeout 和重试次数等脱敏元数据。
+使用 `timeout | http_status | connection | invalid_json`。`failure_phase` 使用可观察的
+`response_headers | response_body | response_decode | transport`，不得把 `response_headers` 进一步
+推断成 DNS、TCP、TLS 或首 Token 阶段。诊断只保留 HTTP status、配置 timeout、单次/总耗时、尝试和
+重试次数等脱敏元数据。
 `MODEL_OUTPUT_INVALID` 的 Selector 诊断只允许记录字段名、未知键、参数键和修复次数，不记录
 Selector 值、模型响应体或密钥。模型输出省略非安全关键的 `reason` 时不产生错误，由 Runtime
 写入固定审计说明；非字符串或超长 `reason` 仍使用 `MODEL_OUTPUT_INVALID`。

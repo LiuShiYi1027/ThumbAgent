@@ -66,7 +66,7 @@ TOOLS = (
     McpToolDefinition(
         "mobile_run_agent",
         "Run mobile Agent task",
-        "Submit a dynamic Observe-Plan-Act task. The MCP host must show the goal and obtain explicit user confirmation before confirmed=true. Returns immediately with task_id.",
+        "Submit one dynamic Observe-Plan-Act task. The MCP host must show the goal and obtain explicit user confirmation before confirmed=true. Returns immediately with task_id; poll that task to a terminal state and report its final TaskRun. Do not automatically submit a replacement task after terminal failure without new user confirmation.",
         "agent_run",
         False,
         False,

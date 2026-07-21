@@ -163,7 +163,7 @@ class UiParserLocatorTests(unittest.TestCase):
         nodes = self.parser.parse(
             b'<hierarchy><node text="Bottom" resource-id="bottom" class="TextView" '
             b'package="android" clickable="true" enabled="true" '
-            b'visible-to-user="true" bounds="[0,2666][1256,2808]"/></hierarchy>'
+            b'visible-to-user="true" bounds="[0,2696][1256,2808]"/></hierarchy>'
         )
 
         with self.assertRaises(MobileAgentError) as raised:
@@ -175,14 +175,14 @@ class UiParserLocatorTests(unittest.TestCase):
             )
 
         self.assertEqual("TARGET_OUT_OF_BOUNDS", raised.exception.code)
-        self.assertEqual(2737, raised.exception.details["tap_y"])
-        self.assertLess(raised.exception.details["safe_bottom"], 2737)
+        self.assertEqual(2752, raised.exception.details["tap_y"])
+        self.assertLess(raised.exception.details["safe_bottom"], 2752)
 
     def test_rejects_tap_center_inside_top_system_margin(self) -> None:
         nodes = self.parser.parse(
             b'<hierarchy><node text="Display and brightness" resource-id="android:id/title" '
             b'class="TextView" package="com.android.settings" clickable="true" enabled="true" '
-            b'visible-to-user="true" bounds="[0,0][1256,166]"/></hierarchy>'
+            b'visible-to-user="true" bounds="[0,0][1256,112]"/></hierarchy>'
         )
 
         with self.assertRaises(MobileAgentError) as raised:
@@ -196,5 +196,23 @@ class UiParserLocatorTests(unittest.TestCase):
             )
 
         self.assertEqual("TARGET_OUT_OF_BOUNDS", raised.exception.code)
-        self.assertEqual(83, raised.exception.details["tap_y"])
-        self.assertGreater(raised.exception.details["safe_top"], 83)
+        self.assertEqual(56, raised.exception.details["tap_y"])
+        self.assertGreater(raised.exception.details["safe_top"], 56)
+
+    def test_clamps_partially_obscured_target_to_safe_clickable_region(self) -> None:
+        nodes = self.parser.parse(
+            b'<hierarchy><node text="Bluetooth" resource-id="dashboard_tile" '
+            b'class="LinearLayout" package="com.android.settings" clickable="true" '
+            b'enabled="true" visible-to-user="true" bounds="[0,46][1256,214]"/>'
+            b'</hierarchy>'
+        )
+
+        match = self.locator.locate(
+            nodes,
+            UiSelector.from_dict({"strategy": "text", "value": "Bluetooth"}),
+            1256,
+            2808,
+        )
+
+        self.assertEqual(628, match.tap_x)
+        self.assertEqual(191, match.tap_y)

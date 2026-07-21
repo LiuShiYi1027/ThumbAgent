@@ -63,6 +63,8 @@ class AgentDecision:
     source: str = "planner"
     repair_count: int = 0
     provider_retry_count: int = 0
+    provider_latency_ms: int = 0
+    provider_attempt_count: int = 0
     schema_version: str = "1.0.0"
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,6 +81,8 @@ class AgentDecision:
             "source": self.source,
             "repair_count": self.repair_count,
             "provider_retry_count": self.provider_retry_count,
+            "provider_latency_ms": self.provider_latency_ms,
+            "provider_attempt_count": self.provider_attempt_count,
         }
 
 

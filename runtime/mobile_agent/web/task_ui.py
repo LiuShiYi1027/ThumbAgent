@@ -720,9 +720,11 @@ TASK_UI_HTML = """<!doctype html>
       const confidence = decision.confidence === null || decision.confidence === undefined ? "-" : decision.confidence;
       const repair = Number.isInteger(decision.repair_count) && decision.repair_count > 0 ? ` · 模型修复 ${esc(decision.repair_count)} 次` : "";
       const providerRetry = Number.isInteger(decision.provider_retry_count) && decision.provider_retry_count > 0 ? ` · Provider 重试 ${esc(decision.provider_retry_count)} 次` : "";
+      const providerAttempts = Number.isInteger(decision.provider_attempt_count) && decision.provider_attempt_count > 0 ? ` · Provider 尝试 ${esc(decision.provider_attempt_count)} 次` : "";
+      const providerLatency = Number.isInteger(decision.provider_latency_ms) && decision.provider_latency_ms >= 0 && Number.isInteger(decision.provider_attempt_count) && decision.provider_attempt_count > 0 ? ` · Provider ${esc(decision.provider_latency_ms)} ms` : "";
       const target = decision.tool_id || decision.skill_id || decision.decision_type || "-";
       const argumentsText = decision.arguments && Object.keys(decision.arguments).length ? JSON.stringify(decision.arguments) : "";
-      return `<div class="label">Decision: ${esc(target)} · ${esc(decision.source || "-")} · confidence ${esc(confidence)}${repair}${providerRetry}</div><div class="value">${esc(decision.reason || "")}</div>${argumentsText ? `<div class="label"><code>${esc(argumentsText)}</code></div>` : ""}${renderActionFeedback(step?.result?.action_feedback)}`;
+      return `<div class="label">Decision: ${esc(target)} · ${esc(decision.source || "-")} · confidence ${esc(confidence)}${repair}${providerRetry}${providerAttempts}${providerLatency}</div><div class="value">${esc(decision.reason || "")}</div>${argumentsText ? `<div class="label"><code>${esc(argumentsText)}</code></div>` : ""}${renderActionFeedback(step?.result?.action_feedback)}`;
     }
 
     function renderActionFeedback(feedback) {
@@ -733,7 +735,7 @@ TASK_UI_HTML = """<!doctype html>
     function renderErrorDiagnostics(error) {
       const details = error?.details;
       if (!details || typeof details !== "object") return error?.suggested_action ? `<div class="label">建议：${esc(error.suggested_action)}</div>` : "";
-      const scalarKeys = ["failure_kind", "http_status", "timeout_seconds", "provider_retry_count", "match_count", "tap_y", "safe_top", "safe_bottom", "tool_id", "selector_error", "selector_error_field", "repair_count", "owner_id", "session_id", "lease_expired"];
+      const scalarKeys = ["failure_kind", "failure_phase", "http_status", "timeout_seconds", "elapsed_ms", "total_elapsed_ms", "provider_attempt_count", "provider_retry_count", "match_count", "tap_y", "safe_top", "safe_bottom", "tool_id", "selector_error", "selector_error_field", "repair_count", "owner_id", "session_id", "lease_expired"];
       const stringArrayKeys = ["argument_keys", "missing_argument_keys", "unknown_argument_keys", "selector_keys", "selector_unknown_keys"];
       const safe = {};
       scalarKeys.forEach(key => {

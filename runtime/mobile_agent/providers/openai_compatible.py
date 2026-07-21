@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
@@ -66,15 +67,23 @@ class HttpModelTransport:
 
         data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         request = Request(url, data=data, headers=headers, method="POST")
+        started_at = time.monotonic()
+        failure_phase = "response_headers"
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                failure_phase = "response_body"
+                raw = response.read()
+            failure_phase = "response_decode"
+            payload = json.loads(raw.decode("utf-8"))
         except HTTPError as error:
             retryable = error.code == 429 or 500 <= error.code <= 599
             raise _model_unavailable(
                 "http_status",
                 retryable=retryable,
-                details={"http_status": error.code},
+                details={
+                    "http_status": error.code,
+                    **_request_timing(started_at, failure_phase),
+                },
                 suggested_action=(
                     "稍后重试或检查 Provider 配额"
                     if retryable
@@ -85,7 +94,10 @@ class HttpModelTransport:
             raise _model_unavailable(
                 "timeout",
                 retryable=True,
-                details={"timeout_seconds": timeout_seconds},
+                details={
+                    "timeout_seconds": timeout_seconds,
+                    **_request_timing(started_at, failure_phase),
+                },
                 suggested_action="稍后重试或调高模型超时配置",
             ) from error
         except URLError as error:
@@ -93,21 +105,28 @@ class HttpModelTransport:
             raise _model_unavailable(
                 failure_kind,
                 retryable=True,
-                details={"timeout_seconds": timeout_seconds}
-                if failure_kind == "timeout"
-                else {},
+                details={
+                    **(
+                        {"timeout_seconds": timeout_seconds}
+                        if failure_kind == "timeout"
+                        else {}
+                    ),
+                    **_request_timing(started_at, failure_phase),
+                },
                 suggested_action="检查网络和 Provider 可用性后重试",
             ) from error
         except OSError as error:
             raise _model_unavailable(
                 "connection",
                 retryable=True,
+                details=_request_timing(started_at, failure_phase),
                 suggested_action="检查网络和 Provider 可用性后重试",
             ) from error
         except json.JSONDecodeError as error:
             raise _model_unavailable(
                 "invalid_json",
                 retryable=True,
+                details=_request_timing(started_at, failure_phase),
                 suggested_action="稍后重试或检查 Provider 兼容性",
             ) from error
         if not isinstance(payload, dict):
@@ -152,7 +171,12 @@ class OpenAICompatiblePlanner:
         for repair_count in range(2):
             payload: object | None = None
             try:
-                response, provider_retry_count = self._post_with_retry(
+                (
+                    response,
+                    provider_retry_count,
+                    provider_latency_ms,
+                    provider_attempt_count,
+                ) = self._post_with_retry(
                     self._request_body(goal, observation, round_index, repair_error)
                 )
                 payload = _extract_decision_payload(response)
@@ -161,6 +185,8 @@ class OpenAICompatiblePlanner:
                     decision,
                     repair_count=repair_count,
                     provider_retry_count=provider_retry_count,
+                    provider_latency_ms=provider_latency_ms,
+                    provider_attempt_count=provider_attempt_count,
                 )
             except MobileAgentError as error:
                 if error.code != "MODEL_OUTPUT_INVALID":
@@ -193,12 +219,18 @@ class OpenAICompatiblePlanner:
                 category=ErrorCategory.VALIDATION,
                 message="目标必须是 1 到 500 字符的文本",
             )
-        response, _ = self._post_with_retry(self._goal_compile_request_body(goal.strip()))
+        response, _, _, _ = self._post_with_retry(
+            self._goal_compile_request_body(goal.strip())
+        )
         payload = _extract_decision_payload(response)
         return model_goal_spec(goal.strip(), payload, self.compiler_id)
 
-    def _post_with_retry(self, body: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    def _post_with_retry(
+        self, body: dict[str, Any]
+    ) -> tuple[dict[str, Any], int, int, int]:
+        request_started_at = time.monotonic()
         for retry_count in range(2):
+            attempt_started_at = time.monotonic()
             try:
                 return (
                     self._transport.post_json(
@@ -208,16 +240,24 @@ class OpenAICompatiblePlanner:
                         self._config.timeout_seconds,
                     ),
                     retry_count,
+                    _elapsed_ms(request_started_at),
+                    retry_count + 1,
                 )
             except MobileAgentError as error:
                 mapped = error
             except TimeoutError:
                 mapped = _model_unavailable(
-                    "timeout", retryable=True, suggested_action="稍后重试"
+                    "timeout",
+                    retryable=True,
+                    details={"failure_phase": "transport"},
+                    suggested_action="稍后重试",
                 )
             except OSError:
                 mapped = _model_unavailable(
-                    "connection", retryable=True, suggested_action="检查网络后重试"
+                    "connection",
+                    retryable=True,
+                    details={"failure_phase": "transport"},
+                    suggested_action="检查网络后重试",
                 )
             if (
                 mapped.code == "MODEL_UNAVAILABLE"
@@ -233,7 +273,18 @@ class OpenAICompatiblePlanner:
                     retryable=mapped.retryable,
                     outcome=mapped.outcome,
                     suggested_action=mapped.suggested_action,
-                    details={**mapped.details, "provider_retry_count": retry_count},
+                    details={
+                        **mapped.details,
+                        "failure_phase": mapped.details.get(
+                            "failure_phase", "transport"
+                        ),
+                        "elapsed_ms": mapped.details.get(
+                            "elapsed_ms", _elapsed_ms(attempt_started_at)
+                        ),
+                        "total_elapsed_ms": _elapsed_ms(request_started_at),
+                        "provider_attempt_count": retry_count + 1,
+                        "provider_retry_count": retry_count,
+                    },
                 ) from mapped
             raise mapped
         raise AssertionError("bounded provider retry loop exhausted")
@@ -444,6 +495,21 @@ def _model_unavailable(
         suggested_action=suggested_action,
         details={"failure_kind": failure_kind, **(details or {})},
     )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    """Return a non-negative monotonic duration in whole milliseconds."""
+
+    return max(0, round((time.monotonic() - started_at) * 1000))
+
+
+def _request_timing(started_at: float, failure_phase: str) -> dict[str, object]:
+    """Build bounded timing diagnostics for a Provider transport failure."""
+
+    return {
+        "failure_phase": failure_phase,
+        "elapsed_ms": _elapsed_ms(started_at),
+    }
 
 
 def _repair_feedback(error: MobileAgentError) -> dict[str, Any]:

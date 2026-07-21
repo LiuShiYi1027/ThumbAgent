@@ -4,7 +4,7 @@
 
 ## 当前进展
 
-项目已完成至 ITER-0040 MCP Skills Developer Preview。使用 Python 3.11+：
+项目已完成至 ITER-0041 Live Agent Reliability。使用 Python 3.11+：
 
 ```bash
 make check
@@ -14,6 +14,22 @@ make run
 Runtime 默认监听 `127.0.0.1:8765`，提供 `/v1/health`、`/v1/devices` 和 `POST /v1/devices/{device_id}/observe`。
 
 ## MCP Skills 开发者预览
+
+在 macOS + Codex 桌面端进行本地真机验收时，可以使用一键脚本。运行前请完全退出 Codex/ChatGPT；
+脚本会根据模型配置静默读取模型 Key、为本次 Runtime 生成新的短期 token、刷新 `mobile-agent` MCP 配置、
+启动 Runtime，并在就绪后重新打开 Codex：
+
+```bash
+./scripts/run-mcp-preview.zsh
+```
+
+模型 Key 只进入 Runtime 进程环境，不写入仓库或脚本输出。脚本保持前台运行，按 `Ctrl+C` 停止
+Runtime。Codex 打开后必须新建对话；已存在的线程不会动态挂载刚注册的 MCP Tools。仅检查 Python、
+ADB、Codex 和模型配置路径而不读取密钥或修改 MCP 配置时，使用：
+
+```bash
+./scripts/run-mcp-preview.zsh --check
+```
 
 为了让 Web、CLI 和 MCP 共享同一个 Runtime，请使用显式本地 token 启动服务：
 

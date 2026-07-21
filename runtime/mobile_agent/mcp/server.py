@@ -113,11 +113,18 @@ class McpServer:
             if is_notification:
                 return None
             cursor = params.get("cursor")
-            if set(params) - {"cursor"} or (cursor is not None and cursor != ""):
+            metadata = params.get("_meta")
+            if (
+                set(params) - {"cursor", "_meta"}
+                or (cursor is not None and cursor != "")
+                or (metadata is not None and not isinstance(metadata, dict))
+            ):
                 return _error(request_id, -32602, "Invalid params")
             return _result(
                 request_id,
-                {"tools": [tool.to_dict(self._schemas) for tool in TOOLS]},
+                {
+                    "tools": [tool.to_dict(self._schemas) for tool in TOOLS]
+                },
             )
         if method == "tools/call":
             if is_notification:

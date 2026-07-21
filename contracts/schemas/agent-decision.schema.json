@@ -25,7 +25,9 @@
     },
     "source": { "enum": ["planner", "rule", "llm"] },
     "repair_count": { "type": "integer", "minimum": 0, "maximum": 1 },
-    "provider_retry_count": { "type": "integer", "minimum": 0, "maximum": 1 }
+    "provider_retry_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "provider_latency_ms": { "type": "integer", "minimum": 0 },
+    "provider_attempt_count": { "type": "integer", "minimum": 0, "maximum": 2 }
   },
   "allOf": [
     {

@@ -77,6 +77,14 @@ V1 Agent 默认 deadline 为 600 秒，可配置范围 1–1800 秒，从任务�
 ITER-0037 的异步日志快照使用相同 Task deadline，默认 60 秒。取消或 Deadline 发生在 ADB 调用
 期间时不强杀设备命令；调用返回后停止后续步骤，并保留已经生成的 Artifact 与完成步骤证据。
 
+ITER-0041 起，非流式 OpenAI-compatible 请求按 `response_headers`、`response_body` 和
+`response_decode` 记录可观察失败阶段，并记录毫秒耗时、尝试与重试次数。标准库 Transport 无法可靠
+拆分 DNS、TCP、TLS 和首 Token，因此报告不得声称这些更细阶段。Provider 重试仍只发生在当前任务、
+当前 Planner 决策内，不授权客户端在任务终态后自动创建替代任务。
+
+语义点击优先使用目标中心；若中心落入顶部或底部系统安全区，但目标 bounds 仍有安全可点击部分，
+Runtime 将点击点约束到该安全交集的中部。目标完全位于安全区时继续在派发前拒绝，不产生设备副作用。
+
 性能基线比较只消费两个已经进入 succeeded 终态的 TaskRun，不参与设备动作重试、取消或恢复。
 不同设备、失败任务和时间倒序在读取阶段明确拒绝；Device Session 不同作为结果事实公开，不被
 静默当作同一连续测量。两点趋势使用公开噪声阈值，不能自动升级为性能回退结论。

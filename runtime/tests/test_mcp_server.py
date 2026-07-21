@@ -75,6 +75,19 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual("2025-06-18", older["result"]["protocolVersion"])
         self.assertEqual(PROTOCOL_VERSION, unknown["result"]["protocolVersion"])
 
+    def test_tools_list_accepts_standard_request_metadata(self) -> None:
+        _ready(self.server)
+
+        response = self.server.handle(
+            _request(
+                2,
+                "tools/list",
+                {"_meta": {"progressToken": "codex-startup"}},
+            )
+        )
+
+        self.assertEqual(11, len(response["result"]["tools"]))
+
     def test_lists_only_goal_level_tools_with_annotations(self) -> None:
         _ready(self.server)
 
@@ -89,6 +102,7 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(run_agent["annotations"]["readOnlyHint"])
         self.assertEqual("forbidden", run_agent["execution"]["taskSupport"])
         self.assertEqual(True, run_agent["inputSchema"]["properties"]["confirmed"]["const"])
+        self.assertIn("Do not automatically submit a replacement task", run_agent["description"])
 
     def test_calls_readiness_and_returns_structured_content(self) -> None:
         _ready(self.server)

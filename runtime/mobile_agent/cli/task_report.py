@@ -88,8 +88,12 @@ def _safe_error_diagnostics(details: object) -> str:
         return ""
     scalar_keys = (
         "failure_kind",
+        "failure_phase",
         "http_status",
         "timeout_seconds",
+        "elapsed_ms",
+        "total_elapsed_ms",
+        "provider_attempt_count",
         "provider_retry_count",
         "match_count",
         "tap_y",
@@ -185,6 +189,8 @@ def _step_decision(step: dict[str, Any]) -> str:
     confidence = decision.get("confidence")
     repair_count = decision.get("repair_count")
     provider_retry_count = decision.get("provider_retry_count")
+    provider_latency_ms = decision.get("provider_latency_ms")
+    provider_attempt_count = decision.get("provider_attempt_count")
     parts = []
     if isinstance(skill_id, str) and skill_id:
         parts.append(skill_id)
@@ -204,6 +210,21 @@ def _step_decision(step: dict[str, Any]) -> str:
         and provider_retry_count > 0
     ):
         parts.append(f"provider_retry_count={provider_retry_count}")
+    if (
+        isinstance(provider_attempt_count, int)
+        and not isinstance(provider_attempt_count, bool)
+        and provider_attempt_count > 0
+    ):
+        parts.append(f"provider_attempt_count={provider_attempt_count}")
+    if (
+        isinstance(provider_latency_ms, int)
+        and not isinstance(provider_latency_ms, bool)
+        and provider_latency_ms >= 0
+        and isinstance(provider_attempt_count, int)
+        and not isinstance(provider_attempt_count, bool)
+        and provider_attempt_count > 0
+    ):
+        parts.append(f"provider_latency_ms={provider_latency_ms}")
     if isinstance(reason, str) and reason:
         parts.append(reason)
     return " · ".join(parts)

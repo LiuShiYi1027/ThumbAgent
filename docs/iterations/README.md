@@ -1,7 +1,7 @@
 # 迭代索引
 
 > 状态：Active
-> 更新日期：2026-07-15
+> 更新日期：2026-07-21
 
 | 迭代 | 名称 | 状态 | 目标 |
 | --- | --- | --- | --- |
@@ -45,5 +45,6 @@
 | [ITER-0038](./0038-android-performance-snapshot/plan.md) | Android Performance Snapshot | Completed | 采集并持久化不含进程明细的聚合 CPU、内存、电池和系统负载快照 |
 | [ITER-0039](./0039-performance-baseline-comparison/plan.md) | Performance Baseline Comparison | Completed | 比较同一设备的两次聚合性能快照并展示可解释趋势 |
 | [ITER-0040](./0040-mcp-skills-developer-preview/plan.md) | MCP Skills Developer Preview | Completed | 让外部 AI Agent 通过本地 MCP stdio 调用目标级 Mobile Skills |
+| [ITER-0041](./0041-live-agent-reliability/plan.md) | Live Agent Reliability | Completed | 提升真实模型请求诊断与语义点击在系统安全区边缘的可靠性 |
 
 迭代流程和文档要求见[文档与迭代规范](../documentation-guide.md)。
