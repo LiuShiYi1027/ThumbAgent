@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0.0",
+  "suite_id": "android.settings.smoke.v1",
+  "runs_per_scenario": 1,
+  "scenarios": [
+    {
+      "schema_version": "1.0.0",
+      "scenario_id": "settings.bluetooth.v1",
+      "goal": "打开设置，找到蓝牙，点击蓝牙，进入蓝牙设置页面。完成时停留在蓝牙设置页面，不要切换蓝牙开关或修改任何其他设置。",
+      "acceptance": {
+        "foreground_app_id": "com.android.settings",
+        "expected_selector": {
+          "strategy": "text",
+          "value": "蓝牙",
+          "match": "exact",
+          "package": "com.android.settings"
+        }
+      },
+      "forbidden_tools": [],
+      "max_rounds": 6
+    },
+    {
+      "schema_version": "1.0.0",
+      "scenario_id": "settings.display-brightness.v1",
+      "goal": "打开设置，找到显示和亮度，点击显示和亮度，进入显示和亮度页面。不要修改亮度或其他设置。",
+      "acceptance": {
+        "foreground_app_id": "com.android.settings",
+        "expected_selector": {
+          "strategy": "text",
+          "value": "显示和亮度",
+          "match": "exact",
+          "package": "com.android.settings"
+        }
+      },
+      "forbidden_tools": [],
+      "max_rounds": 6
+    },
+    {
+      "schema_version": "1.0.0",
+      "scenario_id": "settings.battery.v1",
+      "goal": "打开设置，找到电池，点击电池，进入电池设置页面。不要修改省电模式或其他设置。",
+      "acceptance": {
+        "expected_selector": {
+          "strategy": "text",
+          "value": "电池",
+          "match": "exact"
+        }
+      },
+      "forbidden_tools": [],
+      "max_rounds": 6
+    }
+  ]
+}

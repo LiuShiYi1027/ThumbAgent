@@ -7,10 +7,18 @@ from mobile_agent.domain.errors import ErrorCategory, ErrorOutcome, MobileAgentE
 
 
 class PolicyEngine:
-    def authorize(self, risk: RiskLevel, confirmed: bool = False) -> None:
+    def authorize(
+        self,
+        risk: RiskLevel,
+        confirmed: bool = False,
+        *,
+        high_risk_authorized: bool = False,
+    ) -> None:
         if risk is RiskLevel.LOW:
             return
         if risk is RiskLevel.MEDIUM and confirmed:
+            return
+        if risk is RiskLevel.HIGH and confirmed and high_risk_authorized:
             return
         if risk is RiskLevel.MEDIUM:
             raise MobileAgentError(
@@ -25,4 +33,3 @@ class PolicyEngine:
             message="当前策略禁止执行该设备动作",
             outcome=ErrorOutcome.REJECTED,
         )
-

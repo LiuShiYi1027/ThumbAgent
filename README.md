@@ -4,7 +4,8 @@
 
 ## 当前进展
 
-项目已完成至 ITER-0041 Live Agent Reliability。使用 Python 3.11+：
+项目已完成 ITER-0045 Scoped App Removal：独立确认数据删除影响后，安全卸载非系统应用并验证包缺失。
+使用 Python 3.11+：
 
 ```bash
 make check
@@ -48,7 +49,7 @@ MOBILE_AGENT_API_TOKEN=<same-local-random-token> \
 python3.11 -m mobile_agent.mcp
 ```
 
-MCP 提供十一项目标级 Tools，覆盖就绪诊断、设备列表/检查、Agent 异步任务、任务查询/取消、脱敏日志、
+MCP 提供目标级 Tools，覆盖就绪诊断、设备与已安装应用检查、Agent 异步任务、任务查询/取消、脱敏日志、
 聚合性能快照和性能比较。它不暴露 ADB、任意 Shell 或 `input.tap` 等原子输入 Tool。Agent 和日志调用
 只有在 MCP Host 已向用户展示参数并获得确认后，才允许传入 `confirmed=true`。
 
@@ -66,6 +67,18 @@ PYTHONPATH=runtime python3.11 -m mobile_agent.cli.runtime_diagnose
 ```bash
 PYTHONPATH=runtime python3.11 -m mobile_agent.cli.device_inspect <device_id>
 ```
+
+MCP 还提供只读的 `mobile_list_apps` 与 `mobile_inspect_app`，用于有界列出应用标识和查询单应用的
+版本、安装来源与启用状态。它们不返回 APK 路径、签名、权限或原始 `dumpsys`，也不会启动或修改应用。
+
+本地 APK 安装只接受 `<data-dir>/apks` 目录中的单个 `.apk`。外部 Agent 必须先调用
+`mobile_prepare_apk_install` 获取包含文件名、大小、SHA-256、Manifest package id 和替换影响的短期
+Approval；MCP Host 向用户展示该摘要并取得明确确认后，才能调用 `mobile_install_apk`。Approval
+十分钟过期且默认只能使用一次。Runtime 不下载 URL，不接受 split APK 或任意 ADB 参数。
+
+应用卸载使用独立的 `mobile_prepare_app_uninstall` → `mobile_uninstall_app` 两阶段流程。Prepare
+只读返回应用版本、系统应用判定和数据删除影响；系统应用或属性未知的应用直接拒绝。用户对该摘要
+重新明确确认后才能提交异步卸载任务。失败或结果未知时不得自动重试。
 
 显式确认后采集最近日志快照（需传入 Runtime 启动时生成的本地 API token）：
 
@@ -174,6 +187,21 @@ ITER-0025 优化模型侧 Observation：过滤无语义布局节点，优先保�
 ITER-0026 新增严格 Agent ToolCall Contract、模型无效参数的一次有界修复和失败轮次证据保留。真机已完成“进入显示和亮度”的多轮模型闭环。
 
 ITER-0027 建立目标驱动的在线 Agent 评测基础：真实模型每次都面对当前设备界面重新规划，评测只约束目标、最终状态、禁用 Tool 和轮次预算，不比较固定动作路径。已完成的 `agent.run` 可通过 `POST /v1/tasks/{task_id}/evaluate` 评测，场景示例位于 [agent-evaluation-scenario.example.json](./docs/examples/agent-evaluation-scenario.example.json)。
+
+ITER-0042 将多个路径无关场景组织为版本化 Suite。先通过 Web 或 MCP 分别执行 Suite 中的目标，
+再把已完成的 task_id 交给只读聚合 CLI；该命令只调用已有评测 API，不会提交或重放设备动作：
+
+```bash
+./scripts/report-mcp-evaluation.zsh \
+  --suite evaluations/android-settings-smoke-v1.json \
+  --task settings.bluetooth.v1=task_<id> \
+  --task settings.display-brightness.v1=task_<id> \
+  --task settings.battery.v1=task_<id>
+```
+
+报告展示总成功率、逐场景成功率、耗时 p50/p95、平均轮次和 Tool 数，以及 Provider 重试、
+`NO_PROGRESS`、`MODEL_UNAVAILABLE` 和策略违规统计。Suite 定义目标与独立成功条件，不包含固定动作路径。
+脚本只读取 Codex 中已注册的 `mobile-agent` 本地连接信息，不打印 token，也不提交设备任务。
 
 ITER-0028 强化可靠性：无副作用的目标定位和 `finish` 验证失败可以作为 failed round 反馈模型继续规划；`finish` 可组合前台 app/activity 和 UI Selector；顶部系统区与底部手势区点击会在派发前被拦截。Provider 超时、HTTP、连接和响应格式错误会分类记录，并对 retryable 模型请求最多重试一次；无效 Selector 只展示字段级脱敏诊断。
 模型省略非安全关键的 `reason` 时，Runtime 会生成固定审计说明，不会为此发起额外模型修复请求；Tool、Selector、Policy 和完成条件仍保持严格校验。

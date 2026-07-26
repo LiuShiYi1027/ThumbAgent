@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/apk-install-approval.schema.json",
+  "title": "APK Install Approval",
+  "type": "object",
+  "required": ["schema_version", "approval_id", "device_id", "filename", "size_bytes", "sha256", "app_id", "replace_existing", "prepared_at", "expires_at", "confirmation_required"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+    "device_id": { "type": "string" },
+    "filename": { "type": "string", "maxLength": 256 },
+    "size_bytes": { "type": "integer", "minimum": 1, "maximum": 536870912 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "app_id": { "type": "string" },
+    "replace_existing": { "type": "boolean" },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "confirmation_required": { "const": true }
+  },
+  "additionalProperties": false
+}

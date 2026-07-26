@@ -121,6 +121,39 @@ class CapabilityCatalog:
                     "不保存进程、应用或 dumpsys 原始输出",
                 ),
             ),
+            CapabilityDefinition(
+                "app.inspect@1",
+                RiskLevel.LOW,
+                Idempotency.SAFE,
+                CapabilityVerification.SUPPORTED,
+                ("设备在线且已授权调试",),
+                (
+                    "仅返回应用标识、版本、安装来源和启用状态",
+                    "应用清单单次最多返回 500 项，不返回 APK 路径或签名数据",
+                ),
+            ),
+            CapabilityDefinition(
+                "app.install@1",
+                RiskLevel.HIGH,
+                Idempotency.UNSAFE,
+                CapabilityVerification.REQUIRED,
+                ("设备在线且已授权调试", "范围绑定 Approval", "用户明确确认"),
+                (
+                    "仅安装 Runtime 授权目录中的单个 APK",
+                    "不支持 URL、split APK、降级、权限授予或任意 ADB 参数",
+                ),
+            ),
+            CapabilityDefinition(
+                "app.uninstall@1",
+                RiskLevel.HIGH,
+                Idempotency.UNSAFE,
+                CapabilityVerification.REQUIRED,
+                ("设备在线且已授权调试", "范围绑定 Approval", "用户明确确认"),
+                (
+                    "只允许卸载经预检确认的非系统应用",
+                    "默认删除应用数据；超时或断连时不自动重试",
+                ),
+            ),
         )
         self._definitions = {
             definition.capability: definition for definition in definitions
@@ -148,7 +181,7 @@ class CapabilityDescriptor:
             "risk": self.definition.risk.value,
             "idempotency": self.definition.idempotency.value,
             "verification": self.definition.verification.value,
-            "confirmation_required": self.definition.risk is RiskLevel.MEDIUM,
+            "confirmation_required": self.definition.risk in {RiskLevel.MEDIUM, RiskLevel.HIGH},
             "tools": list(self.tools),
             "requirements": list(self.definition.requirements),
             "limitations": list(self.definition.limitations),

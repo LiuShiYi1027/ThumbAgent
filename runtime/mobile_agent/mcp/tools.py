@@ -20,6 +20,7 @@ class McpToolDefinition:
     schema_key: str
     read_only: bool
     idempotent: bool
+    destructive: bool = False
 
     def to_dict(self, schemas: dict[str, dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -30,7 +31,7 @@ class McpToolDefinition:
             "annotations": {
                 "title": self.title,
                 "readOnlyHint": self.read_only,
-                "destructiveHint": False,
+                "destructiveHint": self.destructive,
                 "idempotentHint": self.idempotent,
                 "openWorldHint": False,
             },
@@ -61,6 +62,56 @@ TOOLS = (
         "Inspect one device's capabilities, risk, confirmation requirements and current availability without observing its screen.",
         "device",
         True,
+        True,
+    ),
+    McpToolDefinition(
+        "mobile_list_apps",
+        "List installed applications",
+        "List a bounded set of installed application identifiers. Does not launch, install, remove, or modify applications.",
+        "app_list",
+        True,
+        True,
+    ),
+    McpToolDefinition(
+        "mobile_inspect_app",
+        "Inspect installed application",
+        "Read privacy-minimized version, installer and enabled metadata for one installed application.",
+        "app_inspect",
+        True,
+        True,
+    ),
+    McpToolDefinition(
+        "mobile_prepare_apk_install",
+        "Prepare local APK installation",
+        "Read and validate one APK inside the Runtime-authorized APK directory. Returns a short-lived scoped approval summary and performs no installation.",
+        "apk_install_prepare",
+        True,
+        False,
+    ),
+    McpToolDefinition(
+        "mobile_install_apk",
+        "Install approved local APK",
+        "Submit a High-risk APK installation using a short-lived approval_id. The MCP host must show the exact approval summary and obtain explicit user confirmation before confirmed=true.",
+        "apk_install_submit",
+        False,
+        False,
+        True,
+    ),
+    McpToolDefinition(
+        "mobile_prepare_app_uninstall",
+        "Prepare application uninstall",
+        "Read and validate one installed non-system application. Returns a short-lived summary including data deletion impact and performs no uninstall.",
+        "app_uninstall_prepare",
+        True,
+        False,
+    ),
+    McpToolDefinition(
+        "mobile_uninstall_app",
+        "Uninstall approved application",
+        "Submit a High-risk application uninstall using a short-lived approval_id. The MCP host must show the exact data impact summary and obtain new explicit user confirmation before confirmed=true. Do not automatically retry a failed or unknown-outcome uninstall.",
+        "app_uninstall_submit",
+        False,
+        False,
         True,
     ),
     McpToolDefinition(

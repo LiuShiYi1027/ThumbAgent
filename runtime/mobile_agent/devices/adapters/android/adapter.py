@@ -6,9 +6,15 @@ import asyncio
 import struct
 import uuid
 import re
+from pathlib import Path
 from datetime import datetime, timezone
 
-from mobile_agent.devices.adapters.android.adb import AdbRunner
+from mobile_agent.devices.adapters.android.adb import AdbRunner, AsyncProcessRunner
+from mobile_agent.devices.adapters.android.app_parser import (
+    parse_package_details,
+    parse_package_list,
+    valid_app_id,
+)
 from mobile_agent.devices.adapters.android.parser import (
     AdbDeviceRecord,
     extract_ui_xml,
@@ -19,6 +25,7 @@ from mobile_agent.devices.adapters.android.performance_parser import (
     parse_performance_snapshot,
 )
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
+from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -40,8 +47,11 @@ def _now() -> str:
 class AndroidDeviceAdapter:
     """Discover Android devices and normalize them into Device Contracts."""
 
-    def __init__(self, runner: AdbRunner) -> None:
+    def __init__(self, runner: AdbRunner, install_runner: AdbRunner | None = None) -> None:
         self._runner = runner
+        self._install_runner = install_runner or AdbRunner(
+            runner.executable, AsyncProcessRunner(timeout_seconds=180.0)
+        )
 
     async def list_devices(self) -> list[Device]:
         result = await self._runner.run("devices", "-l")
@@ -73,6 +83,9 @@ class AndroidDeviceAdapter:
                 "input.text@1",
                 "logs.collect@1",
                 "performance.snapshot@1",
+                "app.inspect@1",
+                "app.install@1",
+                "app.uninstall@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(
@@ -381,6 +394,94 @@ class AndroidDeviceAdapter:
                 )
             results.append(result.stdout_text)
         return parse_performance_snapshot(device_id, *results)
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        """List package identifiers using a fixed package-manager command."""
+
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s", serial, "shell", "pm", "list", "packages", "--user", "0"
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="APP_INVENTORY_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="无法读取设备应用清单",
+                retryable=True,
+            )
+        return parse_package_list(result.stdout_text)
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        """Inspect one validated package without exposing raw dumpsys output."""
+
+        if not valid_app_id(app_id):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="无效的应用标识",
+            )
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s", serial, "shell", "dumpsys", "package", app_id
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="APP_INVENTORY_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="无法读取应用详情",
+                retryable=True,
+            )
+        if f"Package [{app_id}]" not in result.stdout_text:
+            raise MobileAgentError(
+                code="APP_NOT_FOUND",
+                category=ErrorCategory.DEVICE,
+                message="设备上未安装该应用",
+            )
+        return parse_package_details(app_id, result.stdout_text)
+
+    async def install_apk(
+        self, device_id: str, apk_path: Path, replace_existing: bool
+    ) -> None:
+        """Install one already inspected APK with a fixed argument shape."""
+
+        serial = self._serial_from_device_id(device_id)
+        arguments = ["-s", serial, "install"]
+        if replace_existing:
+            arguments.append("-r")
+        arguments.append(str(apk_path))
+        result = await self._install_runner.run(*arguments)
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="APK_INSTALL_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备拒绝安装 APK",
+                suggested_action="检查 APK 签名、版本兼容性、设备空间和系统安装策略",
+            )
+
+    async def uninstall_app(
+        self, device_id: str, app_id: str, keep_data: bool
+    ) -> None:
+        """Uninstall one validated package with a fixed argument shape."""
+
+        if not valid_app_id(app_id):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="无效的应用标识",
+            )
+        serial = self._serial_from_device_id(device_id)
+        arguments = ["-s", serial, "uninstall"]
+        if keep_data:
+            arguments.append("-k")
+        arguments.append(app_id)
+        result = await self._install_runner.run(*arguments)
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="APP_UNINSTALL_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备拒绝卸载应用",
+                suggested_action="检查应用是否受设备管理策略保护，并只读确认当前安装状态",
+            )
 
     async def _key_event(self, device_id: str, key_code: str) -> None:
         serial = self._serial_from_device_id(device_id)

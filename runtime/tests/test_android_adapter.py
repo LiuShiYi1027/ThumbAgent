@@ -49,6 +49,9 @@ locked unauthorized usb:1-1
                 "input.text@1",
                 "logs.collect@1",
                 "performance.snapshot@1",
+                "app.inspect@1",
+                "app.install@1",
+                "app.uninstall@1",
             ),
             devices[0].capabilities,
         )

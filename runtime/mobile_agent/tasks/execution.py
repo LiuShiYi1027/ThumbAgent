@@ -44,7 +44,13 @@ _TERMINAL = frozenset(
 )
 
 _SUPPORTED_TASK_TYPES = frozenset(
-    {"agent.run", "device.logs.collect", "device.performance.snapshot"}
+    {
+        "agent.run",
+        "device.logs.collect",
+        "device.performance.snapshot",
+        "app.install",
+        "app.uninstall",
+    }
 )
 
 

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-inventory-request.schema.json",
+  "title": "App Inventory Request",
+  "type": "object",
+  "required": ["device_id"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 200 },
+    "prefix": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.]+$" }
+  },
+  "additionalProperties": false
+}

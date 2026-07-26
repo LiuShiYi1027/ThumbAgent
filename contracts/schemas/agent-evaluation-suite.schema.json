@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/agent-evaluation-suite/v1.json",
+  "title": "AgentEvaluationSuite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite_id", "runs_per_scenario", "scenarios"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "suite_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,119}$" },
+    "runs_per_scenario": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "agent-evaluation-scenario.schema.json" }
+    }
+  }
+}

@@ -97,6 +97,12 @@ Prompt 或模型变更至少比较成功率、平均步数、耗时、人工介�
 - MCP 必须覆盖：初始化顺序、协议版本协商、Tool Catalog、严格输入、确认缺失、未知 Tool、限流、
   structured error、stdout framing 和 MCP→API→Runtime→TaskStore 跨层链路。默认测试使用无 socket
   Handler Transport，不依赖已启动 Runtime 或网络权限。
+- High 风险包管理必须覆盖：Prepare 零设备写动作、范围绑定 Approval、独立明确确认、Capability
+  与 Policy 拒绝、固定平台参数、确认后对象变化、后置验证、超时 unknown outcome 和禁止自动重试。
+  卸载还必须覆盖系统应用保护与数据保留影响摘要。
+- 在线评测 Suite 必须保证 scenario_id 唯一、每个场景覆盖声明的运行次数、task_id 不重复，并同时
+  汇总总/分场景成功率、耗时分位数、Provider 重试、无进展、模型不可用和策略违规。聚合过程不得
+  调用设备、模型或重放 TaskRun 动作。
 
 ## 7. Bug 回归
 

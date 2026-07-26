@@ -49,6 +49,40 @@ class RuntimeApiClient:
     def inspect_device(self, device_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/devices/{quote(device_id, safe='')}/inspection")
 
+    def list_apps(self, device_id: str, limit: int, prefix: str | None) -> dict[str, Any]:
+        query: dict[str, str | int] = {"limit": limit}
+        if prefix is not None:
+            query["prefix"] = prefix
+        return self._request(
+            "GET", f"/v1/devices/{quote(device_id, safe='')}/apps?{urlencode(query)}"
+        )
+
+    def inspect_app(self, device_id: str, app_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/v1/devices/{quote(device_id, safe='')}/apps/{quote(app_id, safe='')}",
+        )
+
+    def prepare_apk_install(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/apps/install/prepare", arguments)
+
+    def install_apk(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST", "/v1/tasks/app.install/async", arguments,
+            idempotent_submission=True,
+        )
+
+    def prepare_app_removal(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/apps/uninstall/prepare", arguments)
+
+    def uninstall_app(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/app.uninstall/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
     def submit_agent(self, arguments: dict[str, Any]) -> dict[str, Any]:
         body = {
             "device_id": arguments["device_id"],

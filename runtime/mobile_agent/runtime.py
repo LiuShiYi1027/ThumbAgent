@@ -21,6 +21,8 @@ from mobile_agent.devices.lease import DeviceLeaseManager
 from mobile_agent.devices.session import SessionTrackingDeviceAdapter
 from mobile_agent.devices.unavailable import UnavailableDeviceAdapter
 from mobile_agent.domain.device import ConnectionState, Device
+from mobile_agent.domain.apk import ApkInspector, ApkInstallApprovalStore
+from mobile_agent.domain.app_removal import AppRemovalApprovalStore
 from mobile_agent.domain.capability import (
     CapabilityAvailability,
     CapabilityCatalog,
@@ -57,6 +59,9 @@ from mobile_agent.providers import build_planner_from_settings
 from mobile_agent.providers import load_model_provider_settings
 from mobile_agent.providers import model_provider_status as redacted_model_provider_status
 from mobile_agent.skills.open_app import OpenAppSkill
+from mobile_agent.skills.app_inventory import AppInspectSkill, AppListSkill
+from mobile_agent.skills.apk_install import ApkInstallSkill
+from mobile_agent.skills.app_removal import AppRemovalSkill
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
@@ -70,10 +75,15 @@ from mobile_agent.tasks.execution import (
 from mobile_agent.tasks.runner import TaskRunner
 from mobile_agent.tasks.device_logs import DeviceLogsTaskRunner
 from mobile_agent.tasks.device_performance import DevicePerformanceTaskRunner
+from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
+from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
 from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
 from mobile_agent.tools.performance_capture import DevicePerformanceCaptureTool
+from mobile_agent.tools.app_inventory import AppInventoryTool
+from mobile_agent.tools.apk_install import ApkInstallTool
+from mobile_agent.tools.app_removal import AppRemovalTool
 
 
 def _utc_now() -> str:
@@ -97,6 +107,9 @@ class RuntimeService:
         device_gateway_error: MobileAgentError | None = None,
         gateway_platform: str = "android",
         gateway_transport: str = "adapter",
+        apk_root: Path | None = None,
+        apk_approval_store: ApkInstallApprovalStore | None = None,
+        app_removal_approval_store: AppRemovalApprovalStore | None = None,
     ) -> None:
         self._adapter = (
             adapter
@@ -124,6 +137,26 @@ class RuntimeService:
         self._device_performance_task_runner = DevicePerformanceTaskRunner(
             self._device_performance
         )
+        self._app_inventory_tool = AppInventoryTool(
+            self._adapter, self._tool_registry, self._policy
+        )
+        self._app_list = AppListSkill(self._app_inventory_tool)
+        self._app_inspect = AppInspectSkill(self._app_inventory_tool)
+        self._apk_inspector = ApkInspector(apk_root or artifacts.root.parent / "apks")
+        self._apk_approvals = apk_approval_store or ApkInstallApprovalStore()
+        self._apk_install_tool = ApkInstallTool(
+            self._adapter, self._tool_registry, self._policy, self._apk_inspector
+        )
+        self._apk_install = ApkInstallSkill(self._apk_install_tool)
+        self._apk_install_task_runner = ApkInstallTaskRunner(self._apk_install)
+        self._app_removal_approvals = (
+            app_removal_approval_store or AppRemovalApprovalStore()
+        )
+        self._app_removal_tool = AppRemovalTool(
+            self._adapter, self._tool_registry, self._policy
+        )
+        self._app_removal = AppRemovalSkill(self._app_removal_tool)
+        self._app_removal_task_runner = AppRemovalTaskRunner(self._app_removal)
         self._open_app = OpenAppSkill(self._tools)
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
@@ -312,6 +345,265 @@ class RuntimeService:
             generated_at=_utc_now(),
             availability=availability,
             capabilities=descriptors,
+        ).to_dict()
+
+    async def list_installed_apps(
+        self, device_id: str, limit: int = 200, prefix: str | None = None
+    ) -> dict[str, Any]:
+        """Return a bounded, privacy-minimized application inventory."""
+
+        limit, prefix = AppInventoryTool.validate_list_request(limit, prefix)
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"skill_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            return (await self._app_list.list(device_id, limit, prefix)).to_dict()
+
+    async def inspect_installed_app(
+        self, device_id: str, app_id: str
+    ) -> dict[str, Any]:
+        """Return structured metadata for one installed application."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"skill_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            return (await self._app_inspect.invoke(device_id, app_id)).to_dict()
+
+    async def prepare_apk_install(
+        self,
+        device_id: str,
+        apk_path: str,
+        expected_app_id: str,
+        replace_existing: bool = False,
+    ) -> dict[str, Any]:
+        """Preflight a local APK and create a short-lived scoped Approval."""
+
+        expected_app_id = AppInventoryTool.validate_app_id(expected_app_id)
+        if not isinstance(replace_existing, bool):
+            raise MobileAgentError("INVALID_ARGUMENT", ErrorCategory.VALIDATION, "replace_existing 无效")
+        package = self._apk_inspector.inspect(apk_path)
+        if package.app_id != expected_app_id:
+            raise MobileAgentError(
+                "APK_PACKAGE_MISMATCH", ErrorCategory.VALIDATION,
+                "APK Manifest package 与预期应用标识不一致",
+                details={"manifest_app_id": package.app_id},
+            )
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"prepare_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            devices = await self._adapter.list_devices()
+            device = next((item for item in devices if item.device_id == device_id), None)
+            if device is None or "app.install@1" not in device.capabilities:
+                raise MobileAgentError(
+                    "CAPABILITY_UNAVAILABLE", ErrorCategory.CAPABILITY,
+                    "设备不支持 APK 安装", details={"capability": "app.install@1"},
+                )
+            installed = package.app_id in await self._adapter.list_installed_apps(device_id)
+        if installed and not replace_existing:
+            raise MobileAgentError(
+                "APP_ALREADY_INSTALLED", ErrorCategory.VALIDATION,
+                "目标应用已安装；如需升级必须显式允许替换",
+            )
+        if replace_existing and not installed:
+            raise MobileAgentError(
+                "APP_NOT_FOUND", ErrorCategory.VALIDATION,
+                "设备上没有可替换的目标应用",
+            )
+        return self._apk_approvals.create(
+            device_id, package, replace_existing
+        ).to_public_dict()
+
+    def submit_apk_install_task(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 300.0,
+    ) -> dict[str, Any]:
+        """Claim one scoped Approval and enqueue the High-risk installation."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED", ErrorCategory.POLICY,
+                "APK 安装需要用户对影响摘要进行明确确认",
+            )
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT", ErrorCategory.VALIDATION,
+                "APK 安装必须提供 Idempotency-Key",
+            )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+        approval = self._apk_approvals.claim(approval_id, idempotency_key)
+        goal = f"安装已批准的本地 APK：{approval.package.app_id}"
+
+        async def run_factory(
+            task_id: str, on_step: Any, is_cancelled: Any, deadline_exceeded: Any
+        ) -> TaskRun:
+            try:
+                session_id = await self._adapter.require_online_session(approval.device_id)
+                with self._device_leases.hold(
+                    approval.device_id, task_id, deadline_seconds + 30.0, session_id
+                ), self._adapter.bind_session(approval.device_id, session_id):
+                    self._task_executor.bind_device_session(task_id, session_id)
+                    task = await self._apk_install_task_runner.run(
+                        task_id, approval, confirmed, deadline_seconds,
+                        on_step, is_cancelled, deadline_exceeded,
+                    )
+                    return replace(task, device_session_id=session_id)
+            except MobileAgentError as error:
+                now = _utc_now()
+                return TaskRun(
+                    task_id, "app.install", approval.device_id, goal,
+                    TaskStatus.FAILED, now, now, (), {}, error.to_dict(),
+                    deadline_seconds=deadline_seconds,
+                )
+
+        fingerprint = hashlib.sha256(json.dumps({
+            "task_type": "app.install", "approval_id": approval.approval_id,
+            "device_id": approval.device_id, "sha256": approval.package.sha256,
+            "replace_existing": approval.replace_existing,
+            "deadline_seconds": deadline_seconds,
+        }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return self._task_executor.submit(
+            approval.device_id, goal, run_factory, self._task_store.save,
+            idempotency_key, fingerprint, deadline_seconds, task_type="app.install",
+        ).to_dict()
+
+    async def prepare_app_removal(
+        self, device_id: str, app_id: str, keep_data: bool = False
+    ) -> dict[str, Any]:
+        """Inspect one non-system app and create a scoped removal Approval."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        if not isinstance(keep_data, bool):
+            raise MobileAgentError(
+                "INVALID_ARGUMENT", ErrorCategory.VALIDATION, "keep_data 无效"
+            )
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"prepare_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            device = next(
+                (
+                    item
+                    for item in await self._adapter.list_devices()
+                    if item.device_id == device_id
+                ),
+                None,
+            )
+            if device is None or "app.uninstall@1" not in device.capabilities:
+                raise MobileAgentError(
+                    "CAPABILITY_UNAVAILABLE",
+                    ErrorCategory.CAPABILITY,
+                    "设备不支持应用卸载",
+                    details={"capability": "app.uninstall@1"},
+                )
+            app = await self._adapter.inspect_installed_app(device_id, app_id)
+        if app.system_app is not False:
+            raise MobileAgentError(
+                "SYSTEM_APP_PROTECTED",
+                ErrorCategory.POLICY,
+                "系统应用或系统属性未知的应用不允许卸载",
+                suggested_action="仅选择明确识别为非系统应用的测试包",
+            )
+        return self._app_removal_approvals.create(
+            device_id, app, keep_data
+        ).to_public_dict()
+
+    def submit_app_removal_task(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 180.0,
+    ) -> dict[str, Any]:
+        """Claim one scoped Approval and enqueue High-risk app removal."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "应用卸载需要用户对数据删除影响进行明确确认",
+            )
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT",
+                ErrorCategory.VALIDATION,
+                "应用卸载必须提供 Idempotency-Key",
+            )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+        approval = self._app_removal_approvals.claim(
+            approval_id, idempotency_key
+        )
+        goal = f"卸载已批准的应用：{approval.app.app_id}"
+
+        async def run_factory(
+            task_id: str, on_step: Any, is_cancelled: Any, deadline_exceeded: Any
+        ) -> TaskRun:
+            try:
+                session_id = await self._adapter.require_online_session(
+                    approval.device_id
+                )
+                with self._device_leases.hold(
+                    approval.device_id,
+                    task_id,
+                    deadline_seconds + 30.0,
+                    session_id,
+                ), self._adapter.bind_session(approval.device_id, session_id):
+                    self._task_executor.bind_device_session(task_id, session_id)
+                    task = await self._app_removal_task_runner.run(
+                        task_id,
+                        approval,
+                        confirmed,
+                        deadline_seconds,
+                        on_step,
+                        is_cancelled,
+                        deadline_exceeded,
+                    )
+                    return replace(task, device_session_id=session_id)
+            except MobileAgentError as error:
+                now = _utc_now()
+                return TaskRun(
+                    task_id,
+                    "app.uninstall",
+                    approval.device_id,
+                    goal,
+                    TaskStatus.FAILED,
+                    now,
+                    now,
+                    (),
+                    {},
+                    error.to_dict(),
+                    deadline_seconds=deadline_seconds,
+                )
+
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_type": "app.uninstall",
+                    "approval_id": approval.approval_id,
+                    "device_id": approval.device_id,
+                    "app_id": approval.app.app_id,
+                    "version_code": approval.app.version_code,
+                    "keep_data": approval.keep_data,
+                    "deadline_seconds": deadline_seconds,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return self._task_executor.submit(
+            approval.device_id,
+            goal,
+            run_factory,
+            self._task_store.save,
+            idempotency_key,
+            fingerprint,
+            deadline_seconds,
+            task_type="app.uninstall",
         ).to_dict()
 
     @staticmethod
@@ -970,6 +1262,74 @@ class RuntimeService:
         except MobileAgentError as error:
             return self._error_response(error)
 
+    def list_installed_apps_sync(
+        self, device_id: str, limit: int = 200, prefix: str | None = None
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            inventory = asyncio.run(self.list_installed_apps(device_id, limit, prefix))
+            return HTTPStatus.OK, {"inventory": inventory}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def inspect_installed_app_sync(
+        self, device_id: str, app_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            app = asyncio.run(self.inspect_installed_app(device_id, app_id))
+            return HTTPStatus.OK, {"app": app}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def prepare_apk_install_sync(
+        self, device_id: str, apk_path: str, expected_app_id: str,
+        replace_existing: bool = False,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            approval = asyncio.run(self.prepare_apk_install(
+                device_id, apk_path, expected_app_id, replace_existing
+            ))
+            return HTTPStatus.OK, {"approval": approval}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_apk_install_task_sync(
+        self, approval_id: str, confirmed: bool, idempotency_key: str,
+        deadline_seconds: float = 300.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            execution = self.submit_apk_install_task(
+                approval_id, confirmed, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def prepare_app_removal_sync(
+        self, device_id: str, app_id: str, keep_data: bool = False
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            approval = asyncio.run(
+                self.prepare_app_removal(device_id, app_id, keep_data)
+            )
+            return HTTPStatus.OK, {"approval": approval}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_app_removal_task_sync(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 180.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            execution = self.submit_app_removal_task(
+                approval_id, confirmed, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
     def invoke_tool_sync(
         self, tool_id: str, device_id: str, arguments: dict[str, Any], confirmed: bool = False
     ) -> tuple[HTTPStatus, dict[str, Any]]:
@@ -1274,9 +1634,17 @@ class RuntimeService:
     def _error_response(error: MobileAgentError) -> tuple[HTTPStatus, dict[str, Any]]:
         if error.code in {"DEVICE_NOT_FOUND", "TOOL_NOT_FOUND", "TASK_NOT_FOUND"}:
             status = HTTPStatus.NOT_FOUND
-        elif error.code in {"INVALID_ARGUMENT"}:
+        elif error.code in {
+            "INVALID_ARGUMENT", "APK_INVALID", "APK_PACKAGE_MISMATCH",
+            "APP_ALREADY_INSTALLED",
+        }:
             status = HTTPStatus.BAD_REQUEST
-        elif error.code in {"CONFIRMATION_REQUIRED", "ACTION_REJECTED_BY_POLICY"}:
+        elif error.code in {
+            "CONFIRMATION_REQUIRED",
+            "ACTION_REJECTED_BY_POLICY",
+            "APPROVAL_INVALID",
+            "SYSTEM_APP_PROTECTED",
+        }:
             status = HTTPStatus.FORBIDDEN
         elif error.code in {
             "TASK_STATE_CONFLICT",

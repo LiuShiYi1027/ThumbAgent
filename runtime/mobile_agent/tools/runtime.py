@@ -82,6 +82,10 @@ class ToolRegistry:
                 "performance.snapshot@1",
                 direct_invocation=False,
             ),
+            definition("app.list", "app.inspect@1", direct_invocation=False),
+            definition("app.inspect", "app.inspect@1", direct_invocation=False),
+            definition("app.install", "app.install@1", direct_invocation=False),
+            definition("app.uninstall", "app.uninstall@1", direct_invocation=False),
         )
         self._definitions = {definition.tool_id: definition for definition in definitions}
 
@@ -123,11 +127,17 @@ class ToolRuntime:
     ) -> ActionResult:
         definition = self._registry.get(tool_id)
         if not definition.direct_invocation:
+            skill_id = {
+                "device.logs.capture": "device.logs.collect",
+                "device.performance.capture": "device.performance.snapshot",
+                "app.list": "app.list",
+                "app.inspect": "app.inspect",
+            }.get(tool_id, "对应的目标级 Skill")
             raise MobileAgentError(
                 code="TOOL_REQUIRES_SKILL",
                 category=ErrorCategory.VALIDATION,
                 message="该底层 Tool 只能通过对应 Skill 调用",
-                suggested_action="调用 device.logs.collect Skill",
+                suggested_action=f"调用 {skill_id} Skill",
             )
         device = next(
             (item for item in await self._adapter.list_devices() if item.device_id == device_id), None

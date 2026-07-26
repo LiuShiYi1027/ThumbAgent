@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from mobile_agent.domain.artifact import ArtifactWriter
+from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.device import Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.observation import Observation
@@ -46,4 +48,24 @@ class DeviceAdapter(Protocol):
         self, device_id: str
     ) -> DevicePerformanceSnapshot:
         """Capture one aggregate performance snapshot without process details."""
+        ...
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        """Return installed application identifiers for an online device."""
+        ...
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        """Return bounded package metadata for one installed application."""
+        ...
+
+    async def install_apk(
+        self, device_id: str, apk_path: Path, replace_existing: bool
+    ) -> None:
+        """Install one prevalidated local APK using fixed platform arguments."""
+        ...
+
+    async def uninstall_app(
+        self, device_id: str, app_id: str, keep_data: bool
+    ) -> None:
+        """Uninstall one prevalidated non-system application."""
         ...

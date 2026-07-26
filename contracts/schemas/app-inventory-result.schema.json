@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-inventory-result.schema.json",
+  "title": "App Inventory Result",
+  "type": "object",
+  "required": ["schema_version", "device_id", "apps", "total_matched", "truncated", "prefix"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "device_id": { "type": "string" },
+    "apps": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/app" } },
+    "total_matched": { "type": "integer", "minimum": 0 },
+    "truncated": { "type": "boolean" },
+    "prefix": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "app": {
+      "type": "object",
+      "required": ["app_id", "version_name", "version_code", "installer_app_id", "enabled"],
+      "properties": {
+        "app_id": { "type": "string" },
+        "version_name": { "type": ["string", "null"] },
+        "version_code": { "type": ["integer", "null"] },
+        "installer_app_id": { "type": ["string", "null"] },
+        "enabled": { "type": ["boolean", "null"] },
+        "system_app": { "type": ["boolean", "null"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

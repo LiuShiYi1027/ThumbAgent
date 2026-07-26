@@ -1,0 +1,15 @@
+{
+  "id": "app.list",
+  "version": "1.0.0",
+  "name": "List installed applications",
+  "description": "List a bounded set of installed application identifiers. Does not install, remove, launch, or modify applications.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-inventory-request.schema.json",
+  "output_schema": "contracts/schemas/app-inventory-result.schema.json",
+  "required_capabilities": ["app.inspect@1"],
+  "tool_allowlist": ["app.list"],
+  "risk": "low",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "package_manager_structured_response"
+}

@@ -12,7 +12,8 @@
 4. `docs/architecture/technical-design-v1.md`
 5. `docs/engineering/development.md`
 6. `docs/iterations/README.md`
-7. 与任务相关的迭代文档、目录级 `AGENTS.md` 和 ADR
+7. `docs/engineering/iteration-process.md`
+8. 与任务相关的迭代文档、目录级 `AGENTS.md` 和 ADR
 
 修改 Contract、Skill、持久化、执行语义或错误体系时，还必须阅读对应专项规范：
 
@@ -143,6 +144,9 @@ Platform Adapters
 - 最终交付说明包含：变更、验证、已知限制。
 
 如果受环境限制无法运行某项验证，必须明确说明未运行的命令和原因，不能宣称已经通过。
+
+迭代的粒度、生命周期、集中测试、真机 E2E 和提交边界遵循
+`docs/engineering/iteration-process.md`。单个 Tool、接口或局部修复不得无理由升级为独立迭代。
 
 ## 10. 架构决策
 

@@ -46,7 +46,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual({"tools": {"listChanged": False}}, initialize["result"]["capabilities"])
         self.assertEqual(-32002, between["error"]["code"])
         self.assertIsNone(notification)
-        self.assertEqual(11, len(after["result"]["tools"]))
+        self.assertEqual(17, len(after["result"]["tools"]))
 
     def test_negotiates_supported_older_version_and_falls_back_for_unknown(self) -> None:
         older = McpServer(self.client).handle(
@@ -86,7 +86,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(11, len(response["result"]["tools"]))
+        self.assertEqual(17, len(response["result"]["tools"]))
 
     def test_lists_only_goal_level_tools_with_annotations(self) -> None:
         _ready(self.server)
@@ -103,6 +103,12 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual("forbidden", run_agent["execution"]["taskSupport"])
         self.assertEqual(True, run_agent["inputSchema"]["properties"]["confirmed"]["const"])
         self.assertIn("Do not automatically submit a replacement task", run_agent["description"])
+        install = next(tool for tool in tools if tool["name"] == "mobile_install_apk")
+        self.assertTrue(install["annotations"]["destructiveHint"])
+        self.assertFalse(install["annotations"]["readOnlyHint"])
+        uninstall = next(tool for tool in tools if tool["name"] == "mobile_uninstall_app")
+        self.assertTrue(uninstall["annotations"]["destructiveHint"])
+        self.assertIn("Do not automatically retry", uninstall["description"])
 
     def test_calls_readiness_and_returns_structured_content(self) -> None:
         _ready(self.server)
@@ -251,6 +257,14 @@ class _FakeRuntimeClient:
 
     def inspect_device(self, device_id: str) -> dict[str, Any]:
         return self._result("inspect_device", device_id, {"inspection": {}})
+
+    def prepare_app_removal(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._result("prepare_app_removal", arguments, {"approval": {}})
+
+    def uninstall_app(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._result(
+            "uninstall_app", arguments, {"execution": {"task_id": TASK_ID}}
+        )
 
     def submit_agent(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._result("submit_agent", arguments, {"execution": {"task_id": TASK_ID}})

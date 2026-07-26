@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/apk-install-result.schema.json",
+  "title": "APK Install Result",
+  "type": "object",
+  "required": ["schema_version", "skill_call_id", "skill_id", "skill_version", "device_id", "success", "status", "verification", "app", "apk_sha256", "apk_size_bytes", "replaced_existing", "evidence_refs", "started_at", "completed_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string" },
+    "skill_id": { "const": "app.install" },
+    "skill_version": { "const": "1.0.0" },
+    "device_id": { "type": "string" },
+    "success": { "const": true },
+    "status": { "const": "succeeded" },
+    "verification": { "const": "verified" },
+    "app": { "$ref": "app-inspection-result.schema.json" },
+    "apk_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "apk_size_bytes": { "type": "integer", "minimum": 1 },
+    "replaced_existing": { "type": "boolean" },
+    "evidence_refs": { "type": "array", "maxItems": 0 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

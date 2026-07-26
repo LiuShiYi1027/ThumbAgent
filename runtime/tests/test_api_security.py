@@ -230,7 +230,47 @@ class ApiSecurityTests(unittest.TestCase):
             "fake:android-001",
             payload["inspection"]["availability"]["device"]["device_id"],
         )
-        self.assertEqual(10, len(payload["inspection"]["capabilities"]))
+        self.assertEqual(13, len(payload["inspection"]["capabilities"]))
+
+    def test_get_app_inventory_is_bounded_and_supports_prefix(self) -> None:
+        with TemporaryDirectory() as directory:
+            handler = object.__new__(RuntimeRequestHandler)
+            handler.path = "/v1/devices/fake%3Aandroid-001/apps?limit=500&prefix=com.example"
+            handler.server = SimpleNamespace(
+                runtime=RuntimeService(
+                    FakeDeviceAdapter(), ArtifactStore(Path(directory))
+                )
+            )
+            captured: dict[str, object] = {}
+            handler._write_json = lambda status, payload: captured.update(
+                {"status": status, "payload": payload}
+            )
+
+            handler.do_GET()
+
+        self.assertEqual(HTTPStatus.OK, captured["status"])
+        inventory = captured["payload"]["inventory"]
+        self.assertEqual(["com.example.fake"], [app["app_id"] for app in inventory["apps"]])
+        self.assertFalse(inventory["truncated"])
+
+    def test_get_app_inventory_rejects_blank_or_unknown_query(self) -> None:
+        for query in ("prefix=", "unknown=value"):
+            with self.subTest(query=query), TemporaryDirectory() as directory:
+                handler = object.__new__(RuntimeRequestHandler)
+                handler.path = f"/v1/devices/fake%3Aandroid-001/apps?{query}"
+                handler.server = SimpleNamespace(
+                    runtime=RuntimeService(
+                        FakeDeviceAdapter(), ArtifactStore(Path(directory))
+                    )
+                )
+                captured: dict[str, object] = {}
+                handler._write_json = lambda status, payload: captured.update(
+                    {"status": status, "payload": payload}
+                )
+
+                handler.do_GET()
+
+            self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
 
     def test_post_collects_confirmed_bounded_device_logs(self) -> None:
         with TemporaryDirectory() as directory:

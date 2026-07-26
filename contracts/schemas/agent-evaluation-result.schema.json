@@ -38,6 +38,12 @@
         "unchanged_action_count": { "type": "integer", "minimum": 0 },
         "model_repair_count": { "type": "integer", "minimum": 0 },
         "policy_violation_count": { "type": "integer", "minimum": 0 },
+        "provider_latency_ms": { "type": "integer", "minimum": 0 },
+        "provider_attempt_count": { "type": "integer", "minimum": 0 },
+        "provider_retry_count": { "type": "integer", "minimum": 0 },
+        "no_progress_count": { "type": "integer", "minimum": 0 },
+        "model_unavailable_count": { "type": "integer", "minimum": 0 },
+        "terminal_error_code": { "type": "string", "maxLength": 120 },
         "duration_ms": { "type": "integer", "minimum": 0 },
         "used_tools": {
           "type": "array",

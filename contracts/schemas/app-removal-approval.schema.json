@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-removal-approval.schema.json",
+  "title": "Application Removal Approval",
+  "type": "object",
+  "required": ["schema_version", "approval_id", "device_id", "app", "keep_data", "application_data_will_be_deleted", "prepared_at", "expires_at", "confirmation_required"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+    "device_id": { "type": "string" },
+    "app": { "$ref": "app-inspection-result.schema.json" },
+    "keep_data": { "type": "boolean" },
+    "application_data_will_be_deleted": { "type": "boolean" },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "confirmation_required": { "const": true }
+  },
+  "additionalProperties": false
+}

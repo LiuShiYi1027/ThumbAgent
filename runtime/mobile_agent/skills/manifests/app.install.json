@@ -1,0 +1,15 @@
+{
+  "id": "app.install",
+  "version": "1.0.0",
+  "name": "Install approved local APK",
+  "description": "Install one prevalidated APK from the Runtime-authorized directory using a short-lived scoped approval, then verify the package through the device package manager.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/apk-install-approval.schema.json",
+  "output_schema": "contracts/schemas/apk-install-result.schema.json",
+  "required_capabilities": ["app.install@1", "app.inspect@1"],
+  "tool_allowlist": ["app.install", "app.inspect"],
+  "risk": "high",
+  "timeout_seconds": 300,
+  "max_steps": 2,
+  "verification": "package_manager_post_install_query"
+}

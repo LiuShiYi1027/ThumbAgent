@@ -46,6 +46,12 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(3, result["metrics"]["round_count"])
         self.assertEqual(2, result["metrics"]["tool_call_count"])
         self.assertEqual(["app.launch", "input.tap_element"], result["metrics"]["used_tools"])
+        self.assertEqual(0, result["metrics"]["provider_latency_ms"])
+        self.assertEqual(0, result["metrics"]["provider_attempt_count"])
+        self.assertEqual(0, result["metrics"]["provider_retry_count"])
+        self.assertEqual(0, result["metrics"]["no_progress_count"])
+        self.assertEqual(0, result["metrics"]["model_unavailable_count"])
+        self.assertEqual("", result["metrics"]["terminal_error_code"])
 
     async def test_evaluation_rejects_wrong_outcome_forbidden_tool_and_budget(self) -> None:
         task = await self.runtime.run_agent_task(
@@ -91,6 +97,33 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["passed"])
         self.assertIn("foreground_activity_mismatch", result["failure_reasons"])
 
+    async def test_evaluation_matches_final_observation_not_planner_verified_node(self) -> None:
+        task = await self.runtime.run_agent_task(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+        task["evidence_summary"]["verified_node"] = {
+            "text": "unrelated planner node",
+            "resource_id": "other",
+            "package": "com.android.settings",
+            "clickable": False,
+            "enabled": True,
+        }
+
+        result = AgentEvaluator().evaluate(
+            task,
+            scenario(
+                foreground_app_id="com.android.settings",
+                expected_selector={
+                    "strategy": "text",
+                    "value": "Display settings",
+                    "match": "exact",
+                    "package": "com.android.settings",
+                },
+            ),
+        )
+
+        self.assertTrue(result["passed"])
+
     def test_goal_acceptance_rejects_empty_and_unknown_fields(self) -> None:
         for payload in ({}, {"unexpected": True}):
             with self.subTest(payload=payload):
@@ -121,6 +154,16 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8"
             )
         )
+        suite_schema = json.loads(
+            (ROOT / "contracts/schemas/agent-evaluation-suite.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        summary_schema = json.loads(
+            (ROOT / "contracts/schemas/agent-evaluation-summary.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
         acceptance_schema = json.loads(
             (ROOT / "contracts/schemas/agent-goal-acceptance.schema.json").read_text(
                 encoding="utf-8"
@@ -140,10 +183,22 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
             acceptance_schema["$id"],
         )
         self.assertEqual(
+            "https://mobile-agent.local/schemas/agent-evaluation-suite/v1.json",
+            suite_schema["$id"],
+        )
+        self.assertEqual(
+            "https://mobile-agent.local/schemas/agent-evaluation-summary/v1.json",
+            summary_schema["$id"],
+        )
+        self.assertEqual(
             "agent-goal-acceptance.schema.json",
             scenario_schema["properties"]["acceptance"]["$ref"],
         )
         self.assertIn("forbidden_tool_used", result_schema["properties"]["failure_reasons"]["items"]["enum"])
+        self.assertIn(
+            "provider_latency_ms",
+            result_schema["properties"]["metrics"]["properties"],
+        )
 
 
 def scenario(

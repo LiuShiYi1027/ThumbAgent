@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-inspection-result.schema.json",
+  "title": "App Inspection Result",
+  "type": "object",
+  "required": ["app_id", "version_name", "version_code", "installer_app_id", "enabled"],
+  "properties": {
+    "app_id": { "type": "string" },
+    "version_name": { "type": ["string", "null"] },
+    "version_code": { "type": ["integer", "null"] },
+    "installer_app_id": { "type": ["string", "null"] },
+    "enabled": { "type": ["boolean", "null"] },
+    "system_app": { "type": ["boolean", "null"] }
+  },
+  "additionalProperties": false
+}

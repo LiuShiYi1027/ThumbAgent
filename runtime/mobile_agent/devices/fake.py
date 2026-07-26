@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import struct
 import uuid
+from pathlib import Path
 from datetime import datetime, timezone
 
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
+from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -69,6 +71,8 @@ class FakeDeviceAdapter:
         self.foreground_activity = ".MainActivity"
         self.actions: list[tuple[object, ...]] = []
         self.custom_ui_xml: bytes | None = None
+        self.install_target_app_id = "com.example.installed"
+        self._installed_apps = {"com.android.settings", "com.example.fake"}
         self._devices = devices if devices is not None else [
             Device(
                 device_id="fake:android-001",
@@ -88,6 +92,9 @@ class FakeDeviceAdapter:
                     "input.text@1",
                     "logs.collect@1",
                     "performance.snapshot@1",
+                    "app.inspect@1",
+                    "app.install@1",
+                    "app.uninstall@1",
                 ),
             )
         ]
@@ -106,6 +113,7 @@ class FakeDeviceAdapter:
         screenshot = artifacts.write(
             ArtifactKind.SCREENSHOT, "image/png", _fake_png(), ".png"
         )
+
         ui_time = _now()
         ui_tree = artifacts.write(
             ArtifactKind.UI_TREE,
@@ -189,3 +197,32 @@ class FakeDeviceAdapter:
             load_average_5m=0.8,
             load_average_15m=0.6,
         )
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        self.actions.append(("app.list", device_id))
+        return tuple(sorted(self._installed_apps))
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        self.actions.append(("app.inspect", device_id, app_id))
+        if app_id not in self._installed_apps:
+            raise MobileAgentError(
+                code="APP_NOT_FOUND",
+                category=ErrorCategory.DEVICE,
+                message="设备上未安装该应用",
+            )
+        return InstalledApp(
+            app_id, "1.0", 1, "com.android.vending", True,
+            app_id.startswith("com.android."),
+        )
+
+    async def install_apk(
+        self, device_id: str, apk_path: Path, replace_existing: bool
+    ) -> None:
+        self.actions.append(("app.install", device_id, apk_path.name, replace_existing))
+        self._installed_apps.add(self.install_target_app_id)
+
+    async def uninstall_app(
+        self, device_id: str, app_id: str, keep_data: bool
+    ) -> None:
+        self.actions.append(("app.uninstall", device_id, app_id, keep_data))
+        self._installed_apps.discard(app_id)

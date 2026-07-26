@@ -1,0 +1,15 @@
+{
+  "id": "app.inspect",
+  "version": "1.0.0",
+  "name": "Inspect installed application",
+  "description": "Read privacy-minimized version, installer and enabled metadata for one installed application.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-inspection-request.schema.json",
+  "output_schema": "contracts/schemas/app-inspection-result.schema.json",
+  "required_capabilities": ["app.inspect@1"],
+  "tool_allowlist": ["app.inspect"],
+  "risk": "low",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "package_manager_structured_response"
+}

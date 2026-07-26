@@ -26,6 +26,12 @@ class McpRuntimeClient(Protocol):
     def readiness(self) -> dict[str, Any]: ...
     def list_devices(self) -> dict[str, Any]: ...
     def inspect_device(self, device_id: str) -> dict[str, Any]: ...
+    def list_apps(self, device_id: str, limit: int, prefix: str | None) -> dict[str, Any]: ...
+    def inspect_app(self, device_id: str, app_id: str) -> dict[str, Any]: ...
+    def prepare_apk_install(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def install_apk(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def prepare_app_removal(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def uninstall_app(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def submit_agent(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def list_tasks(self, limit: int) -> dict[str, Any]: ...
     def get_task_execution(self, task_id: str) -> dict[str, Any]: ...
@@ -159,6 +165,8 @@ class McpServer:
                 "instructions": (
                     "Use readiness and inspection before submitting device work. "
                     "Device actions and log collection require the MCP host to obtain explicit user confirmation. "
+                    "APK installation requires prepare first; show the returned scoped approval summary and obtain a new explicit confirmation before install. "
+                    "Application uninstall requires a separate prepare step and new explicit confirmation of the data deletion impact. "
                     "Long-running work returns a Mobile Agent task_id; query execution and report tools for progress."
                 ),
             },
@@ -226,6 +234,18 @@ class McpServer:
             "mobile_inspect_device": lambda: self._client.inspect_device(
                 arguments["device_id"]
             ),
+            "mobile_list_apps": lambda: self._client.list_apps(
+                arguments["device_id"], arguments.get("limit", 200), arguments.get("prefix")
+            ),
+            "mobile_inspect_app": lambda: self._client.inspect_app(
+                arguments["device_id"], arguments["app_id"]
+            ),
+            "mobile_prepare_apk_install": lambda: self._client.prepare_apk_install(arguments),
+            "mobile_install_apk": lambda: self._client.install_apk(arguments),
+            "mobile_prepare_app_uninstall": lambda: self._client.prepare_app_removal(
+                arguments
+            ),
+            "mobile_uninstall_app": lambda: self._client.uninstall_app(arguments),
             "mobile_run_agent": lambda: self._client.submit_agent(arguments),
             "mobile_list_tasks": lambda: self._client.list_tasks(arguments.get("limit", 20)),
             "mobile_get_task_execution": lambda: self._client.get_task_execution(

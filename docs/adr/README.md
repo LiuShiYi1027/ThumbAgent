@@ -55,3 +55,5 @@ NNNN-short-kebab-case-title.md
 - [ADR-0013：异步执行器支持显式注册的多任务类型](./0013-explicit-multi-type-async-execution.md)
 - [ADR-0014：性能诊断只保留聚合快照](./0014-aggregate-performance-snapshot.md)
 - [ADR-0015：MCP stdio 作为本地 Runtime API 的 Interface Adapter](./0015-mcp-stdio-local-api-adapter.md)
+- [ADR-0016：High 风险动作使用两阶段、单次、范围绑定的授权](./0016-scoped-high-risk-approval.md)
+- [ADR-0017：应用卸载独立确认数据删除影响](./0017-scoped-app-removal.md)

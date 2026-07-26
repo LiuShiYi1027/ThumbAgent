@@ -5,12 +5,14 @@ from __future__ import annotations
 import contextvars
 import threading
 import uuid
+from pathlib import Path
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from typing import Callable
 
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.domain.artifact import ArtifactWriter
+from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.device import ConnectionState, Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -203,3 +205,23 @@ class SessionTrackingDeviceAdapter:
     ) -> DevicePerformanceSnapshot:
         await self._validate_binding(device_id)
         return await self._adapter.capture_performance(device_id)
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        await self._validate_binding(device_id)
+        return await self._adapter.list_installed_apps(device_id)
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        await self._validate_binding(device_id)
+        return await self._adapter.inspect_installed_app(device_id, app_id)
+
+    async def install_apk(
+        self, device_id: str, apk_path: Path, replace_existing: bool
+    ) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.install_apk(device_id, apk_path, replace_existing)
+
+    async def uninstall_app(
+        self, device_id: str, app_id: str, keep_data: bool
+    ) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.uninstall_app(device_id, app_id, keep_data)

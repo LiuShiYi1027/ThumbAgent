@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
-    "task_type": { "enum": ["agent.run", "device.logs.collect", "device.performance.snapshot"] },
+    "task_type": { "enum": ["agent.run", "device.logs.collect", "device.performance.snapshot", "app.install", "app.uninstall"] },
     "device_id": { "type": "string", "minLength": 1 },
     "device_session_id": { "oneOf": [{ "type": "string", "pattern": "^session_[a-f0-9]{32}$" }, { "type": "null" }] },
     "goal": { "type": "string", "minLength": 1, "maxLength": 500 },

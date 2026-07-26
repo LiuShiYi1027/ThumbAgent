@@ -48,7 +48,19 @@ class DeviceInspectionTests(unittest.TestCase):
         inspection = asyncio.run(runtime.inspect_device("fake:android-001"))
 
         self.assertEqual("ready", inspection["availability"]["status"])
-        self.assertEqual(10, len(inspection["capabilities"]))
+        self.assertEqual(13, len(inspection["capabilities"]))
+        install = next(
+            item for item in inspection["capabilities"]
+            if item["capability"] == "app.install@1"
+        )
+        self.assertEqual("high", install["risk"])
+        self.assertTrue(install["confirmation_required"])
+        uninstall = next(
+            item for item in inspection["capabilities"]
+            if item["capability"] == "app.uninstall@1"
+        )
+        self.assertEqual("high", uninstall["risk"])
+        self.assertEqual("unsafe", uninstall["idempotency"])
         by_id = {item["capability"]: item for item in inspection["capabilities"]}
         self.assertEqual("available", by_id["input.tap@1"]["availability"])
         self.assertEqual("medium", by_id["input.tap@1"]["risk"])

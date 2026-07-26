@@ -1,7 +1,7 @@
-# 文档与迭代规范
+# 文档规范
 
-> 状态：Active  
-> 更新日期：2026-07-03
+> 文档状态：Active
+> 更新日期：2026-07-26
 
 ## 1. 目标
 
@@ -40,7 +40,7 @@ docs/
 正式文档标题后至少包含：
 
 ```text
-状态：Draft | Active | Superseded | Archived
+文档状态：Draft | Active | Superseded | Archived
 更新日期：YYYY-MM-DD
 ```
 
@@ -63,6 +63,9 @@ docs/
 - 不使用 `final`、`new`、`latest`、`copy` 等无法长期理解的名称。
 
 ## 6. 迭代目录
+
+迭代粒度、节奏、生命周期门禁、测试策略、真机 E2E 和 Git 交付边界以
+[迭代开发规范](./engineering/iteration-process.md)为唯一真源。本节只定义迭代文档的目录职责。
 
 每个迭代固定包含：
 
@@ -96,23 +99,13 @@ NNNN-short-name/
 
 ### `retrospective.md`
 
-迭代开始时保持 Draft 模板；结束时记录实际交付、偏差、指标、问题和后续行动。完成后状态改为 Active 并冻结。
+迭代开始时保持 Draft 模板；结束时记录实际交付、偏差、指标、问题和后续行动。完成后文档状态改为
+`Active`、迭代状态改为 `Completed`，并冻结内容。
 
 ## 7. 迭代生命周期
 
-```text
-Proposed
-→ Planned
-→ Active
-→ Verifying
-→ Completed / Cancelled
-```
-
-- 同一时间原则上只有一个主要 `Active` 迭代。
-- 进入 Active 前必须完成范围、任务和验收定义。
-- 开发中新增范围必须先更新计划和任务，不以口头约定扩张。
-- Completed 前必须更新验收结果和复盘。
-- 长期有效的发现必须回写产品、架构、工程规范或 ADR。
+迭代生命周期和各阶段门禁见[迭代开发规范](./engineering/iteration-process.md)。本文不再维护第二份
+生命周期定义，避免粒度、测试和完成条件出现冲突。
 
 ## 8. 更新规则
 
@@ -126,7 +119,8 @@ Proposed
 
 Agent 接任务时必须：
 
-1. 读取当前迭代的 `plan.md`、`tasks.md` 和 `acceptance.md`。
+1. 读取[迭代开发规范](./engineering/iteration-process.md)以及当前迭代的 `plan.md`、`tasks.md`
+   和 `acceptance.md`。
 2. 使用明确任务 ID 工作。
 3. 只修改任务声明范围内的文档和代码。
 4. 完成后更新任务状态、验证结果和必要文档。

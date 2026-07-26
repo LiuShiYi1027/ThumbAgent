@@ -84,6 +84,23 @@ class AgentEvaluationScenario:
             max_rounds=max_rounds,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return the normalized public scenario representation."""
+
+        acceptance = AgentGoalAcceptance(
+            self.foreground_app_id,
+            self.foreground_activity,
+            self.expected_selector,
+        )
+        return {
+            "schema_version": self.schema_version,
+            "scenario_id": self.scenario_id,
+            "goal": self.goal,
+            "acceptance": acceptance.to_dict(),
+            "forbidden_tools": list(self.forbidden_tools),
+            "max_rounds": self.max_rounds,
+        }
+
 
 class AgentEvaluator:
     """Score a completed live task by outcome and constraints, never by path equality."""
@@ -121,8 +138,8 @@ class AgentEvaluator:
             _final_foreground_activity(task) != scenario.foreground_activity
         ):
             failures.append("foreground_activity_mismatch")
-        if scenario.expected_selector is not None and not _selector_met(
-            _verified_node(task), scenario.expected_selector
+        if scenario.expected_selector is not None and not _task_selector_met(
+            task, scenario.expected_selector
         ):
             failures.append("expected_selector_not_met")
         if set(metrics["used_tools"]) & set(scenario.forbidden_tools):
@@ -148,6 +165,11 @@ def _metrics(task: dict[str, Any], steps: list[object]) -> dict[str, Any]:
     unchanged_action_count = 0
     model_repair_count = 0
     policy_violation_count = 0
+    provider_latency_ms = 0
+    provider_attempt_count = 0
+    provider_retry_count = 0
+    no_progress_count = 0
+    model_unavailable_count = 0
     used_tools: list[str] = []
     for raw_step in steps:
         if not isinstance(raw_step, dict):
@@ -155,8 +177,14 @@ def _metrics(task: dict[str, Any], steps: list[object]) -> dict[str, Any]:
         if raw_step.get("kind") == "agent_round":
             round_count += 1
         error = raw_step.get("error")
-        if isinstance(error, dict) and error.get("code") == "ACTION_REJECTED_BY_POLICY":
-            policy_violation_count += 1
+        if isinstance(error, dict):
+            error_code = error.get("code")
+            if error_code == "ACTION_REJECTED_BY_POLICY":
+                policy_violation_count += 1
+            elif error_code == "NO_PROGRESS":
+                no_progress_count += 1
+            elif error_code == "MODEL_UNAVAILABLE":
+                model_unavailable_count += 1
         result = raw_step.get("result")
         if not isinstance(result, dict):
             continue
@@ -165,6 +193,15 @@ def _metrics(task: dict[str, Any], steps: list[object]) -> dict[str, Any]:
             repair_count = decision.get("repair_count")
             if isinstance(repair_count, int) and not isinstance(repair_count, bool):
                 model_repair_count += max(repair_count, 0)
+            provider_latency = decision.get("provider_latency_ms")
+            if isinstance(provider_latency, int) and not isinstance(provider_latency, bool):
+                provider_latency_ms += max(provider_latency, 0)
+            attempt_count = decision.get("provider_attempt_count")
+            if isinstance(attempt_count, int) and not isinstance(attempt_count, bool):
+                provider_attempt_count += max(attempt_count, 0)
+            retry_count = decision.get("provider_retry_count")
+            if isinstance(retry_count, int) and not isinstance(retry_count, bool):
+                provider_retry_count += max(retry_count, 0)
             if decision.get("decision_type") == "run_tool":
                 tool_call_count += 1
                 tool_id = decision.get("tool_id")
@@ -176,6 +213,11 @@ def _metrics(task: dict[str, Any], steps: list[object]) -> dict[str, Any]:
                 changed_action_count += 1
             elif feedback.get("effect") == "unchanged":
                 unchanged_action_count += 1
+    terminal_error_code = _terminal_error_code(task)
+    if terminal_error_code == "NO_PROGRESS" and no_progress_count == 0:
+        no_progress_count = 1
+    if terminal_error_code == "MODEL_UNAVAILABLE" and model_unavailable_count == 0:
+        model_unavailable_count = 1
     return {
         "round_count": round_count,
         "tool_call_count": tool_call_count,
@@ -183,9 +225,23 @@ def _metrics(task: dict[str, Any], steps: list[object]) -> dict[str, Any]:
         "unchanged_action_count": unchanged_action_count,
         "model_repair_count": model_repair_count,
         "policy_violation_count": policy_violation_count,
+        "provider_latency_ms": provider_latency_ms,
+        "provider_attempt_count": provider_attempt_count,
+        "provider_retry_count": provider_retry_count,
+        "no_progress_count": no_progress_count,
+        "model_unavailable_count": model_unavailable_count,
+        "terminal_error_code": terminal_error_code,
         "duration_ms": _duration_ms(task),
         "used_tools": used_tools,
     }
+
+
+def _terminal_error_code(task: dict[str, Any]) -> str:
+    error = task.get("error")
+    if not isinstance(error, dict):
+        return ""
+    code = error.get("code")
+    return code if isinstance(code, str) and len(code) <= 120 else ""
 
 
 def _duration_ms(task: dict[str, Any]) -> int:
@@ -230,7 +286,42 @@ def _verified_node(task: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _selector_met(node: dict[str, Any] | None, selector: UiSelector) -> bool:
+def _task_selector_met(task: dict[str, Any], selector: UiSelector) -> bool:
+    observation = _final_observation(task)
+    foreground_app_id = _final_foreground_app_id(task)
+    if observation is not None:
+        foreground = observation.get("foreground_app")
+        if isinstance(foreground, dict) and isinstance(foreground.get("app_id"), str):
+            foreground_app_id = foreground["app_id"]
+        ui_summary = observation.get("ui_summary")
+        if isinstance(ui_summary, list) and any(
+            _selector_met(item, selector, foreground_app_id)
+            for item in ui_summary
+            if isinstance(item, dict)
+        ):
+            return True
+    return _selector_met(_verified_node(task), selector, foreground_app_id)
+
+
+def _final_observation(task: dict[str, Any]) -> dict[str, Any] | None:
+    steps = task.get("steps")
+    if not isinstance(steps, list):
+        return None
+    for step in reversed(steps):
+        if not isinstance(step, dict):
+            continue
+        result = step.get("result")
+        if not isinstance(result, dict):
+            continue
+        observation = result.get("observation")
+        if isinstance(observation, dict):
+            return observation
+    return None
+
+
+def _selector_met(
+    node: dict[str, Any] | None, selector: UiSelector, foreground_app_id: str = ""
+) -> bool:
     if node is None:
         return False
     field_name = {
@@ -245,8 +336,13 @@ def _selector_met(node: dict[str, Any] | None, selector: UiSelector) -> bool:
         return False
     if selector.match is MatchMode.CONTAINS and selector.value not in actual:
         return False
-    if selector.package is not None and node.get("package") != selector.package:
-        return False
+    if selector.package is not None:
+        node_package = node.get("package")
+        if isinstance(node_package, str):
+            if node_package != selector.package:
+                return False
+        elif foreground_app_id != selector.package:
+            return False
     if selector.clickable is not None and node.get("clickable") is not selector.clickable:
         return False
     if selector.enabled and node.get("enabled") is not True:

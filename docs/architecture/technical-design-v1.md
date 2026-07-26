@@ -172,6 +172,29 @@ ITER-0026 起，`run_tool` 使用独立的 `AgentToolCall` JSON Schema 和 Runti
 
 ITER-0027 起，Agent 评测不以历史 ToolCall 序列作为正确答案。`AgentEvaluationScenario` 只定义用户目标、独立成功判定、禁用 Tool 和轮次预算；真实设备 E2E 仍使用当前模型对最新 Observation 逐轮规划。`AgentEvaluator` 只消费已持久化的 `TaskRun`，不调用 Adapter、不重放设备动作，并输出目标是否达成、轮次、Tool 数、页面进展、模型修复、策略违规和耗时等指标。历史轨迹只用于 Runtime/Contract/Policy 的确定性回归，不用来声称模型对改版 App 的泛化能力。
 
+ITER-0042 起，多个 `AgentEvaluationScenario` 可以组成版本化 Suite。Suite 只声明运行次数、目标、
+成功条件与约束；设备任务仍由现有 Web/MCP 异步入口逐个执行。只读聚合器消费单任务评测结果，要求
+完整场景覆盖并输出成功率、耗时分位数和可靠性指标，不访问 Adapter、Planner 或 Task Store，也不
+将历史 ToolCall 固化为回放工作流。
+
+ITER-0043 起，`app.list` 与 `app.inspect` 两个确定性 Skill 通过 `app.inspect@1` Capability 读取
+设备包管理器的最小必要元数据。Client/MCP 只调用 Runtime REST，Runtime 在 Session 与 Lease 边界内
+调用 Tool，Tool 再经过 Capability Catalog 与 Policy Engine 到达 Device Gateway。Android Adapter
+只构造固定的 `pm list packages` 和 `dumpsys package <validated-app-id>` 参数数组，并在公共响应前
+丢弃 APK 路径、签名、权限与原始输出。安装仍是独立 High 风险能力，不复用该只读 Capability。
+
+ITER-0044 的 `app.install` 使用两阶段 High 风险协议。Prepare 在 Runtime 授权的 `<data-dir>/apks`
+目录内读取单 APK，计算 SHA-256 并从 bounded binary Manifest 提取 package id，然后生成十分钟有效、
+单次使用的内存 Approval。Submit 只携带 approval id；Runtime claim 后才向 Policy Engine 提供内部
+High-risk 授权位。异步任务持有 Lease/Session，Android Adapter 只执行固定 `adb install` 或
+`adb install -r`，随后通过 package manager 查询验证。详见 [ADR-0016](../adr/0016-scoped-high-risk-approval.md)。
+
+ITER-0045 的 `app.uninstall` 使用独立两阶段 High 风险协议。Prepare 读取最小应用元数据并要求
+`system_app=false`，影响摘要明确展示是否删除应用数据；Approval 绑定设备、包名、版本和
+`keep_data`。Submit 后 Android Adapter 只执行固定 `adb uninstall [ -k ] <app-id>`，再读取应用
+清单确认目标包不存在。超时或断连视为 unknown outcome，不自动重试。详见
+[ADR-0017](../adr/0017-scoped-app-removal.md)。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

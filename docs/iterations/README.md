@@ -46,5 +46,10 @@
 | [ITER-0039](./0039-performance-baseline-comparison/plan.md) | Performance Baseline Comparison | Completed | 比较同一设备的两次聚合性能快照并展示可解释趋势 |
 | [ITER-0040](./0040-mcp-skills-developer-preview/plan.md) | MCP Skills Developer Preview | Completed | 让外部 AI Agent 通过本地 MCP stdio 调用目标级 Mobile Skills |
 | [ITER-0041](./0041-live-agent-reliability/plan.md) | Live Agent Reliability | Completed | 提升真实模型请求诊断与语义点击在系统安全区边缘的可靠性 |
+| [ITER-0042](./0042-live-evaluation-baseline/plan.md) | Live Evaluation Baseline | Completed | 用版本化场景集和聚合指标建立真实 Agent 成功率基线 |
+| [ITER-0043](./0043-app-inventory/plan.md) | App Inventory | Completed | 通过 REST 与 MCP 安全列出和检查 Android 已安装应用 |
+| [ITER-0044](./0044-scoped-apk-install/plan.md) | Scoped APK Install | Completed | 通过范围绑定授权安全安装本地 APK 并验证结果 |
+| [ITER-0045](./0045-scoped-app-removal/plan.md) | Scoped App Removal | Completed | 独立确认数据删除影响后安全卸载非系统应用并验证包缺失 |
 
-迭代流程和文档要求见[文档与迭代规范](../documentation-guide.md)。
+迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
+格式见[文档规范](../documentation-guide.md)。

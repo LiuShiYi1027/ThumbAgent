@@ -29,6 +29,9 @@ navigation.back
 navigation.home
 logs.collect
 performance.snapshot
+app.inspect
+app.install
+app.uninstall
 ```
 
 不在 ID 中放平台名或版本，例如不用 `android.adb.tap`。
@@ -126,6 +129,9 @@ navigation.back@1
 navigation.home@1
 logs.collect@1
 performance.snapshot@1
+app.inspect@1
+app.install@1
+app.uninstall@1
 ```
 
 ITER-0001 只需实现 `device.inspect@1` 及设备发现所需内部能力，其余在后续迭代启用。
@@ -142,6 +148,18 @@ ITER-0036 增加 `logs.collect@1`。它是 Medium 风险、safe 幂等的工程�
 
 ITER-0038 增加 `performance.snapshot@1`。它是 Low 风险、safe 幂等的聚合只读能力，只保留总
 CPU、内存、电池与系统负载；进程、应用和平台原始诊断输出不进入 Capability 消费者或 Artifact。
+
+ITER-0043 增加 `app.inspect@1`。它是 Low 风险、safe 幂等的只读应用清单能力，仅返回应用标识、
+版本、安装来源和启用状态；列表有界，不返回 APK 路径、签名、权限或原始平台输出。APK 安装不属于
+该 Capability，必须经过独立的 High 风险授权设计。
+
+ITER-0044 增加 `app.install@1`。它是 High 风险、unsafe 幂等的设备写能力，只接受 Runtime 内部已
+claim 的短期范围绑定 Approval。Approval 绑定 device、APK SHA-256、Manifest package id 与替换
+语义；普通 `confirmed=true`、模型输出或 Manifest 均不能直接放行该 Capability。
+
+ITER-0045 增加 `app.uninstall@1`。它是 High 风险、unsafe 幂等的设备写能力，使用与安装相互独立
+的短期 Approval，绑定 device、应用标识、版本和数据保留语义。系统应用或系统属性未知的应用在
+Prepare 阶段拒绝；超时或断连结果未知时禁止自动重试。
 
 ## 10. 测试要求
 

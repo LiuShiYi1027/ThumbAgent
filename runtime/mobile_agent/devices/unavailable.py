@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import NoReturn
+from pathlib import Path
 
 from mobile_agent.domain.artifact import ArtifactWriter
+from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.device import Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import MobileAgentError
@@ -61,4 +63,20 @@ class UnavailableDeviceAdapter:
     async def capture_performance(
         self, device_id: str
     ) -> DevicePerformanceSnapshot:
+        self._raise()
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        self._raise()
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        self._raise()
+
+    async def install_apk(
+        self, device_id: str, apk_path: Path, replace_existing: bool
+    ) -> None:
+        self._raise()
+
+    async def uninstall_app(
+        self, device_id: str, app_id: str, keep_data: bool
+    ) -> None:
         self._raise()

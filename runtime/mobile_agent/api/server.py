@@ -67,6 +67,35 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             )
             self._write_json(status, payload)
             return
+        apps_match = re.fullmatch(r"/v1/devices/([^/]+)/apps", path)
+        if apps_match:
+            try:
+                query = parse_qs(parsed_path.query, keep_blank_values=True)
+                if set(query) - {"limit", "prefix"}:
+                    raise ValueError("unknown query")
+                limit = _query_int(parsed_path.query, "limit", 200, maximum=500)
+                prefix_values = query.get("prefix", [])
+                if len(prefix_values) > 1:
+                    raise ValueError("prefix")
+                prefix = prefix_values[0] if prefix_values else None
+            except ValueError:
+                self._write_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}},
+                )
+                return
+            status, payload = self._runtime().list_installed_apps_sync(
+                unquote(apps_match.group(1)), limit, prefix
+            )
+            self._write_json(status, payload)
+            return
+        app_match = re.fullmatch(r"/v1/devices/([^/]+)/apps/([^/]+)", path)
+        if app_match:
+            status, payload = self._runtime().inspect_installed_app_sync(
+                unquote(app_match.group(1)), unquote(app_match.group(2))
+            )
+            self._write_json(status, payload)
+            return
         if path == "/v1/tasks":
             try:
                 limit = _query_int(parsed_path.query, "limit", 20)
@@ -155,6 +184,16 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         async_device_performance_match = re.fullmatch(
             r"/v1/tasks/device\.performance\.snapshot/async", self.path
         )
+        apk_prepare_match = re.fullmatch(r"/v1/apps/install/prepare", self.path)
+        async_apk_install_match = re.fullmatch(
+            r"/v1/tasks/app\.install/async", self.path
+        )
+        app_removal_prepare_match = re.fullmatch(
+            r"/v1/apps/uninstall/prepare", self.path
+        )
+        async_app_removal_match = re.fullmatch(
+            r"/v1/tasks/app\.uninstall/async", self.path
+        )
         execution_cancel_match = re.fullmatch(
             r"/v1/task-executions/(task_[a-f0-9]{32})/cancel", self.path
         )
@@ -197,6 +236,80 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 if set(body) != {"goal"} or not isinstance(body.get("goal"), str):
                     raise ValueError("goal")
                 status, payload = self._runtime().compile_goal_sync(body["goal"])
+                self._write_json(status, payload)
+                return
+            if apk_prepare_match:
+                if set(body) - {"device_id", "apk_path", "expected_app_id", "replace_existing"}:
+                    raise ValueError("apk prepare fields")
+                device_id = body.get("device_id")
+                apk_path = body.get("apk_path")
+                expected_app_id = body.get("expected_app_id")
+                replace_existing = body.get("replace_existing", False)
+                if (
+                    not isinstance(device_id, str)
+                    or not isinstance(apk_path, str)
+                    or not isinstance(expected_app_id, str)
+                    or not isinstance(replace_existing, bool)
+                ):
+                    raise ValueError("apk prepare")
+                status, payload = self._runtime().prepare_apk_install_sync(
+                    device_id, apk_path, expected_app_id, replace_existing
+                )
+                self._write_json(status, payload)
+                return
+            if async_apk_install_match:
+                if set(body) - {"approval_id", "confirmed", "deadline_seconds"}:
+                    raise ValueError("apk install fields")
+                approval_id = body.get("approval_id")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 300.0, 1.0, 1800.0
+                )
+                if not isinstance(approval_id, str) or not isinstance(confirmed, bool):
+                    raise ValueError("apk install")
+                idempotency_key = _idempotency_key(self.headers.get("Idempotency-Key"))
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_apk_install_task_sync(
+                    approval_id, confirmed, idempotency_key, deadline_seconds
+                )
+                self._write_json(status, payload)
+                return
+            if app_removal_prepare_match:
+                if set(body) - {"device_id", "app_id", "keep_data"}:
+                    raise ValueError("app removal prepare fields")
+                device_id = body.get("device_id")
+                app_id = body.get("app_id")
+                keep_data = body.get("keep_data", False)
+                if (
+                    not isinstance(device_id, str)
+                    or not isinstance(app_id, str)
+                    or not isinstance(keep_data, bool)
+                ):
+                    raise ValueError("app removal prepare")
+                status, payload = self._runtime().prepare_app_removal_sync(
+                    device_id, app_id, keep_data
+                )
+                self._write_json(status, payload)
+                return
+            if async_app_removal_match:
+                if set(body) - {"approval_id", "confirmed", "deadline_seconds"}:
+                    raise ValueError("app removal fields")
+                approval_id = body.get("approval_id")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 180.0, 1.0, 1800.0
+                )
+                if not isinstance(approval_id, str) or not isinstance(confirmed, bool):
+                    raise ValueError("app removal")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_app_removal_task_sync(
+                    approval_id, confirmed, idempotency_key, deadline_seconds
+                )
                 self._write_json(status, payload)
                 return
             if execution_cancel_match:
@@ -540,7 +653,7 @@ def _runtime_data_root() -> Path:
     return Path(data_dir) if data_dir else default_artifact_root().parent
 
 
-def _query_int(query: str, name: str, default: int) -> int:
+def _query_int(query: str, name: str, default: int, maximum: int = 100) -> int:
     values = parse_qs(query).get(name)
     if not values:
         return default
@@ -550,7 +663,7 @@ def _query_int(query: str, name: str, default: int) -> int:
         value = int(values[0])
     except ValueError as error:
         raise ValueError(name) from error
-    if value < 1 or value > 100:
+    if value < 1 or value > maximum:
         raise ValueError(name)
     return value
 
