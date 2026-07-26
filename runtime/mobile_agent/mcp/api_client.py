@@ -63,6 +63,42 @@ class RuntimeApiClient:
             f"/v1/devices/{quote(device_id, safe='')}/apps/{quote(app_id, safe='')}",
         )
 
+    def inspect_app_state(self, device_id: str, app_id: str) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            (
+                f"/v1/devices/{quote(device_id, safe='')}/apps/"
+                f"{quote(app_id, safe='')}/state"
+            ),
+        )
+
+    def launch_app(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/app.launch/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
+    def stop_app(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/app.stop/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
+    def prepare_app_data_clear(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/apps/data/clear/prepare", arguments)
+
+    def clear_app_data(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/app.data.clear/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
     def prepare_apk_install(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/apps/install/prepare", arguments)
 

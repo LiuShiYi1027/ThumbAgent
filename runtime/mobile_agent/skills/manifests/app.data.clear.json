@@ -1,0 +1,15 @@
+{
+  "id": "app.data.clear",
+  "version": "1.0.0",
+  "name": "Clear approved application data",
+  "description": "Clear data for one prevalidated non-system application using a short-lived scoped approval, then verify the package remains installed and stopped.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-data-clear-approval.schema.json",
+  "output_schema": "contracts/schemas/app-lifecycle-result.schema.json",
+  "required_capabilities": ["app.data.clear@1", "app.inspect@1", "app.state.inspect@1"],
+  "tool_allowlist": ["app.data.clear", "app.inspect", "app.state.inspect"],
+  "risk": "high",
+  "timeout_seconds": 180,
+  "max_steps": 3,
+  "verification": "package_present_and_runtime_stopped"
+}

@@ -13,6 +13,7 @@ from mobile_agent.devices.adapters.android.adb import AdbRunner, AsyncProcessRun
 from mobile_agent.devices.adapters.android.app_parser import (
     parse_package_details,
     parse_package_list,
+    parse_package_stopped,
     valid_app_id,
 )
 from mobile_agent.devices.adapters.android.parser import (
@@ -26,6 +27,7 @@ from mobile_agent.devices.adapters.android.performance_parser import (
 )
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
 from mobile_agent.domain.app import InstalledApp
+from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -86,6 +88,9 @@ class AndroidDeviceAdapter:
                 "app.inspect@1",
                 "app.install@1",
                 "app.uninstall@1",
+                "app.state.inspect@1",
+                "app.stop@1",
+                "app.data.clear@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(
@@ -481,6 +486,94 @@ class AndroidDeviceAdapter:
                 category=ErrorCategory.DEVICE,
                 message="设备拒绝卸载应用",
                 suggested_action="检查应用是否受设备管理策略保护，并只读确认当前安装状态",
+            )
+
+    async def inspect_app_runtime_state(
+        self, device_id: str, app: InstalledApp
+    ) -> AppRuntimeState:
+        """Read bounded lifecycle state using fixed package/process/window commands."""
+
+        if not valid_app_id(app.app_id):
+            raise MobileAgentError(
+                "INVALID_ARGUMENT", ErrorCategory.VALIDATION, "无效的应用标识"
+            )
+        serial = self._serial_from_device_id(device_id)
+        package_result = await self._runner.run(
+            "-s", serial, "shell", "dumpsys", "package", app.app_id
+        )
+        if (
+            package_result.returncode != 0
+            or f"Package [{app.app_id}]" not in package_result.stdout_text
+        ):
+            raise MobileAgentError(
+                "APP_NOT_FOUND", ErrorCategory.DEVICE, "设备上未安装该应用"
+            )
+        process_result = await self._runner.run(
+            "-s", serial, "shell", "pidof", app.app_id
+        )
+        if process_result.returncode not in {0, 1}:
+            raise MobileAgentError(
+                "APP_STATE_INSPECTION_FAILED",
+                ErrorCategory.DEVICE,
+                "无法读取应用进程状态",
+                retryable=True,
+            )
+        window_result = await self._runner.run(
+            "-s", serial, "shell", "dumpsys", "window"
+        )
+        if window_result.returncode != 0:
+            raise MobileAgentError(
+                "APP_STATE_INSPECTION_FAILED",
+                ErrorCategory.DEVICE,
+                "无法读取前台应用状态",
+                retryable=True,
+            )
+        foreground_app, _ = parse_foreground_app(window_result.stdout_text)
+        return AppRuntimeState(
+            device_id,
+            app,
+            process_result.returncode == 0 and bool(process_result.stdout_text.strip()),
+            foreground_app == app.app_id,
+            parse_package_stopped(package_result.stdout_text),
+            _now(),
+        )
+
+    async def force_stop_app(self, device_id: str, app_id: str) -> None:
+        """Force-stop one validated package using a fixed command."""
+
+        if not valid_app_id(app_id):
+            raise MobileAgentError(
+                "INVALID_ARGUMENT", ErrorCategory.VALIDATION, "无效的应用标识"
+            )
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s", serial, "shell", "am", "force-stop", app_id
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                "APP_STOP_FAILED",
+                ErrorCategory.DEVICE,
+                "设备拒绝停止应用",
+                suggested_action="检查设备管理策略并只读确认应用当前状态",
+            )
+
+    async def clear_app_data(self, device_id: str, app_id: str) -> None:
+        """Clear one validated package using fixed package-manager arguments."""
+
+        if not valid_app_id(app_id):
+            raise MobileAgentError(
+                "INVALID_ARGUMENT", ErrorCategory.VALIDATION, "无效的应用标识"
+            )
+        serial = self._serial_from_device_id(device_id)
+        result = await self._install_runner.run(
+            "-s", serial, "shell", "pm", "clear", "--user", "0", app_id
+        )
+        if result.returncode != 0 or result.stdout_text.strip() != "Success":
+            raise MobileAgentError(
+                "APP_DATA_CLEAR_FAILED",
+                ErrorCategory.DEVICE,
+                "设备拒绝清除应用数据",
+                suggested_action="检查设备管理策略，并只读确认应用和运行状态",
             )
 
     async def _key_event(self, device_id: str, key_code: str) -> None:

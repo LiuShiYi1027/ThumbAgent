@@ -195,6 +195,12 @@ ITER-0045 的 `app.uninstall` 使用独立两阶段 High 风险协议。Prepare 
 清单确认目标包不存在。超时或断连视为 unknown outcome，不自动重试。详见
 [ADR-0017](../adr/0017-scoped-app-removal.md)。
 
+ITER-0046 将应用生命周期收敛为统一的确定性任务链路。只读状态通过固定的 package、process 和
+window 查询归一化为 `AppRuntimeState`；启动复用 `app.open` 并验证目标包进入前台；停止只允许
+已确认的非系统应用并验证进程消失、目标退出前台。清除数据采用独立 Prepare/Submit：Approval
+绑定设备、包名和版本，Submit 后 Adapter 只执行固定 `pm clear --user 0 <app-id>`，再验证应用仍
+安装且运行状态复位。REST 和 MCP 只接受类型化参数，不暴露 PID、原始系统输出或任意命令参数。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

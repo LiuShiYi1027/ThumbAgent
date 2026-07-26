@@ -7,6 +7,7 @@ from typing import Protocol
 
 from mobile_agent.domain.artifact import ArtifactWriter
 from mobile_agent.domain.app import InstalledApp
+from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.observation import Observation
@@ -68,4 +69,18 @@ class DeviceAdapter(Protocol):
         self, device_id: str, app_id: str, keep_data: bool
     ) -> None:
         """Uninstall one prevalidated non-system application."""
+        ...
+
+    async def inspect_app_runtime_state(
+        self, device_id: str, app: InstalledApp
+    ) -> AppRuntimeState:
+        """Return privacy-minimized process, foreground and stopped state."""
+        ...
+
+    async def force_stop_app(self, device_id: str, app_id: str) -> None:
+        """Force-stop one prevalidated non-system application."""
+        ...
+
+    async def clear_app_data(self, device_id: str, app_id: str) -> None:
+        """Clear data for one prevalidated non-system application."""
         ...

@@ -641,6 +641,7 @@ TASK_UI_HTML = """<!doctype html>
         ${card("Artifacts", (summary.artifact_refs || []).length ? summary.artifact_refs.map(item => `<code>${esc(item)}</code>`).join("<br>") : "-")}
         ${card("日志采集", summary.captured_bytes !== undefined ? `${esc(summary.captured_bytes)} bytes · 脱敏 ${esc(summary.redaction_count || 0)} 处 · ${summary.truncated ? "已截断" : "未截断"}` : "-")}
         ${card("性能快照", summary.cpu_total_usage_percent !== undefined ? `CPU ${esc(summary.cpu_total_usage_percent)}% · 内存 ${esc(summary.memory_used_percent)}% · 电量 ${esc(summary.battery_level_percent)}% · 温度 ${esc(summary.battery_temperature_celsius ?? "-")}°C` : "-")}
+        ${card("应用生命周期", summary.operation ? `${esc(summary.operation)} · ${esc(summary.app?.app_id || "-")}<br>前台 ${esc(summary.state?.foreground ?? "-")} · 进程 ${esc(summary.state?.process_present ?? "-")} · stopped ${esc(summary.state?.stopped ?? "-")} · 数据清除 ${esc(summary.data_cleared ?? "-")}` : "-")}
       </div>
       <h3>事件</h3>
       ${renderEvents(events)}

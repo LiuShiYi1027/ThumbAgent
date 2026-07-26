@@ -1,0 +1,15 @@
+{
+  "id": "app.stop",
+  "version": "1.0.0",
+  "name": "Force-stop application",
+  "description": "Force-stop one explicitly confirmed non-system application and verify it is not foreground and has no process.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-stop-request.schema.json",
+  "output_schema": "contracts/schemas/app-lifecycle-result.schema.json",
+  "required_capabilities": ["app.stop@1", "app.inspect@1", "app.state.inspect@1"],
+  "tool_allowlist": ["app.stop", "app.inspect", "app.state.inspect"],
+  "risk": "medium",
+  "timeout_seconds": 60,
+  "max_steps": 3,
+  "verification": "not_foreground_and_process_absent"
+}

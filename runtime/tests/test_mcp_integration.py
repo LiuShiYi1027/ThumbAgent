@@ -20,6 +20,106 @@ from runtime.tests.test_apk_install import _write_apk
 
 
 class McpRuntimeIntegrationTests(unittest.TestCase):
+    def test_mcp_runs_application_lifecycle_with_scoped_data_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory) / "artifacts")
+            )
+            server = McpServer(
+                RuntimeApiClient(
+                    "http://127.0.0.1:8765",
+                    "integration-token",
+                    _InProcessHttpTransport(runtime),
+                )
+            )
+            _ready(server)
+            state = server.handle(
+                _request(
+                    3,
+                    "tools/call",
+                    {
+                        "name": "mobile_inspect_app_state",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "app_id": "com.example.fake",
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["state"]
+            launch = server.handle(
+                _request(
+                    4,
+                    "tools/call",
+                    {
+                        "name": "mobile_launch_app",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "app_id": "com.example.fake",
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["execution"]
+            launch_report = _wait_for_report(runtime, launch["task_id"])
+            stopped = server.handle(
+                _request(
+                    5,
+                    "tools/call",
+                    {
+                        "name": "mobile_stop_app",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "app_id": "com.example.fake",
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["execution"]
+            stop_report = _wait_for_report(runtime, stopped["task_id"])
+            approval = server.handle(
+                _request(
+                    6,
+                    "tools/call",
+                    {
+                        "name": "mobile_prepare_app_data_clear",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "app_id": "com.example.fake",
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["approval"]
+            submitted = server.handle(
+                _request(
+                    7,
+                    "tools/call",
+                    {
+                        "name": "mobile_clear_app_data",
+                        "arguments": {
+                            "approval_id": approval["approval_id"],
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["execution"]
+            deadline = time.monotonic() + 2
+            execution = {}
+            while time.monotonic() < deadline:
+                execution = runtime.get_task_execution(submitted["task_id"])
+                if execution["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.01)
+            report = runtime.get_task(submitted["task_id"])
+
+        self.assertTrue(state["foreground"])
+        self.assertEqual("succeeded", launch_report["status"])
+        self.assertTrue(launch_report["evidence_summary"]["state"]["foreground"])
+        self.assertEqual("succeeded", stop_report["status"])
+        self.assertFalse(stop_report["evidence_summary"]["state"]["process_present"])
+        self.assertTrue(approval["application_data_will_be_deleted"])
+        self.assertTrue(approval["application_will_remain_installed"])
+        self.assertEqual("succeeded", execution["status"])
+        self.assertTrue(report["evidence_summary"]["data_cleared"])
+
     def test_mcp_prepares_and_installs_scoped_apk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "apks"
@@ -244,6 +344,16 @@ class _InProcessHttpTransport:
         else:
             handler.do_POST()
         return int(captured["status"]), json.dumps(captured["payload"]).encode()
+
+
+def _wait_for_report(runtime: RuntimeService, task_id: str) -> dict[str, Any]:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        execution = runtime.get_task_execution(task_id)
+        if execution["status"] in {"succeeded", "failed"}:
+            return runtime.get_task(task_id)
+        time.sleep(0.01)
+    raise AssertionError("task did not reach a terminal state")
 
 
 def _ready(server: McpServer) -> None:

@@ -154,6 +154,33 @@ class CapabilityCatalog:
                     "默认删除应用数据；超时或断连时不自动重试",
                 ),
             ),
+            CapabilityDefinition(
+                "app.state.inspect@1",
+                RiskLevel.LOW,
+                Idempotency.SAFE,
+                CapabilityVerification.SUPPORTED,
+                ("设备在线且已授权调试",),
+                ("只返回进程存在、前台和 stopped flag，不返回 PID 或原始输出",),
+            ),
+            CapabilityDefinition(
+                "app.stop@1",
+                RiskLevel.MEDIUM,
+                Idempotency.CONDITIONAL,
+                CapabilityVerification.REQUIRED,
+                ("设备在线且已授权调试", "用户明确确认"),
+                ("仅允许停止明确识别为非系统应用的包",),
+            ),
+            CapabilityDefinition(
+                "app.data.clear@1",
+                RiskLevel.HIGH,
+                Idempotency.UNSAFE,
+                CapabilityVerification.REQUIRED,
+                ("设备在线且已授权调试", "范围绑定 Approval", "用户明确确认"),
+                (
+                    "仅允许清除明确识别为非系统应用的数据",
+                    "应用保持安装；不读取、备份或返回私有数据",
+                ),
+            ),
         )
         self._definitions = {
             definition.capability: definition for definition in definitions

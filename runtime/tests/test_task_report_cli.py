@@ -126,6 +126,40 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Memory used: 60.0%", report)
         self.assertIn("Battery temperature: 31.0 C", report)
 
+    def test_renders_application_lifecycle_evidence(self) -> None:
+        task = {
+            "task_id": "task_app",
+            "task_type": "app.data.clear",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "清除应用数据",
+            "started_at": "2026-07-26T00:00:00Z",
+            "completed_at": "2026-07-26T00:00:01Z",
+            "steps": [],
+            "evidence_summary": {
+                "operation": "clear_data",
+                "app": {
+                    "app_id": "com.example.app",
+                    "version_name": "1.0",
+                    "version_code": 1,
+                },
+                "state": {
+                    "foreground": False,
+                    "process_present": False,
+                    "stopped": True,
+                },
+                "data_cleared": True,
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn("Application operation: clear_data", report)
+        self.assertIn("Application: com.example.app (1.0 / 1)", report)
+        self.assertIn("foreground=False process_present=False stopped=True", report)
+        self.assertIn("Application data cleared: True", report)
+
     async def test_renders_failure_reason_without_full_payload_noise(self) -> None:
         task = await self.runtime.run_settings_scroll_navigation_task(
             "fake:android-001",

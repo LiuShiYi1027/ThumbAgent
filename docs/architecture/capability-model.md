@@ -32,6 +32,9 @@ performance.snapshot
 app.inspect
 app.install
 app.uninstall
+app.state.inspect
+app.stop
+app.data.clear
 ```
 
 不在 ID 中放平台名或版本，例如不用 `android.adb.tap`。
@@ -132,6 +135,9 @@ performance.snapshot@1
 app.inspect@1
 app.install@1
 app.uninstall@1
+app.state.inspect@1
+app.stop@1
+app.data.clear@1
 ```
 
 ITER-0001 只需实现 `device.inspect@1` 及设备发现所需内部能力，其余在后续迭代启用。
@@ -160,6 +166,12 @@ claim 的短期范围绑定 Approval。Approval 绑定 device、APK SHA-256、Ma
 ITER-0045 增加 `app.uninstall@1`。它是 High 风险、unsafe 幂等的设备写能力，使用与安装相互独立
 的短期 Approval，绑定 device、应用标识、版本和数据保留语义。系统应用或系统属性未知的应用在
 Prepare 阶段拒绝；超时或断连结果未知时禁止自动重试。
+
+ITER-0046 增加三项应用生命周期能力：`app.state.inspect@1` 是 Low 风险、safe 幂等的有界只读
+检查，只返回进程是否存在、是否前台和 package stopped flag，不返回 PID 或原始平台输出；
+`app.stop@1` 是 Medium 风险、unsafe 幂等的单应用写动作，要求明确确认并拒绝系统应用；
+`app.data.clear@1` 是 High 风险、unsafe 幂等的永久数据删除动作，只接受绑定设备、包名和版本的
+短期单次 Approval。停止和清除数据必须进行运行状态后置验证，结果未知时禁止自动重试。
 
 ## 10. 测试要求
 

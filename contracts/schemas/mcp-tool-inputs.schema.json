@@ -81,6 +81,55 @@
         "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 180 }
       }
     },
+    "app_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "app_id"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" }
+      }
+    },
+    "app_launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "app_id"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 60 }
+      }
+    },
+    "app_stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "app_id", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+        "confirmed": { "const": true, "description": "The MCP host must obtain explicit user confirmation before force-stopping the application." },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 60 }
+      }
+    },
+    "app_data_clear_prepare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "app_id"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" }
+      }
+    },
+    "app_data_clear_submit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "confirmed"],
+      "properties": {
+        "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+        "confirmed": { "const": true, "description": "The MCP host must show the exact application data deletion impact and obtain new explicit user confirmation." },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 180 }
+      }
+    },
     "agent_run": {
       "type": "object",
       "additionalProperties": false,

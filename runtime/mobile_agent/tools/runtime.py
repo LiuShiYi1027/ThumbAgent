@@ -86,6 +86,13 @@ class ToolRegistry:
             definition("app.inspect", "app.inspect@1", direct_invocation=False),
             definition("app.install", "app.install@1", direct_invocation=False),
             definition("app.uninstall", "app.uninstall@1", direct_invocation=False),
+            definition(
+                "app.state.inspect", "app.state.inspect@1", direct_invocation=False
+            ),
+            definition("app.stop", "app.stop@1", direct_invocation=False),
+            definition(
+                "app.data.clear", "app.data.clear@1", direct_invocation=False
+            ),
         )
         self._definitions = {definition.tool_id: definition for definition in definitions}
 

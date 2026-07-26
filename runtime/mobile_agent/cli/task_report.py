@@ -171,6 +171,25 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
         value = summary.get(key)
         if isinstance(value, int | float) and not isinstance(value, bool):
             lines.append(f"{label}: {value}{suffix}")
+    operation = summary.get("operation")
+    app = summary.get("app")
+    state = summary.get("state")
+    if isinstance(operation, str):
+        lines.append(f"Application operation: {operation}")
+    if isinstance(app, dict) and isinstance(app.get("app_id"), str):
+        lines.append(
+            f"Application: {app['app_id']} "
+            f"({app.get('version_name') or '-'} / {app.get('version_code') or '-'})"
+        )
+    if isinstance(state, dict):
+        lines.append(
+            "Application state: "
+            f"foreground={state.get('foreground', '-')} "
+            f"process_present={state.get('process_present', '-')} "
+            f"stopped={state.get('stopped', '-')}"
+        )
+    if isinstance(summary.get("data_cleared"), bool):
+        lines.append(f"Application data cleared: {summary['data_cleared']}")
     return lines or ["(no evidence summary)"]
 
 

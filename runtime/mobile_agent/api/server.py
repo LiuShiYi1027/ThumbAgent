@@ -89,6 +89,16 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             )
             self._write_json(status, payload)
             return
+        app_state_match = re.fullmatch(
+            r"/v1/devices/([^/]+)/apps/([^/]+)/state", path
+        )
+        if app_state_match:
+            status, payload = self._runtime().inspect_app_runtime_state_sync(
+                unquote(app_state_match.group(1)),
+                unquote(app_state_match.group(2)),
+            )
+            self._write_json(status, payload)
+            return
         app_match = re.fullmatch(r"/v1/devices/([^/]+)/apps/([^/]+)", path)
         if app_match:
             status, payload = self._runtime().inspect_installed_app_sync(
@@ -193,6 +203,18 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         )
         async_app_removal_match = re.fullmatch(
             r"/v1/tasks/app\.uninstall/async", self.path
+        )
+        async_app_launch_match = re.fullmatch(
+            r"/v1/tasks/app\.launch/async", self.path
+        )
+        async_app_stop_match = re.fullmatch(
+            r"/v1/tasks/app\.stop/async", self.path
+        )
+        app_data_clear_prepare_match = re.fullmatch(
+            r"/v1/apps/data/clear/prepare", self.path
+        )
+        async_app_data_clear_match = re.fullmatch(
+            r"/v1/tasks/app\.data\.clear/async", self.path
         )
         execution_cancel_match = re.fullmatch(
             r"/v1/task-executions/(task_[a-f0-9]{32})/cancel", self.path
@@ -312,6 +334,38 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 )
                 self._write_json(status, payload)
                 return
+            if app_data_clear_prepare_match:
+                if set(body) != {"device_id", "app_id"}:
+                    raise ValueError("app data clear prepare fields")
+                device_id = body.get("device_id")
+                app_id = body.get("app_id")
+                if not isinstance(device_id, str) or not isinstance(app_id, str):
+                    raise ValueError("app data clear prepare")
+                status, payload = self._runtime().prepare_app_data_clear_sync(
+                    device_id, app_id
+                )
+                self._write_json(status, payload)
+                return
+            if async_app_data_clear_match:
+                if set(body) - {"approval_id", "confirmed", "deadline_seconds"}:
+                    raise ValueError("app data clear fields")
+                approval_id = body.get("approval_id")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 180.0, 1.0, 1800.0
+                )
+                if not isinstance(approval_id, str) or not isinstance(confirmed, bool):
+                    raise ValueError("app data clear")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_app_data_clear_task_sync(
+                    approval_id, confirmed, idempotency_key, deadline_seconds
+                )
+                self._write_json(status, payload)
+                return
             if execution_cancel_match:
                 if body:
                     raise ValueError("empty body")
@@ -323,7 +377,51 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             device_id = body.get("device_id")
             if not isinstance(device_id, str):
                 raise ValueError("device_id")
-            if tool_match:
+            if async_app_launch_match:
+                if set(body) - {"device_id", "app_id", "deadline_seconds"}:
+                    raise ValueError("app launch fields")
+                app_id = body.get("app_id")
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 60.0, 1.0, 1800.0
+                )
+                if not isinstance(app_id, str):
+                    raise ValueError("app launch")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_app_launch_task_sync(
+                    device_id, app_id, idempotency_key, deadline_seconds
+                )
+            elif async_app_stop_match:
+                if set(body) - {
+                    "device_id",
+                    "app_id",
+                    "confirmed",
+                    "deadline_seconds",
+                }:
+                    raise ValueError("app stop fields")
+                app_id = body.get("app_id")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 60.0, 1.0, 1800.0
+                )
+                if not isinstance(app_id, str) or not isinstance(confirmed, bool):
+                    raise ValueError("app stop")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_app_stop_task_sync(
+                    device_id,
+                    app_id,
+                    confirmed,
+                    idempotency_key,
+                    deadline_seconds,
+                )
+            elif tool_match:
                 arguments = body.get("arguments", {})
                 confirmed = body.get("confirmed", False)
                 if not isinstance(arguments, dict) or not isinstance(confirmed, bool):

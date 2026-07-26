@@ -7,7 +7,7 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -23,6 +23,7 @@ from mobile_agent.devices.unavailable import UnavailableDeviceAdapter
 from mobile_agent.domain.device import ConnectionState, Device
 from mobile_agent.domain.apk import ApkInspector, ApkInstallApprovalStore
 from mobile_agent.domain.app_removal import AppRemovalApprovalStore
+from mobile_agent.domain.app_lifecycle import AppDataClearApprovalStore
 from mobile_agent.domain.capability import (
     CapabilityAvailability,
     CapabilityCatalog,
@@ -62,6 +63,12 @@ from mobile_agent.skills.open_app import OpenAppSkill
 from mobile_agent.skills.app_inventory import AppInspectSkill, AppListSkill
 from mobile_agent.skills.apk_install import ApkInstallSkill
 from mobile_agent.skills.app_removal import AppRemovalSkill
+from mobile_agent.skills.app_lifecycle import (
+    AppDataClearSkill,
+    AppLaunchSkill,
+    AppStateInspectSkill,
+    AppStopSkill,
+)
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
@@ -77,6 +84,7 @@ from mobile_agent.tasks.device_logs import DeviceLogsTaskRunner
 from mobile_agent.tasks.device_performance import DevicePerformanceTaskRunner
 from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
 from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
+from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
 from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
@@ -84,6 +92,7 @@ from mobile_agent.tools.performance_capture import DevicePerformanceCaptureTool
 from mobile_agent.tools.app_inventory import AppInventoryTool
 from mobile_agent.tools.apk_install import ApkInstallTool
 from mobile_agent.tools.app_removal import AppRemovalTool
+from mobile_agent.tools.app_lifecycle import AppLifecycleTool
 
 
 def _utc_now() -> str:
@@ -110,6 +119,7 @@ class RuntimeService:
         apk_root: Path | None = None,
         apk_approval_store: ApkInstallApprovalStore | None = None,
         app_removal_approval_store: AppRemovalApprovalStore | None = None,
+        app_data_clear_approval_store: AppDataClearApprovalStore | None = None,
     ) -> None:
         self._adapter = (
             adapter
@@ -158,6 +168,21 @@ class RuntimeService:
         self._app_removal = AppRemovalSkill(self._app_removal_tool)
         self._app_removal_task_runner = AppRemovalTaskRunner(self._app_removal)
         self._open_app = OpenAppSkill(self._tools)
+        self._app_lifecycle_tool = AppLifecycleTool(
+            self._adapter, self._tool_registry, self._policy
+        )
+        self._app_state = AppStateInspectSkill(self._app_lifecycle_tool)
+        self._app_launch = AppLaunchSkill(
+            self._open_app, self._app_lifecycle_tool
+        )
+        self._app_stop = AppStopSkill(self._app_lifecycle_tool)
+        self._app_data_clear_approvals = (
+            app_data_clear_approval_store or AppDataClearApprovalStore()
+        )
+        self._app_data_clear = AppDataClearSkill(self._app_lifecycle_tool)
+        self._app_lifecycle_task_runner = AppLifecycleTaskRunner(
+            self._app_launch, self._app_stop, self._app_data_clear
+        )
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
         self._tasks = TaskRunner(self._settings_scroll_navigate)
@@ -604,6 +629,246 @@ class RuntimeService:
             fingerprint,
             deadline_seconds,
             task_type="app.uninstall",
+        ).to_dict()
+
+    async def inspect_app_runtime_state(
+        self, device_id: str, app_id: str
+    ) -> dict[str, Any]:
+        """Return bounded application lifecycle state under Session and Lease."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"skill_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            return (await self._app_state.invoke(device_id, app_id)).to_dict()
+
+    async def prepare_app_data_clear(
+        self, device_id: str, app_id: str
+    ) -> dict[str, Any]:
+        """Inspect a non-system app and create a scoped data-clear Approval."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id, f"prepare_{uuid.uuid4().hex}", 30.0, session_id
+        ), self._adapter.bind_session(device_id, session_id):
+            device = next(
+                (
+                    item
+                    for item in await self._adapter.list_devices()
+                    if item.device_id == device_id
+                ),
+                None,
+            )
+            if device is None or "app.data.clear@1" not in device.capabilities:
+                raise MobileAgentError(
+                    "CAPABILITY_UNAVAILABLE",
+                    ErrorCategory.CAPABILITY,
+                    "设备不支持清除应用数据",
+                    details={"capability": "app.data.clear@1"},
+                )
+            app = await self._adapter.inspect_installed_app(device_id, app_id)
+        if app.system_app is not False:
+            raise MobileAgentError(
+                "SYSTEM_APP_PROTECTED",
+                ErrorCategory.POLICY,
+                "系统应用或系统属性未知的应用不允许清除数据",
+                suggested_action="仅选择明确识别为非系统应用的测试包",
+            )
+        return self._app_data_clear_approvals.create(
+            device_id, app
+        ).to_public_dict()
+
+    def submit_app_launch_task(
+        self,
+        device_id: str,
+        app_id: str,
+        idempotency_key: str,
+        deadline_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Enqueue a deterministic application launch and foreground verification."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        return self._submit_app_lifecycle_task(
+            "app.launch",
+            device_id,
+            f"启动应用并验证前台：{app_id}",
+            idempotency_key,
+            deadline_seconds,
+            {"app_id": app_id},
+            lambda task_id, on_step, cancelled, exceeded: (
+                self._app_lifecycle_task_runner.run_launch(
+                    task_id,
+                    device_id,
+                    app_id,
+                    deadline_seconds,
+                    on_step,
+                    cancelled,
+                    exceeded,
+                )
+            ),
+        )
+
+    def submit_app_stop_task(
+        self,
+        device_id: str,
+        app_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Enqueue one explicitly confirmed non-system application stop."""
+
+        app_id = AppInventoryTool.validate_app_id(app_id)
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "停止应用需要用户明确确认",
+            )
+        return self._submit_app_lifecycle_task(
+            "app.stop",
+            device_id,
+            f"停止非系统应用并验证：{app_id}",
+            idempotency_key,
+            deadline_seconds,
+            {"app_id": app_id, "confirmed": True},
+            lambda task_id, on_step, cancelled, exceeded: (
+                self._app_lifecycle_task_runner.run_stop(
+                    task_id,
+                    device_id,
+                    app_id,
+                    confirmed,
+                    deadline_seconds,
+                    on_step,
+                    cancelled,
+                    exceeded,
+                )
+            ),
+        )
+
+    def submit_app_data_clear_task(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 180.0,
+    ) -> dict[str, Any]:
+        """Claim a scoped Approval and enqueue High-risk application data clear."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "清除应用数据需要用户对删除影响进行明确确认",
+            )
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT",
+                ErrorCategory.VALIDATION,
+                "清除应用数据必须提供 Idempotency-Key",
+            )
+        approval = self._app_data_clear_approvals.claim(
+            approval_id, idempotency_key
+        )
+        return self._submit_app_lifecycle_task(
+            "app.data.clear",
+            approval.device_id,
+            f"清除已批准应用的数据：{approval.app.app_id}",
+            idempotency_key,
+            deadline_seconds,
+            {
+                "approval_id": approval.approval_id,
+                "app_id": approval.app.app_id,
+                "version_code": approval.app.version_code,
+            },
+            lambda task_id, on_step, cancelled, exceeded: (
+                self._app_lifecycle_task_runner.run_clear_data(
+                    task_id,
+                    approval,
+                    confirmed,
+                    deadline_seconds,
+                    on_step,
+                    cancelled,
+                    exceeded,
+                )
+            ),
+        )
+
+    def _submit_app_lifecycle_task(
+        self,
+        task_type: str,
+        device_id: str,
+        goal: str,
+        idempotency_key: str,
+        deadline_seconds: float,
+        fingerprint_fields: dict[str, Any],
+        invoke: Callable[
+            [str, Any, Any, Any], Awaitable[TaskRun]
+        ],
+    ) -> dict[str, Any]:
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT",
+                ErrorCategory.VALIDATION,
+                "应用生命周期任务必须提供 Idempotency-Key",
+            )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+
+        async def run_factory(
+            task_id: str, on_step: Any, is_cancelled: Any, deadline_exceeded: Any
+        ) -> TaskRun:
+            try:
+                session_id = await self._adapter.require_online_session(device_id)
+                with self._device_leases.hold(
+                    device_id,
+                    task_id,
+                    deadline_seconds + 30.0,
+                    session_id,
+                ), self._adapter.bind_session(device_id, session_id):
+                    self._task_executor.bind_device_session(task_id, session_id)
+                    task = await invoke(
+                        task_id, on_step, is_cancelled, deadline_exceeded
+                    )
+                    return replace(task, device_session_id=session_id)
+            except MobileAgentError as error:
+                now = _utc_now()
+                return TaskRun(
+                    task_id,
+                    task_type,
+                    device_id,
+                    goal,
+                    TaskStatus.FAILED,
+                    now,
+                    now,
+                    (),
+                    {},
+                    error.to_dict(),
+                    deadline_seconds=deadline_seconds,
+                )
+
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_type": task_type,
+                    "device_id": device_id,
+                    "deadline_seconds": deadline_seconds,
+                    **fingerprint_fields,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return self._task_executor.submit(
+            device_id,
+            goal,
+            run_factory,
+            self._task_store.save,
+            idempotency_key,
+            fingerprint,
+            deadline_seconds,
+            task_type=task_type,
         ).to_dict()
 
     @staticmethod
@@ -1330,6 +1595,84 @@ class RuntimeService:
         except MobileAgentError as error:
             return self._error_response(error)
 
+    def inspect_app_runtime_state_sync(
+        self, device_id: str, app_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for bounded application state."""
+
+        try:
+            state = asyncio.run(self.inspect_app_runtime_state(device_id, app_id))
+            return HTTPStatus.OK, {"state": state}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def prepare_app_data_clear_sync(
+        self, device_id: str, app_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for application data-clear preflight."""
+
+        try:
+            approval = asyncio.run(self.prepare_app_data_clear(device_id, app_id))
+            return HTTPStatus.OK, {"approval": approval}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_app_launch_task_sync(
+        self,
+        device_id: str,
+        app_id: str,
+        idempotency_key: str,
+        deadline_seconds: float = 60.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for deterministic app launch."""
+
+        try:
+            execution = self.submit_app_launch_task(
+                device_id, app_id, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_app_stop_task_sync(
+        self,
+        device_id: str,
+        app_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 60.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for explicitly confirmed app stop."""
+
+        try:
+            execution = self.submit_app_stop_task(
+                device_id,
+                app_id,
+                confirmed,
+                idempotency_key,
+                deadline_seconds,
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_app_data_clear_task_sync(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 180.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for approved application data clear."""
+
+        try:
+            execution = self.submit_app_data_clear_task(
+                approval_id, confirmed, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
     def invoke_tool_sync(
         self, tool_id: str, device_id: str, arguments: dict[str, Any], confirmed: bool = False
     ) -> tuple[HTTPStatus, dict[str, Any]]:
@@ -1632,7 +1975,12 @@ class RuntimeService:
 
     @staticmethod
     def _error_response(error: MobileAgentError) -> tuple[HTTPStatus, dict[str, Any]]:
-        if error.code in {"DEVICE_NOT_FOUND", "TOOL_NOT_FOUND", "TASK_NOT_FOUND"}:
+        if error.code in {
+            "DEVICE_NOT_FOUND",
+            "APP_NOT_FOUND",
+            "TOOL_NOT_FOUND",
+            "TASK_NOT_FOUND",
+        }:
             status = HTTPStatus.NOT_FOUND
         elif error.code in {
             "INVALID_ARGUMENT", "APK_INVALID", "APK_PACKAGE_MISMATCH",

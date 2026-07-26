@@ -48,7 +48,7 @@ class DeviceInspectionTests(unittest.TestCase):
         inspection = asyncio.run(runtime.inspect_device("fake:android-001"))
 
         self.assertEqual("ready", inspection["availability"]["status"])
-        self.assertEqual(13, len(inspection["capabilities"]))
+        self.assertEqual(16, len(inspection["capabilities"]))
         install = next(
             item for item in inspection["capabilities"]
             if item["capability"] == "app.install@1"

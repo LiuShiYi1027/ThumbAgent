@@ -1,0 +1,15 @@
+{
+  "id": "app.open",
+  "version": "1.0.0",
+  "name": "Launch application",
+  "description": "Launch one installed application and verify it is foreground using a post-action runtime state query.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-inspection-request.schema.json",
+  "output_schema": "contracts/schemas/app-lifecycle-result.schema.json",
+  "required_capabilities": ["app.launch@1", "app.inspect@1", "app.state.inspect@1"],
+  "tool_allowlist": ["app.launch", "app.inspect", "app.state.inspect"],
+  "risk": "low",
+  "timeout_seconds": 60,
+  "max_steps": 3,
+  "verification": "foreground_app_and_runtime_state"
+}

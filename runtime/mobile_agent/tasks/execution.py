@@ -50,6 +50,9 @@ _SUPPORTED_TASK_TYPES = frozenset(
         "device.performance.snapshot",
         "app.install",
         "app.uninstall",
+        "app.launch",
+        "app.stop",
+        "app.data.clear",
     }
 )
 

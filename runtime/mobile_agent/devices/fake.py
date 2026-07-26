@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
 from mobile_agent.domain.app import InstalledApp
+from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -73,6 +74,8 @@ class FakeDeviceAdapter:
         self.custom_ui_xml: bytes | None = None
         self.install_target_app_id = "com.example.installed"
         self._installed_apps = {"com.android.settings", "com.example.fake"}
+        self._running_apps = {"com.example.fake"}
+        self._stopped_apps: set[str] = set()
         self._devices = devices if devices is not None else [
             Device(
                 device_id="fake:android-001",
@@ -95,6 +98,9 @@ class FakeDeviceAdapter:
                     "app.inspect@1",
                     "app.install@1",
                     "app.uninstall@1",
+                    "app.state.inspect@1",
+                    "app.stop@1",
+                    "app.data.clear@1",
                 ),
             )
         ]
@@ -142,6 +148,8 @@ class FakeDeviceAdapter:
         self.foreground_app = app_id
         self.foreground_activity = ".MainActivity"
         self.actions.append(("app.launch", device_id, app_id))
+        self._running_apps.add(app_id)
+        self._stopped_apps.discard(app_id)
 
     async def press_back(self, device_id: str) -> None:
         self.actions.append(("navigation.back", device_id))
@@ -220,9 +228,45 @@ class FakeDeviceAdapter:
     ) -> None:
         self.actions.append(("app.install", device_id, apk_path.name, replace_existing))
         self._installed_apps.add(self.install_target_app_id)
+        self._stopped_apps.add(self.install_target_app_id)
 
     async def uninstall_app(
         self, device_id: str, app_id: str, keep_data: bool
     ) -> None:
         self.actions.append(("app.uninstall", device_id, app_id, keep_data))
         self._installed_apps.discard(app_id)
+        self._running_apps.discard(app_id)
+        self._stopped_apps.discard(app_id)
+
+    async def inspect_app_runtime_state(
+        self, device_id: str, app: InstalledApp
+    ) -> AppRuntimeState:
+        self.actions.append(("app.state.inspect", device_id, app.app_id))
+        if app.app_id not in self._installed_apps:
+            raise MobileAgentError(
+                "APP_NOT_FOUND", ErrorCategory.DEVICE, "设备上未安装该应用"
+            )
+        return AppRuntimeState(
+            device_id,
+            app,
+            app.app_id in self._running_apps,
+            self.foreground_app == app.app_id,
+            app.app_id in self._stopped_apps,
+            _now(),
+        )
+
+    async def force_stop_app(self, device_id: str, app_id: str) -> None:
+        self.actions.append(("app.stop", device_id, app_id))
+        self._running_apps.discard(app_id)
+        self._stopped_apps.add(app_id)
+        if self.foreground_app == app_id:
+            self.foreground_app = "com.example.launcher"
+            self.foreground_activity = ".Launcher"
+
+    async def clear_app_data(self, device_id: str, app_id: str) -> None:
+        self.actions.append(("app.data.clear", device_id, app_id))
+        self._running_apps.discard(app_id)
+        self._stopped_apps.add(app_id)
+        if self.foreground_app == app_id:
+            self.foreground_app = "com.example.launcher"
+            self.foreground_activity = ".Launcher"

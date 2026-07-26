@@ -16,21 +16,35 @@ Runtime 默认监听 `127.0.0.1:8765`，提供 `/v1/health`、`/v1/devices` 和 
 
 ## MCP Skills 开发者预览
 
-在 macOS + Codex 桌面端进行本地真机验收时，可以使用一键脚本。运行前请完全退出 Codex/ChatGPT；
-脚本会根据模型配置静默读取模型 Key、为本次 Runtime 生成新的短期 token、刷新 `mobile-agent` MCP 配置、
-启动 Runtime，并在就绪后重新打开 Codex：
+在 macOS + Codex 桌面端进行本地真机验收时，可以使用一键脚本：
 
 ```bash
 ./scripts/run-mcp-preview.zsh
 ```
 
-模型 Key 只进入 Runtime 进程环境，不写入仓库或脚本输出。脚本保持前台运行，按 `Ctrl+C` 停止
-Runtime。Codex 打开后必须新建对话；已存在的线程不会动态挂载刚注册的 MCP Tools。仅检查 Python、
-ADB、Codex 和模型配置路径而不读取密钥或修改 MCP 配置时，使用：
+首次运行时，脚本会提示输入模型 Key，并将模型 Key 与稳定的本地 Runtime token 分别保存到 macOS
+登录 Keychain；后续启动不会再次询问。脚本会安全停止占用目标端口的旧
+`mobile_agent.api.server`、复用未变化的 MCP 注册并启动新 Runtime。Codex/ChatGPT 已运行时无需
+关闭或重新打开。只有首次注册、显式 `--refresh-mcp` 或 MCP 配置发生变化时，运行中的 Codex
+需要重启一次并新建任务，以刷新缓存的 MCP 环境；普通 Runtime 重启不需要。
+
+模型 Key 只进入 Keychain 和 Runtime 进程环境，不写入仓库或脚本输出。脚本保持前台运行，按
+`Ctrl+C` 停止 Runtime。仅检查 Python、ADB、Codex 和模型配置路径而不读取密钥或修改 MCP 配置时，
+使用：
 
 ```bash
 ./scripts/run-mcp-preview.zsh --check
 ```
+
+需要强制刷新 MCP 注册或删除预览 Secret 时：
+
+```bash
+./scripts/run-mcp-preview.zsh --refresh-mcp
+./scripts/run-mcp-preview.zsh --forget-secrets
+```
+
+刷新注册不会轮换 Keychain 中的 token。若目标端口被其他程序占用，脚本会拒绝误杀；它只自动停止
+命令行明确属于 `mobile_agent.api.server` 的进程。
 
 为了让 Web、CLI 和 MCP 共享同一个 Runtime，请使用显式本地 token 启动服务：
 
@@ -49,9 +63,10 @@ MOBILE_AGENT_API_TOKEN=<same-local-random-token> \
 python3.11 -m mobile_agent.mcp
 ```
 
-MCP 提供目标级 Tools，覆盖就绪诊断、设备与已安装应用检查、Agent 异步任务、任务查询/取消、脱敏日志、
-聚合性能快照和性能比较。它不暴露 ADB、任意 Shell 或 `input.tap` 等原子输入 Tool。Agent 和日志调用
-只有在 MCP Host 已向用户展示参数并获得确认后，才允许传入 `confirmed=true`。
+MCP 提供目标级 Tools，覆盖就绪诊断、设备与已安装应用检查、应用生命周期、Agent 异步任务、
+任务查询/取消、脱敏日志、聚合性能快照和性能比较。它不暴露 ADB、任意 Shell 或 `input.tap`
+等原子输入 Tool。需要确认的动作只有在 MCP Host 已向用户展示参数和影响并获得确认后，才允许
+传入 `confirmed=true`。
 
 启动后可查看统一就绪诊断：
 
@@ -79,6 +94,12 @@ Approval；MCP Host 向用户展示该摘要并取得明确确认后，才能调
 应用卸载使用独立的 `mobile_prepare_app_uninstall` → `mobile_uninstall_app` 两阶段流程。Prepare
 只读返回应用版本、系统应用判定和数据删除影响；系统应用或属性未知的应用直接拒绝。用户对该摘要
 重新明确确认后才能提交异步卸载任务。失败或结果未知时不得自动重试。
+
+应用生命周期提供 `mobile_inspect_app_state`、`mobile_launch_app` 和 `mobile_stop_app`。状态检查
+只返回进程是否存在、是否前台和 stopped flag；启动、停止返回异步 task_id，停止非系统应用前必须
+明确确认。永久清除应用数据必须先调用 `mobile_prepare_app_data_clear`，展示包名、版本和数据删除
+影响并获得一次新的明确确认，再调用 `mobile_clear_app_data`。应用数据清除不会卸载应用，失败或
+unknown outcome 不得自动重试。
 
 显式确认后采集最近日志快照（需传入 Runtime 启动时生成的本地 API token）：
 

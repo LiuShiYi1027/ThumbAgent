@@ -13,6 +13,7 @@ from typing import Callable
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.domain.artifact import ArtifactWriter
 from mobile_agent.domain.app import InstalledApp
+from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
@@ -225,3 +226,17 @@ class SessionTrackingDeviceAdapter:
     ) -> None:
         await self._validate_binding(device_id)
         await self._adapter.uninstall_app(device_id, app_id, keep_data)
+
+    async def inspect_app_runtime_state(
+        self, device_id: str, app: InstalledApp
+    ) -> AppRuntimeState:
+        await self._validate_binding(device_id)
+        return await self._adapter.inspect_app_runtime_state(device_id, app)
+
+    async def force_stop_app(self, device_id: str, app_id: str) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.force_stop_app(device_id, app_id)
+
+    async def clear_app_data(self, device_id: str, app_id: str) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.clear_app_data(device_id, app_id)

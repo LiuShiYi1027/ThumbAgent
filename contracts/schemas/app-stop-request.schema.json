@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-stop-request.schema.json",
+  "title": "Application Stop Request",
+  "type": "object",
+  "required": ["device_id", "app_id", "confirmed"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+    "confirmed": { "const": true }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+{
+  "id": "app.state.inspect",
+  "version": "1.0.0",
+  "name": "Inspect application runtime state",
+  "description": "Read bounded process-present, foreground and package stopped state without returning process identifiers or raw platform output.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/app-inspection-request.schema.json",
+  "output_schema": "contracts/schemas/app-runtime-state.schema.json",
+  "required_capabilities": ["app.inspect@1", "app.state.inspect@1"],
+  "tool_allowlist": ["app.inspect", "app.state.inspect"],
+  "risk": "low",
+  "timeout_seconds": 30,
+  "max_steps": 2,
+  "verification": "bounded_platform_state_query"
+}

@@ -42,7 +42,9 @@ def parse_package_details(app_id: str, output: str) -> InstalledApp:
         r"^\s*(?:pkgFlags|flags)=\[([^\]\r\n]*)\]", output, re.MULTILINE
     )
     installer = installer_match.group(1) if installer_match else None
-    if installer in {"null", "None"} or (installer is not None and not valid_app_id(installer)):
+    if installer in {"null", "None"} or (
+        installer is not None and not valid_app_id(installer)
+    ):
         installer = None
     return InstalledApp(
         app_id=app_id,
@@ -58,3 +60,17 @@ def parse_package_details(app_id: str, output: str) -> InstalledApp:
         if flags_match
         else None,
     )
+
+
+def parse_package_stopped(output: str) -> bool | None:
+    """Extract the package stopped state without exposing package-manager output."""
+
+    stopped_match = re.search(r"\bstopped=(true|false)\b", output)
+    if stopped_match is not None:
+        return stopped_match.group(1) == "true"
+    flags_match = re.search(
+        r"^\s*(?:pkgFlags|flags)=\[([^\]\r\n]*)\]", output, re.MULTILINE
+    )
+    if flags_match is not None:
+        return "STOPPED" in flags_match.group(1).split()
+    return None

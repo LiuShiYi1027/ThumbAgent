@@ -51,6 +51,36 @@ class McpApiClientTests(unittest.TestCase):
 
         self.assertEqual(error, raised.exception.error)
 
+    def test_lifecycle_mutations_use_fixed_endpoints_and_idempotency(self) -> None:
+        transport = _Transport({"execution": {"task_id": "task_1"}})
+        client = RuntimeApiClient("http://127.0.0.1:8765", "token", transport)
+
+        client.launch_app(
+            {"device_id": "adb:001", "app_id": "com.example.app"}
+        )
+        client.stop_app(
+            {
+                "device_id": "adb:001",
+                "app_id": "com.example.app",
+                "confirmed": True,
+            }
+        )
+        client.clear_app_data(
+            {"approval_id": "approval_" + "1" * 32, "confirmed": True}
+        )
+
+        self.assertEqual(
+            [
+                "/v1/tasks/app.launch/async",
+                "/v1/tasks/app.stop/async",
+                "/v1/tasks/app.data.clear/async",
+            ],
+            [url.removeprefix("http://127.0.0.1:8765") for _, url, *_ in transport.calls],
+        )
+        self.assertTrue(
+            all("Idempotency-Key" in call[2] for call in transport.calls)
+        )
+
     def test_invalid_or_oversized_runtime_response_is_safe(self) -> None:
         invalid = RuntimeApiClient(
             "http://localhost:8765",

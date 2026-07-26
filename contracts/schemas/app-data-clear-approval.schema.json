@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-data-clear-approval.schema.json",
+  "title": "Application Data Clear Approval",
+  "type": "object",
+  "required": ["schema_version", "approval_id", "device_id", "app", "application_data_will_be_deleted", "application_will_remain_installed", "prepared_at", "expires_at", "confirmation_required"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+    "device_id": { "type": "string" },
+    "app": { "$ref": "app-inspection-result.schema.json" },
+    "application_data_will_be_deleted": { "const": true },
+    "application_will_remain_installed": { "const": true },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "confirmation_required": { "const": true }
+  },
+  "additionalProperties": false
+}
