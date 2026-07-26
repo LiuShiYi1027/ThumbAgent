@@ -160,6 +160,34 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("foreground=False process_present=False stopped=True", report)
         self.assertIn("Application data cleared: True", report)
 
+    def test_renders_diagnostic_bundle_metadata_without_content(self) -> None:
+        task = {
+            "task_id": "task_bundle",
+            "task_type": "device.diagnostics.bundle",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "采集诊断包",
+            "started_at": "2026-07-26T00:00:00Z",
+            "completed_at": "2026-07-26T00:00:01Z",
+            "steps": [],
+            "evidence_summary": {
+                "bundle_artifact": {
+                    "artifact_id": "artifact_bundle",
+                    "size_bytes": 4096,
+                    "relative_path": "2026/07/26/artifact_bundle.zip",
+                }
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn(
+            "Diagnostic bundle: artifact_bundle / 4096 bytes / "
+            "2026/07/26/artifact_bundle.zip",
+            report,
+        )
+
     async def test_renders_failure_reason_without_full_payload_noise(self) -> None:
         task = await self.runtime.run_settings_scroll_navigation_task(
             "fake:android-001",

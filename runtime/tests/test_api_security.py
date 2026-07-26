@@ -230,7 +230,7 @@ class ApiSecurityTests(unittest.TestCase):
             "fake:android-001",
             payload["inspection"]["availability"]["device"]["device_id"],
         )
-        self.assertEqual(16, len(payload["inspection"]["capabilities"]))
+        self.assertEqual(17, len(payload["inspection"]["capabilities"]))
 
     def test_get_app_inventory_is_bounded_and_supports_prefix(self) -> None:
         with TemporaryDirectory() as directory:

@@ -21,6 +21,7 @@ class ArtifactStore:
         (ArtifactKind.UI_TREE, "application/xml", ".xml"),
         (ArtifactKind.DEVICE_LOG, "text/plain", ".log"),
         (ArtifactKind.DEVICE_PERFORMANCE, "application/json", ".json"),
+        (ArtifactKind.DIAGNOSTIC_BUNDLE, "application/zip", ".zip"),
     }
 
     def __init__(self, root: Path) -> None:

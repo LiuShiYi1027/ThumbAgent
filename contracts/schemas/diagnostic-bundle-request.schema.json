@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/diagnostic-bundle-request.schema.json",
+  "title": "Diagnostic Bundle Request",
+  "type": "object",
+  "required": ["device_id", "confirmed"],
+  "properties": {
+    "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "app_id": { "type": ["string", "null"], "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+    "max_log_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 500 },
+    "minimum_log_level": { "enum": ["verbose", "debug", "info", "warn", "error", "fatal"], "default": "info" },
+    "confirmed": { "const": true },
+    "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 120 }
+  },
+  "additionalProperties": false
+}

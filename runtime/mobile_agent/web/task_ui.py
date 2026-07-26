@@ -108,9 +108,11 @@ TASK_UI_HTML = """<!doctype html>
           </select>
           <button id="collectLogs" disabled>确认并采集最近 500 行日志</button>
           <button id="capturePerformance" disabled>采集性能快照</button>
+          <button id="collectDiagnosticBundle" disabled>确认并采集诊断包</button>
         </div>
         <div id="logCaptureStatus" class="model-status-help"></div>
         <div id="performanceStatus" class="model-status-help"></div>
+        <div id="diagnosticBundleStatus" class="model-status-help"></div>
         <label class="label" for="agentGoal">Agent Preview 目标</label>
         <textarea id="agentGoal" maxlength="500" placeholder="例如：进入显示和亮度页面">进入显示和亮度页面</textarea>
         <div id="goalDraft" class="goal-draft" hidden></div>
@@ -155,6 +157,8 @@ TASK_UI_HTML = """<!doctype html>
     const logLevelEl = document.querySelector("#logLevel");
     const logCaptureStatusEl = document.querySelector("#logCaptureStatus");
     const capturePerformanceEl = document.querySelector("#capturePerformance");
+    const collectDiagnosticBundleEl = document.querySelector("#collectDiagnosticBundle");
+    const diagnosticBundleStatusEl = document.querySelector("#diagnosticBundleStatus");
     const performanceStatusEl = document.querySelector("#performanceStatus");
     const API_TOKEN = __MOBILE_AGENT_API_TOKEN__;
     let selectedTaskId = "";
@@ -316,6 +320,7 @@ TASK_UI_HTML = """<!doctype html>
       cancelExecutionEl.hidden = !activeExecutionId;
       collectLogsEl.disabled = !hasDevice || hasActiveExecution;
       capturePerformanceEl.disabled = !hasDevice || hasActiveExecution;
+      collectDiagnosticBundleEl.disabled = !hasDevice || hasActiveExecution;
     }
 
     async function collectDeviceLogs() {
@@ -379,6 +384,42 @@ TASK_UI_HTML = """<!doctype html>
         await pollExecution();
       } catch (error) {
         performanceStatusEl.textContent = `性能快照失败：${error.message}`;
+      } finally {
+        updateRunButtons();
+      }
+    }
+
+    async function collectDiagnosticBundle() {
+      const deviceId = deviceSelectEl.value;
+      if (!deviceId) return;
+      collectDiagnosticBundleEl.disabled = true;
+      diagnosticBundleStatusEl.textContent = "正在采集截图、UI Tree、脱敏日志和聚合性能…";
+      try {
+        const response = await fetch("/v1/tasks/device.diagnostics.bundle/async", {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${API_TOKEN}`,
+            "Idempotency-Key": newIdempotencyKey()
+          },
+          body: JSON.stringify({
+            device_id: deviceId,
+            max_log_lines: 500,
+            minimum_log_level: logLevelEl.value,
+            confirmed: true,
+            deadline_seconds: 120
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error?.message || response.statusText);
+        activeExecutionId = payload.execution.task_id;
+        selectedTaskId = activeExecutionId;
+        diagnosticBundleStatusEl.textContent = `诊断包任务已提交：${payload.execution.status}`;
+        updateRunButtons();
+        await pollExecution();
+      } catch (error) {
+        diagnosticBundleStatusEl.textContent = `诊断包采集失败：${error.message}`;
       } finally {
         updateRunButtons();
       }
@@ -642,6 +683,7 @@ TASK_UI_HTML = """<!doctype html>
         ${card("日志采集", summary.captured_bytes !== undefined ? `${esc(summary.captured_bytes)} bytes · 脱敏 ${esc(summary.redaction_count || 0)} 处 · ${summary.truncated ? "已截断" : "未截断"}` : "-")}
         ${card("性能快照", summary.cpu_total_usage_percent !== undefined ? `CPU ${esc(summary.cpu_total_usage_percent)}% · 内存 ${esc(summary.memory_used_percent)}% · 电量 ${esc(summary.battery_level_percent)}% · 温度 ${esc(summary.battery_temperature_celsius ?? "-")}°C` : "-")}
         ${card("应用生命周期", summary.operation ? `${esc(summary.operation)} · ${esc(summary.app?.app_id || "-")}<br>前台 ${esc(summary.state?.foreground ?? "-")} · 进程 ${esc(summary.state?.process_present ?? "-")} · stopped ${esc(summary.state?.stopped ?? "-")} · 数据清除 ${esc(summary.data_cleared ?? "-")}` : "-")}
+        ${card("诊断包", summary.bundle_artifact ? `${esc(summary.bundle_artifact.artifact_id)} · ${esc(summary.bundle_artifact.size_bytes)} bytes<br><code>${esc(summary.bundle_artifact.relative_path)}</code><br>日志 ${esc(summary.log_summary?.captured_bytes ?? "-")} bytes · CPU ${esc(summary.performance_summary?.cpu?.total_usage_percent ?? "-")}%` : "-")}
       </div>
       <h3>事件</h3>
       ${renderEvents(events)}
@@ -778,6 +820,7 @@ TASK_UI_HTML = """<!doctype html>
     runDemoEl.addEventListener("click", runDemoTask);
     collectLogsEl.addEventListener("click", collectDeviceLogs);
     capturePerformanceEl.addEventListener("click", captureDevicePerformance);
+    collectDiagnosticBundleEl.addEventListener("click", collectDiagnosticBundle);
     loadModelProviderStatus();
     loadReadiness();
     loadTasks();

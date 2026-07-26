@@ -91,6 +91,7 @@ class AndroidDeviceAdapter:
                 "app.state.inspect@1",
                 "app.stop@1",
                 "app.data.clear@1",
+                "device.diagnostics.bundle@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(

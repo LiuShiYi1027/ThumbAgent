@@ -173,6 +173,16 @@ class RuntimeApiClient:
     def compare_performance(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/performance-comparisons", arguments)
 
+    def collect_diagnostic_bundle(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/device.diagnostics.bundle/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
     def _request(
         self,
         method: str,

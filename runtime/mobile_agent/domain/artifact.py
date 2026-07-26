@@ -15,6 +15,7 @@ class ArtifactKind(str, Enum):
     UI_TREE = "ui_tree"
     DEVICE_LOG = "device_log"
     DEVICE_PERFORMANCE = "device_performance"
+    DIAGNOSTIC_BUNDLE = "diagnostic_bundle"
 
 
 @dataclass(frozen=True, slots=True)

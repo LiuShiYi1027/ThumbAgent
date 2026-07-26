@@ -54,6 +54,8 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("Skill allowlist", TASK_UI_HTML)
         self.assertIn("/v1/tasks?limit=50", TASK_UI_HTML)
         self.assertIn("/v1/model-provider/status", TASK_UI_HTML)
+        self.assertIn("collectDiagnosticBundle", TASK_UI_HTML)
+        self.assertIn("/v1/tasks/device.diagnostics.bundle/async", TASK_UI_HTML)
         self.assertIn("/v1/tasks/settings.scroll_navigate/run", TASK_UI_HTML)
         self.assertIn("/v1/tasks/agent.run", TASK_UI_HTML)
         self.assertIn("/v1/tasks/agent.run/async", TASK_UI_HTML)

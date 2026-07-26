@@ -101,6 +101,7 @@ class FakeDeviceAdapter:
                     "app.state.inspect@1",
                     "app.stop@1",
                     "app.data.clear@1",
+                    "device.diagnostics.bundle@1",
                 ),
             )
         ]

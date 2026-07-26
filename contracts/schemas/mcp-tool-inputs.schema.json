@@ -130,6 +130,19 @@
         "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 180 }
       }
     },
+    "diagnostic_bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "app_id": { "type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$" },
+        "max_log_lines": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 500 },
+        "minimum_log_level": { "enum": ["verbose", "debug", "info", "warn", "error", "fatal"], "default": "info" },
+        "confirmed": { "const": true, "description": "The MCP host must explain that screenshot, UI tree and redacted logs will be captured locally, then obtain explicit user confirmation." },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 120 }
+      }
+    },
     "agent_run": {
       "type": "object",
       "additionalProperties": false,

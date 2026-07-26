@@ -219,6 +219,14 @@ TOOLS = (
         True,
         True,
     ),
+    McpToolDefinition(
+        "mobile_collect_diagnostic_bundle",
+        "Collect diagnostic evidence bundle",
+        "Submit one bounded local capture containing screenshot, UI tree, redacted logs, aggregate performance and optional app state. The MCP host must explain the captured evidence and obtain explicit user confirmation before confirmed=true. Returns task_id and never inline evidence content.",
+        "diagnostic_bundle",
+        False,
+        False,
+    ),
 )
 
 

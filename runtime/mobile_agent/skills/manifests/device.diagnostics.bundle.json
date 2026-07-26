@@ -1,0 +1,15 @@
+{
+  "id": "device.diagnostics.bundle",
+  "version": "1.0.0",
+  "name": "Collect local diagnostic evidence bundle",
+  "description": "Capture current screenshot, UI tree, redacted bounded logs, aggregate performance and optional app state into one local integrity-manifest ZIP.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/diagnostic-bundle-request.schema.json",
+  "output_schema": "contracts/schemas/diagnostic-bundle-result.schema.json",
+  "required_capabilities": ["device.diagnostics.bundle@1", "screen.observe@1", "logs.collect@1", "performance.snapshot@1"],
+  "tool_allowlist": ["device.diagnostics.bundle", "screen.observe", "device.logs.capture", "device.performance.capture", "app.state.inspect"],
+  "risk": "medium",
+  "timeout_seconds": 120,
+  "max_steps": 5,
+  "verification": "zip_manifest_and_source_hashes_verified"
+}

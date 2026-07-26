@@ -45,6 +45,7 @@ class McpRuntimeClient(Protocol):
     def collect_logs(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def capture_performance(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def compare_performance(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def collect_diagnostic_bundle(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class _ToolRateLimiter:
@@ -173,6 +174,7 @@ class McpServer:
                     "APK installation requires prepare first; show the returned scoped approval summary and obtain a new explicit confirmation before install. "
                     "Application uninstall requires a separate prepare step and new explicit confirmation of the data deletion impact. "
                     "Application stop requires explicit confirmation. Application data clear requires prepare first and a new explicit confirmation of permanent data deletion. "
+                    "Diagnostic bundle capture requires explicit confirmation because it reads screenshot, UI tree and redacted logs; bundle content remains local. "
                     "Long-running work returns a Mobile Agent task_id; query execution and report tools for progress."
                 ),
             },
@@ -276,6 +278,9 @@ class McpServer:
             ),
             "mobile_compare_device_performance": lambda: self._client.compare_performance(
                 arguments
+            ),
+            "mobile_collect_diagnostic_bundle": lambda: (
+                self._client.collect_diagnostic_bundle(arguments)
             ),
         }
         return handlers[tool.name]()

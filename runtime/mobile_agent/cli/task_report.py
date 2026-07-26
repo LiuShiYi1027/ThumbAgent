@@ -190,6 +190,32 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
         )
     if isinstance(summary.get("data_cleared"), bool):
         lines.append(f"Application data cleared: {summary['data_cleared']}")
+    bundle = summary.get("bundle_artifact")
+    if isinstance(bundle, dict):
+        lines.append(
+            "Diagnostic bundle: "
+            f"{bundle.get('artifact_id', '-')} / "
+            f"{bundle.get('size_bytes', '-')} bytes / "
+            f"{bundle.get('relative_path', '-')}"
+        )
+    bundle_logs = summary.get("log_summary")
+    if isinstance(bundle_logs, dict):
+        lines.append(
+            "Diagnostic logs: "
+            f"{bundle_logs.get('captured_bytes', '-')} bytes / "
+            f"redactions={bundle_logs.get('redaction_count', '-')} / "
+            f"truncated={bundle_logs.get('truncated', '-')}"
+        )
+    bundle_performance = summary.get("performance_summary")
+    if isinstance(bundle_performance, dict):
+        cpu = bundle_performance.get("cpu")
+        memory = bundle_performance.get("memory")
+        if isinstance(cpu, dict) and isinstance(memory, dict):
+            lines.append(
+                "Diagnostic performance: "
+                f"CPU={cpu.get('total_usage_percent', '-')}% / "
+                f"memory={memory.get('used_percent', '-')}%"
+            )
     return lines or ["(no evidence summary)"]
 
 

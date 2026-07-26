@@ -93,6 +93,11 @@ class ToolRegistry:
             definition(
                 "app.data.clear", "app.data.clear@1", direct_invocation=False
             ),
+            definition(
+                "device.diagnostics.bundle",
+                "device.diagnostics.bundle@1",
+                direct_invocation=False,
+            ),
         )
         self._definitions = {definition.tool_id: definition for definition in definitions}
 

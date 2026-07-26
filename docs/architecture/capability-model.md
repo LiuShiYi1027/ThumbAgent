@@ -29,6 +29,7 @@ navigation.back
 navigation.home
 logs.collect
 performance.snapshot
+device.diagnostics.bundle
 app.inspect
 app.install
 app.uninstall
@@ -132,6 +133,7 @@ navigation.back@1
 navigation.home@1
 logs.collect@1
 performance.snapshot@1
+device.diagnostics.bundle@1
 app.inspect@1
 app.install@1
 app.uninstall@1
@@ -172,6 +174,12 @@ ITER-0046 增加三项应用生命周期能力：`app.state.inspect@1` 是 Low �
 `app.stop@1` 是 Medium 风险、unsafe 幂等的单应用写动作，要求明确确认并拒绝系统应用；
 `app.data.clear@1` 是 High 风险、unsafe 幂等的永久数据删除动作，只接受绑定设备、包名和版本的
 短期单次 Approval。停止和清除数据必须进行运行状态后置验证，结果未知时禁止自动重试。
+
+ITER-0047 增加 `device.diagnostics.bundle@1`。它是 Medium 风险、safe 幂等的本地诊断能力，
+必须明确确认后才能读取截图、UI Tree 和日志。一次调用在同一 Session 与 Lease 中复用
+`screen.observe@1`、`logs.collect@1`、`performance.snapshot@1` 和可选 `app.state.inspect@1`，
+只生成固定文件名、大小有界且带来源 SHA-256 Manifest 的本地 ZIP；公共响应不内联证据内容，
+也不提供上传、任意文件选择或平台命令参数。
 
 ## 10. 测试要求
 

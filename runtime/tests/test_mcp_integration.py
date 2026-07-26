@@ -20,6 +20,44 @@ from runtime.tests.test_apk_install import _write_apk
 
 
 class McpRuntimeIntegrationTests(unittest.TestCase):
+    def test_mcp_collects_diagnostic_bundle_through_local_api(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory) / "artifacts")
+            )
+            server = McpServer(
+                RuntimeApiClient(
+                    "http://127.0.0.1:8765",
+                    "integration-token",
+                    _InProcessHttpTransport(runtime),
+                )
+            )
+            _ready(server)
+            submitted = server.handle(
+                _request(
+                    3,
+                    "tools/call",
+                    {
+                        "name": "mobile_collect_diagnostic_bundle",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "app_id": "com.example.fake",
+                            "max_log_lines": 100,
+                            "minimum_log_level": "info",
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["execution"]
+            report = _wait_for_report(runtime, submitted["task_id"])
+
+        self.assertEqual("succeeded", report["status"])
+        self.assertEqual(
+            "diagnostic_bundle",
+            report["evidence_summary"]["bundle_artifact"]["kind"],
+        )
+        self.assertEqual(5, len(report["evidence_summary"]["artifact_refs"]))
+
     def test_mcp_runs_application_lifecycle_with_scoped_data_clear(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = RuntimeService(

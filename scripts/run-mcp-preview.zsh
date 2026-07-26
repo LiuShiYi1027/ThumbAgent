@@ -156,8 +156,25 @@ registration_fingerprint() {
   "$1" - "$PROJECT_ROOT" "$BASE_URL" "$RESOLVED_PYTHON" "$MCP_NAME" <<'PY'
 import hashlib
 import sys
+from pathlib import Path
 
-print(hashlib.sha256("\0".join(sys.argv[1:]).encode()).hexdigest())
+root = Path(sys.argv[1])
+catalog_files = (
+    root / "runtime/mobile_agent/mcp/api_client.py",
+    root / "runtime/mobile_agent/mcp/server.py",
+    root / "runtime/mobile_agent/mcp/tools.py",
+    root / "contracts/schemas/mcp-tool-inputs.schema.json",
+)
+digest = hashlib.sha256()
+for value in sys.argv[1:]:
+    digest.update(value.encode())
+    digest.update(b"\0")
+for path in catalog_files:
+    digest.update(path.relative_to(root).as_posix().encode())
+    digest.update(b"\0")
+    digest.update(path.read_bytes())
+    digest.update(b"\0")
+print(digest.hexdigest())
 PY
 }
 

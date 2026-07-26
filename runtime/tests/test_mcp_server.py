@@ -46,7 +46,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual({"tools": {"listChanged": False}}, initialize["result"]["capabilities"])
         self.assertEqual(-32002, between["error"]["code"])
         self.assertIsNone(notification)
-        self.assertEqual(22, len(after["result"]["tools"]))
+        self.assertEqual(23, len(after["result"]["tools"]))
 
     def test_negotiates_supported_older_version_and_falls_back_for_unknown(self) -> None:
         older = McpServer(self.client).handle(
@@ -86,7 +86,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(22, len(response["result"]["tools"]))
+        self.assertEqual(23, len(response["result"]["tools"]))
 
     def test_lists_only_goal_level_tools_with_annotations(self) -> None:
         _ready(self.server)
@@ -118,6 +118,15 @@ class McpServerTests(unittest.TestCase):
         clear = next(tool for tool in tools if tool["name"] == "mobile_clear_app_data")
         self.assertTrue(clear["annotations"]["destructiveHint"])
         self.assertEqual(True, clear["inputSchema"]["properties"]["confirmed"]["const"])
+        bundle = next(
+            tool for tool in tools
+            if tool["name"] == "mobile_collect_diagnostic_bundle"
+        )
+        self.assertFalse(bundle["annotations"]["readOnlyHint"])
+        self.assertFalse(bundle["annotations"]["destructiveHint"])
+        self.assertEqual(
+            True, bundle["inputSchema"]["properties"]["confirmed"]["const"]
+        )
 
     def test_calls_readiness_and_returns_structured_content(self) -> None:
         _ready(self.server)
@@ -319,6 +328,15 @@ class _FakeRuntimeClient:
 
     def compare_performance(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._result("compare_performance", arguments, {"comparison": {}})
+
+    def collect_diagnostic_bundle(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self._result(
+            "collect_diagnostic_bundle",
+            arguments,
+            {"execution": {"task_id": TASK_ID}},
+        )
 
 
 def _ready(server: McpServer) -> None:

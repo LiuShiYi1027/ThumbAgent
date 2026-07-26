@@ -181,6 +181,17 @@ class CapabilityCatalog:
                     "应用保持安装；不读取、备份或返回私有数据",
                 ),
             ),
+            CapabilityDefinition(
+                "device.diagnostics.bundle@1",
+                RiskLevel.MEDIUM,
+                Idempotency.SAFE,
+                CapabilityVerification.REQUIRED,
+                ("设备在线且已授权调试", "用户明确确认"),
+                (
+                    "本地采集截图、UI Tree、脱敏日志和聚合性能",
+                    "诊断包最大 24 MiB，不上传或内联证据内容",
+                ),
+            ),
         )
         self._definitions = {
             definition.capability: definition for definition in definitions

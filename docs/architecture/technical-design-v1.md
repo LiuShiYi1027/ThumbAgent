@@ -201,6 +201,13 @@ window 查询归一化为 `AppRuntimeState`；启动复用 `app.open` 并验证�
 绑定设备、包名和版本，Submit 后 Adapter 只执行固定 `pm clear --user 0 <app-id>`，再验证应用仍
 安装且运行状态复位。REST 和 MCP 只接受类型化参数，不暴露 PID、原始系统输出或任意命令参数。
 
+ITER-0047 将已有诊断能力组合为 `device.diagnostics.bundle`。Tool 在执行任何敏感读取前完成
+Capability 与 Medium 风险确认校验，然后在同一 Task Session 和 Lease 中采集 Observation、脱敏
+日志、聚合性能及可选应用状态。Bundle Builder 只读取本次生成的受信任 Artifact，逐项复核大小与
+SHA-256，并写入固定文件集合和版本化 Manifest；路径由 ArtifactStore 分配，总大小限制为 24 MiB。
+REST、MCP、CLI 和 Web 仅展示摘要及 Artifact 元数据，不内联包内容、不上传数据，也不开放通用
+文件读取接口。部分采集失败时，Task 报告保留已完成证据引用以便定位问题。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

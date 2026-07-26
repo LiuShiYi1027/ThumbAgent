@@ -25,8 +25,8 @@ Runtime 默认监听 `127.0.0.1:8765`，提供 `/v1/health`、`/v1/devices` 和 
 首次运行时，脚本会提示输入模型 Key，并将模型 Key 与稳定的本地 Runtime token 分别保存到 macOS
 登录 Keychain；后续启动不会再次询问。脚本会安全停止占用目标端口的旧
 `mobile_agent.api.server`、复用未变化的 MCP 注册并启动新 Runtime。Codex/ChatGPT 已运行时无需
-关闭或重新打开。只有首次注册、显式 `--refresh-mcp` 或 MCP 配置发生变化时，运行中的 Codex
-需要重启一次并新建任务，以刷新缓存的 MCP 环境；普通 Runtime 重启不需要。
+关闭或重新打开。只有首次注册、显式 `--refresh-mcp`、MCP 配置或 Tool Catalog 发生变化时，
+运行中的 Codex 需要重启一次并新建任务，以刷新缓存的 MCP 环境；普通 Runtime 重启不需要。
 
 模型 Key 只进入 Keychain 和 Runtime 进程环境，不写入仓库或脚本输出。脚本保持前台运行，按
 `Ctrl+C` 停止 Runtime。仅检查 Python、ADB、Codex 和模型配置路径而不读取密钥或修改 MCP 配置时，
@@ -64,9 +64,9 @@ python3.11 -m mobile_agent.mcp
 ```
 
 MCP 提供目标级 Tools，覆盖就绪诊断、设备与已安装应用检查、应用生命周期、Agent 异步任务、
-任务查询/取消、脱敏日志、聚合性能快照和性能比较。它不暴露 ADB、任意 Shell 或 `input.tap`
-等原子输入 Tool。需要确认的动作只有在 MCP Host 已向用户展示参数和影响并获得确认后，才允许
-传入 `confirmed=true`。
+任务查询/取消、脱敏日志、聚合性能快照、诊断证据包和性能比较。它不暴露 ADB、任意 Shell 或
+`input.tap` 等原子输入 Tool。需要确认的动作只有在 MCP Host 已向用户展示参数和影响并获得确认后，
+才允许传入 `confirmed=true`。
 
 启动后可查看统一就绪诊断：
 
@@ -124,6 +124,17 @@ PYTHONPATH=runtime python3.11 -m mobile_agent.cli.device_performance_snapshot \
 ```
 
 性能 Artifact 只包含聚合 JSON 指标，不保存 dumpsys 原文、进程名或应用明细。
+
+一次性采集截图、UI Tree、脱敏日志、聚合性能和可选应用状态，并生成带 SHA-256 清单的本地 ZIP：
+
+```bash
+PYTHONPATH=runtime python3.11 -m mobile_agent.cli.diagnostic_bundle_collect \
+  <device_id> --app-id <package-id> --max-log-lines 500 \
+  --minimum-log-level info --confirm --token <runtime-token>
+```
+
+诊断包属于 Medium 风险，必须明确确认。CLI、Web、REST 与 MCP 仅返回 Artifact 元数据和安全摘要，
+不内联截图、UI Tree、日志或 ZIP 内容；包内文件名固定，总大小不超过 24 MiB，且不会上传或外发。
 
 比较同一设备上两条已完成的性能快照任务：
 
@@ -282,6 +293,11 @@ ITER-0040 增加 MCP `2025-11-25` stdio 开发者预览。MCP 子进程只调用
 localhost REST API，因此与 Web 共享任务、Session、Lease 和 Policy；所有耗时能力异步返回
 Mobile Agent task_id。Tool 输入来自公共 Contract，调用前经过严格校验和限流，领域错误以
 structuredContent 返回。暂不实现 MCP Tasks、远程传输、Resources 或 Prompts。
+
+ITER-0047 增加 `device.diagnostics.bundle`。一次已确认的异步任务在同一 Device Session 与 Lease
+中组合 Observation、脱敏日志、聚合性能和可选应用状态，生成固定内容的本地 ZIP。Manifest 记录
+四个来源 Artifact 的名称、大小和 SHA-256；Runtime 在发布诊断包前重新校验来源完整性和 ZIP
+文件集合，失败时保留已经完成的安全 Artifact 引用。
 
 真实 Provider 若持续在默认 30 秒预算附近完成响应，可在本地配置中将
 `timeout_seconds` 调高到 60（允许范围 1–120），或通过

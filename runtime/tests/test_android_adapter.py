@@ -55,6 +55,7 @@ locked unauthorized usb:1-1
                 "app.state.inspect@1",
                 "app.stop@1",
                 "app.data.clear@1",
+                "device.diagnostics.bundle@1",
             ),
             devices[0].capabilities,
         )

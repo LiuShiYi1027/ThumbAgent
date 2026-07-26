@@ -71,6 +71,7 @@ from mobile_agent.skills.app_lifecycle import (
 )
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
+from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
 from mobile_agent.storage.sqlite import SQLiteTaskStore
 from mobile_agent.storage.execution import SQLiteTaskExecutionStore
@@ -82,6 +83,7 @@ from mobile_agent.tasks.execution import (
 from mobile_agent.tasks.runner import TaskRunner
 from mobile_agent.tasks.device_logs import DeviceLogsTaskRunner
 from mobile_agent.tasks.device_performance import DevicePerformanceTaskRunner
+from mobile_agent.tasks.diagnostic_bundle import DiagnosticBundleTaskRunner
 from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
 from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
 from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
@@ -93,6 +95,7 @@ from mobile_agent.tools.app_inventory import AppInventoryTool
 from mobile_agent.tools.apk_install import ApkInstallTool
 from mobile_agent.tools.app_removal import AppRemovalTool
 from mobile_agent.tools.app_lifecycle import AppLifecycleTool
+from mobile_agent.tools.diagnostic_bundle import DiagnosticBundleTool
 
 
 def _utc_now() -> str:
@@ -182,6 +185,21 @@ class RuntimeService:
         self._app_data_clear = AppDataClearSkill(self._app_lifecycle_tool)
         self._app_lifecycle_task_runner = AppLifecycleTaskRunner(
             self._app_launch, self._app_stop, self._app_data_clear
+        )
+        self._diagnostic_bundle_tool = DiagnosticBundleTool(
+            self._adapter,
+            artifacts,
+            self._tool_registry,
+            self._policy,
+            self._device_log_tool,
+            self._device_performance_tool,
+            self._app_lifecycle_tool,
+        )
+        self._diagnostic_bundle = DiagnosticBundleSkill(
+            self._diagnostic_bundle_tool
+        )
+        self._diagnostic_bundle_task_runner = DiagnosticBundleTaskRunner(
+            self._diagnostic_bundle
         )
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
@@ -1349,6 +1367,95 @@ class RuntimeService:
         )
         return execution.to_dict()
 
+    def submit_diagnostic_bundle_task(
+        self,
+        device_id: str,
+        app_id: str | None = None,
+        max_log_lines: int = 500,
+        minimum_log_level: str = "info",
+        confirmed: bool = False,
+        idempotency_key: str | None = None,
+        deadline_seconds: float = 120.0,
+    ) -> dict[str, Any]:
+        """Enqueue one confirmed, bounded, local-only diagnostic bundle."""
+
+        if app_id is not None:
+            app_id = AppInventoryTool.validate_app_id(app_id)
+        max_log_lines, level = DeviceLogCaptureTool.validate_request(
+            max_log_lines, minimum_log_level
+        )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+        definition = self._tool_registry.get("device.diagnostics.bundle")
+        self._policy.authorize(definition.risk, confirmed)
+        goal = "采集本地工程诊断包"
+
+        async def run_factory(
+            task_id: str,
+            on_step: Any,
+            is_cancelled: Any,
+            deadline_exceeded: Any,
+        ) -> TaskRun:
+            try:
+                session_id = await self._adapter.require_online_session(device_id)
+                with self._device_leases.hold(
+                    device_id, task_id, deadline_seconds + 30.0, session_id
+                ), self._adapter.bind_session(device_id, session_id):
+                    self._task_executor.bind_device_session(task_id, session_id)
+                    task = await self._diagnostic_bundle_task_runner.run(
+                        task_id,
+                        device_id,
+                        app_id,
+                        max_log_lines,
+                        level.value,
+                        confirmed,
+                        deadline_seconds,
+                        on_step,
+                        is_cancelled,
+                        deadline_exceeded,
+                    )
+                    return replace(task, device_session_id=session_id)
+            except MobileAgentError as error:
+                now = _utc_now()
+                return TaskRun(
+                    task_id=task_id,
+                    task_type="device.diagnostics.bundle",
+                    device_id=device_id,
+                    goal=goal,
+                    status=TaskStatus.FAILED,
+                    started_at=now,
+                    completed_at=now,
+                    steps=(),
+                    evidence_summary={},
+                    error=error.to_dict(),
+                    deadline_seconds=deadline_seconds,
+                )
+
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_type": "device.diagnostics.bundle",
+                    "device_id": device_id,
+                    "app_id": app_id,
+                    "max_log_lines": max_log_lines,
+                    "minimum_log_level": level.value,
+                    "confirmed": confirmed,
+                    "deadline_seconds": deadline_seconds,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return self._task_executor.submit(
+            device_id,
+            goal,
+            run_factory,
+            self._task_store.save,
+            idempotency_key,
+            fingerprint,
+            deadline_seconds,
+            task_type="device.diagnostics.bundle",
+        ).to_dict()
+
     @staticmethod
     def _device_logs_request_fingerprint(
         device_id: str,
@@ -1885,6 +1992,32 @@ class RuntimeService:
         try:
             execution = self.submit_device_performance_task(
                 device_id, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_diagnostic_bundle_task_sync(
+        self,
+        device_id: str,
+        app_id: str | None = None,
+        max_log_lines: int = 500,
+        minimum_log_level: str = "info",
+        confirmed: bool = False,
+        idempotency_key: str | None = None,
+        deadline_seconds: float = 120.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Submission wrapper for one local diagnostic evidence bundle."""
+
+        try:
+            execution = self.submit_diagnostic_bundle_task(
+                device_id,
+                app_id,
+                max_log_lines,
+                minimum_log_level,
+                confirmed,
+                idempotency_key,
+                deadline_seconds,
             )
             return HTTPStatus.ACCEPTED, {"execution": execution}
         except MobileAgentError as error:

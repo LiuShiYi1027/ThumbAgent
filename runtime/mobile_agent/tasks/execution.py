@@ -48,6 +48,7 @@ _SUPPORTED_TASK_TYPES = frozenset(
         "agent.run",
         "device.logs.collect",
         "device.performance.snapshot",
+        "device.diagnostics.bundle",
         "app.install",
         "app.uninstall",
         "app.launch",

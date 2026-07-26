@@ -73,7 +73,7 @@ class DiagnosticTaskRunner:
                 started_at=started_at,
                 completed_at=completed_at,
                 steps=(step,),
-                evidence_summary={},
+                evidence_summary=_failure_evidence(error),
                 error=error.to_dict(),
                 deadline_seconds=deadline_seconds,
             )
@@ -165,3 +165,10 @@ def _deadline_error() -> dict[str, Any]:
         message="诊断任务超过总执行时间预算",
         outcome=ErrorOutcome.KNOWN_FAILURE,
     ).to_dict()
+
+
+def _failure_evidence(error: MobileAgentError) -> dict[str, Any]:
+    refs = error.details.get("artifact_refs")
+    if isinstance(refs, list) and all(isinstance(item, str) for item in refs):
+        return {"artifact_refs": list(refs)}
+    return {}

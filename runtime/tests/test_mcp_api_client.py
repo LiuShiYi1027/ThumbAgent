@@ -81,6 +81,19 @@ class McpApiClientTests(unittest.TestCase):
             all("Idempotency-Key" in call[2] for call in transport.calls)
         )
 
+    def test_diagnostic_bundle_uses_fixed_async_endpoint(self) -> None:
+        transport = _Transport({"execution": {"task_id": "task_1"}})
+        client = RuntimeApiClient("http://127.0.0.1:8765", "token", transport)
+
+        client.collect_diagnostic_bundle(
+            {"device_id": "adb:001", "confirmed": True}
+        )
+
+        method, url, headers, _, _ = transport.calls[0]
+        self.assertEqual("POST", method)
+        self.assertTrue(url.endswith("/v1/tasks/device.diagnostics.bundle/async"))
+        self.assertIn("Idempotency-Key", headers)
+
     def test_invalid_or_oversized_runtime_response_is_safe(self) -> None:
         invalid = RuntimeApiClient(
             "http://localhost:8765",

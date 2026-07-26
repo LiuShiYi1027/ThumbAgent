@@ -194,6 +194,9 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         async_device_performance_match = re.fullmatch(
             r"/v1/tasks/device\.performance\.snapshot/async", self.path
         )
+        async_diagnostic_bundle_match = re.fullmatch(
+            r"/v1/tasks/device\.diagnostics\.bundle/async", self.path
+        )
         apk_prepare_match = re.fullmatch(r"/v1/apps/install/prepare", self.path)
         async_apk_install_match = re.fullmatch(
             r"/v1/tasks/app\.install/async", self.path
@@ -510,6 +513,42 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                         _idempotency_key(self.headers.get("Idempotency-Key")),
                         deadline_seconds,
                     )
+                )
+            elif async_diagnostic_bundle_match:
+                if not set(body).issubset(
+                    {
+                        "device_id",
+                        "app_id",
+                        "max_log_lines",
+                        "minimum_log_level",
+                        "confirmed",
+                        "deadline_seconds",
+                    }
+                ):
+                    raise ValueError("diagnostic bundle fields")
+                app_id = body.get("app_id")
+                max_log_lines = body.get("max_log_lines", 500)
+                minimum_log_level = body.get("minimum_log_level", "info")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 120.0, 1.0, 1800.0
+                )
+                if (
+                    (app_id is not None and not isinstance(app_id, str))
+                    or not isinstance(max_log_lines, int)
+                    or isinstance(max_log_lines, bool)
+                    or not isinstance(minimum_log_level, str)
+                    or not isinstance(confirmed, bool)
+                ):
+                    raise ValueError("diagnostic bundle arguments")
+                status, payload = self._runtime().submit_diagnostic_bundle_task_sync(
+                    device_id,
+                    app_id,
+                    max_log_lines,
+                    minimum_log_level,
+                    confirmed,
+                    _idempotency_key(self.headers.get("Idempotency-Key")),
+                    deadline_seconds,
                 )
             elif navigation_match:
                 target = body.get("target_selector")
