@@ -7,6 +7,31 @@
       "type": "object",
       "additionalProperties": false
     },
+    "local_storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retention_days": { "type": "integer", "minimum": 1, "maximum": 365, "default": 7 }
+      }
+    },
+    "local_cleanup_prepare": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retention_days": { "type": "integer", "minimum": 1, "maximum": 365, "default": 7 },
+        "max_artifacts": { "type": "integer", "minimum": 1, "maximum": 2000, "default": 500 }
+      }
+    },
+    "local_cleanup_submit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "confirmed"],
+      "properties": {
+        "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+        "confirmed": { "const": true, "description": "The MCP host must show the exact local Artifact deletion impact and obtain a new explicit confirmation." },
+        "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 120 }
+      }
+    },
     "device": {
       "type": "object",
       "additionalProperties": false,

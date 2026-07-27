@@ -25,6 +25,9 @@ class McpRuntimeClient(Protocol):
 
     def readiness(self) -> dict[str, Any]: ...
     def list_devices(self) -> dict[str, Any]: ...
+    def local_storage(self, retention_days: int) -> dict[str, Any]: ...
+    def prepare_local_data_cleanup(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
+    def cleanup_local_data(self, arguments: dict[str, Any]) -> dict[str, Any]: ...
     def inspect_device(self, device_id: str) -> dict[str, Any]: ...
     def list_apps(self, device_id: str, limit: int, prefix: str | None) -> dict[str, Any]: ...
     def inspect_app(self, device_id: str, app_id: str) -> dict[str, Any]: ...
@@ -175,6 +178,7 @@ class McpServer:
                     "Application uninstall requires a separate prepare step and new explicit confirmation of the data deletion impact. "
                     "Application stop requires explicit confirmation. Application data clear requires prepare first and a new explicit confirmation of permanent data deletion. "
                     "Diagnostic bundle capture requires explicit confirmation because it reads screenshot, UI tree and redacted logs; bundle content remains local. "
+                    "Local Artifact cleanup requires prepare first; show the exact count, bytes, cutoff and truncation, then obtain a new explicit confirmation before permanent deletion. "
                     "Long-running work returns a Mobile Agent task_id; query execution and report tools for progress."
                 ),
             },
@@ -239,6 +243,15 @@ class McpServer:
         handlers: dict[str, Callable[[], dict[str, Any]]] = {
             "mobile_runtime_readiness": self._client.readiness,
             "mobile_list_devices": self._client.list_devices,
+            "mobile_get_local_storage": lambda: self._client.local_storage(
+                arguments.get("retention_days", 7)
+            ),
+            "mobile_prepare_local_data_cleanup": lambda: (
+                self._client.prepare_local_data_cleanup(arguments)
+            ),
+            "mobile_cleanup_local_data": lambda: (
+                self._client.cleanup_local_data(arguments)
+            ),
             "mobile_inspect_device": lambda: self._client.inspect_device(
                 arguments["device_id"]
             ),

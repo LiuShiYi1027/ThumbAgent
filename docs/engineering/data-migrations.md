@@ -103,3 +103,7 @@
 
 ITER-0033 的 `device_session_id` 只增加到版本化 Task JSON。TaskExecution 读取旧 JSON 时使用
 `null`，TaskRun 字段可选，因此不增加 SQL migration，也不回填历史任务的连接会话。
+
+ITER-0048 不删除 Task、Event 或数据库引用，不改变 SQLite Schema，因此不增加迁移。过期清理只
+处理 Artifact 根目录内符合系统文件名和已知类型的文件；TaskRun 继续保留原 Artifact 元数据和清理
+审计任务。若未来要求级联删除任务或持久化 tombstone，必须新增 migration 和恢复协议。

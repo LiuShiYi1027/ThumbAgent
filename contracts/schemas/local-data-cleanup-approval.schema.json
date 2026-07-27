@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/local-data-cleanup-approval/v1.json",
+  "title": "Local Data Cleanup Approval",
+  "type": "object",
+  "required": ["schema_version", "approval_id", "retention_days", "cutoff_at", "candidate_count", "candidate_bytes", "truncated", "prepared_at", "expires_at", "local_artifacts_will_be_permanently_deleted", "confirmation_required"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{32}$" },
+    "retention_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+    "cutoff_at": { "type": "string", "format": "date-time" },
+    "candidate_count": { "type": "integer", "minimum": 0, "maximum": 2000 },
+    "candidate_bytes": { "type": "integer", "minimum": 0 },
+    "truncated": { "type": "boolean" },
+    "prepared_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "local_artifacts_will_be_permanently_deleted": { "const": true },
+    "confirmation_required": { "const": true }
+  },
+  "additionalProperties": false
+}

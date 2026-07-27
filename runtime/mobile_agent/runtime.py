@@ -24,6 +24,11 @@ from mobile_agent.domain.device import ConnectionState, Device
 from mobile_agent.domain.apk import ApkInspector, ApkInstallApprovalStore
 from mobile_agent.domain.app_removal import AppRemovalApprovalStore
 from mobile_agent.domain.app_lifecycle import AppDataClearApprovalStore
+from mobile_agent.domain.local_data import (
+    LocalDataCleanupApprovalStore,
+    validate_cleanup_limit,
+    validate_retention_days,
+)
 from mobile_agent.domain.capability import (
     CapabilityAvailability,
     CapabilityCatalog,
@@ -72,6 +77,7 @@ from mobile_agent.skills.app_lifecycle import (
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
 from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
+from mobile_agent.skills.local_data import LocalDataCleanupSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
 from mobile_agent.storage.sqlite import SQLiteTaskStore
 from mobile_agent.storage.execution import SQLiteTaskExecutionStore
@@ -84,6 +90,7 @@ from mobile_agent.tasks.runner import TaskRunner
 from mobile_agent.tasks.device_logs import DeviceLogsTaskRunner
 from mobile_agent.tasks.device_performance import DevicePerformanceTaskRunner
 from mobile_agent.tasks.diagnostic_bundle import DiagnosticBundleTaskRunner
+from mobile_agent.tasks.local_data import LocalDataCleanupTaskRunner
 from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
 from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
 from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
@@ -96,6 +103,7 @@ from mobile_agent.tools.apk_install import ApkInstallTool
 from mobile_agent.tools.app_removal import AppRemovalTool
 from mobile_agent.tools.app_lifecycle import AppLifecycleTool
 from mobile_agent.tools.diagnostic_bundle import DiagnosticBundleTool
+from mobile_agent.tools.local_data import LocalDataTool
 
 
 def _utc_now() -> str:
@@ -123,6 +131,9 @@ class RuntimeService:
         apk_approval_store: ApkInstallApprovalStore | None = None,
         app_removal_approval_store: AppRemovalApprovalStore | None = None,
         app_data_clear_approval_store: AppDataClearApprovalStore | None = None,
+        local_data_cleanup_approval_store: LocalDataCleanupApprovalStore | None = None,
+        artifact_retention_days: int = 7,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._adapter = (
             adapter
@@ -201,6 +212,18 @@ class RuntimeService:
         self._diagnostic_bundle_task_runner = DiagnosticBundleTaskRunner(
             self._diagnostic_bundle
         )
+        self._artifact_retention_days = validate_retention_days(
+            artifact_retention_days
+        )
+        self._local_data_tool = LocalDataTool(artifacts, self._policy, wall_clock)
+        self._local_data_cleanup_approvals = (
+            local_data_cleanup_approval_store
+            or LocalDataCleanupApprovalStore(wall_clock)
+        )
+        self._local_data_cleanup = LocalDataCleanupSkill(self._local_data_tool)
+        self._local_data_cleanup_task_runner = LocalDataCleanupTaskRunner(
+            self._local_data_cleanup
+        )
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
         self._tasks = TaskRunner(self._settings_scroll_navigate)
@@ -244,6 +267,105 @@ class RuntimeService:
                 "message": error["message"],
             }
         return status
+
+    def local_storage_summary(
+        self, retention_days: int | None = None
+    ) -> dict[str, Any]:
+        """Return local Artifact counts and bytes without reading file content."""
+
+        days = (
+            self._artifact_retention_days
+            if retention_days is None
+            else validate_retention_days(retention_days)
+        )
+        return self._local_data_tool.summarize(days).to_dict()
+
+    def prepare_local_data_cleanup(
+        self,
+        retention_days: int | None = None,
+        max_artifacts: int = 500,
+    ) -> dict[str, Any]:
+        """Create a read-only exact cleanup preview and short-lived Approval."""
+
+        days = (
+            self._artifact_retention_days
+            if retention_days is None
+            else validate_retention_days(retention_days)
+        )
+        max_artifacts = validate_cleanup_limit(max_artifacts)
+        cutoff, candidates, truncated = self._local_data_tool.prepare(
+            days, max_artifacts
+        )
+        return self._local_data_cleanup_approvals.create(
+            days, cutoff, candidates, truncated
+        ).to_public_dict()
+
+    def submit_local_data_cleanup_task(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 120.0,
+    ) -> dict[str, Any]:
+        """Claim one scoped Approval and enqueue permanent local deletion."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "清理本地证据需要用户对永久删除影响进行明确确认",
+            )
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT",
+                ErrorCategory.VALIDATION,
+                "本地数据清理必须提供 Idempotency-Key",
+            )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+        approval = self._local_data_cleanup_approvals.claim(
+            approval_id, idempotency_key
+        )
+        goal = "清理已批准的过期本地 Artifact"
+
+        async def run_factory(
+            task_id: str, on_step: Any, is_cancelled: Any, deadline_exceeded: Any
+        ) -> TaskRun:
+            return await self._local_data_cleanup_task_runner.run(
+                task_id,
+                approval,
+                confirmed,
+                deadline_seconds,
+                on_step,
+                is_cancelled,
+                deadline_exceeded,
+            )
+
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_type": "local.data.cleanup",
+                    "approval_id": approval.approval_id,
+                    "retention_days": approval.retention_days,
+                    "cutoff_at": approval.cutoff_at,
+                    "artifact_ids": [
+                        item.artifact_id for item in approval.candidates
+                    ],
+                    "deadline_seconds": deadline_seconds,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return self._task_executor.submit(
+            LocalDataCleanupTaskRunner.target_id,
+            goal,
+            run_factory,
+            self._task_store.save,
+            idempotency_key,
+            fingerprint,
+            deadline_seconds,
+            task_type="local.data.cleanup",
+        ).to_dict()
 
     async def list_devices(self) -> list[dict[str, Any]]:
         devices = await self._adapter.list_devices()
@@ -1564,7 +1686,43 @@ class RuntimeService:
         return self._goal_compiler.compile(goal).to_dict()
 
     def get_task(self, task_id: str) -> dict[str, Any]:
-        return dict(self._task_store.get_task_dict(task_id))
+        task = dict(self._task_store.get_task_dict(task_id))
+        deleted = self._task_store.list_deleted_artifact_ids()
+        return self._annotate_artifact_availability(task, deleted)
+
+    def _annotate_artifact_availability(
+        self, value: Any, deleted: set[str]
+    ) -> Any:
+        if isinstance(value, list):
+            return [
+                self._annotate_artifact_availability(item, deleted)
+                for item in value
+            ]
+        if not isinstance(value, dict):
+            return value
+        result = {
+            key: self._annotate_artifact_availability(item, deleted)
+            for key, item in value.items()
+        }
+        artifact_id = value.get("artifact_id")
+        relative_path = value.get("relative_path")
+        if (
+            isinstance(artifact_id, str)
+            and artifact_id.startswith("artifact_")
+            and isinstance(relative_path, str)
+        ):
+            try:
+                available = self._artifacts.resolve(relative_path).is_file()
+            except MobileAgentError:
+                available = False
+            result["availability"] = (
+                "available"
+                if available
+                else "expired"
+                if artifact_id in deleted
+                else "missing"
+            )
+        return result
 
     def list_task_events(self, task_id: str) -> list[dict[str, Any]]:
         return [dict(event) for event in self._task_store.list_event_dicts(task_id)]
@@ -1640,6 +1798,43 @@ class RuntimeService:
         try:
             inventory = asyncio.run(self.list_installed_apps(device_id, limit, prefix))
             return HTTPStatus.OK, {"inventory": inventory}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def local_storage_summary_sync(
+        self, retention_days: int | None = None
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, {
+                "storage": self.local_storage_summary(retention_days)
+            }
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def prepare_local_data_cleanup_sync(
+        self, retention_days: int | None = None, max_artifacts: int = 500
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, {
+                "approval": self.prepare_local_data_cleanup(
+                    retention_days, max_artifacts
+                )
+            }
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_local_data_cleanup_task_sync(
+        self,
+        approval_id: str,
+        confirmed: bool,
+        idempotency_key: str,
+        deadline_seconds: float = 120.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            execution = self.submit_local_data_cleanup_task(
+                approval_id, confirmed, idempotency_key, deadline_seconds
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
         except MobileAgentError as error:
             return self._error_response(error)
 

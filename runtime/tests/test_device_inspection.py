@@ -136,7 +136,7 @@ class DeviceInspectionTests(unittest.TestCase):
             )
         )
 
-    def test_tool_registry_metadata_comes_from_capability_catalog(self) -> None:
+    def test_device_tool_metadata_comes_from_capability_catalog(self) -> None:
         runtime = RuntimeService(
             FakeDeviceAdapter(), ArtifactStore(self.root / "artifacts")
         )
@@ -147,9 +147,20 @@ class DeviceInspectionTests(unittest.TestCase):
         }
 
         for tool in tools.values():
+            if tool["capability"].startswith("runtime."):
+                continue
             capability = capabilities[tool["capability"]]
             self.assertEqual(capability["risk"], tool["risk"])
             self.assertEqual(capability["idempotency"], tool["idempotency"])
+
+        local_cleanup = tools["local.data.cleanup"]
+        self.assertEqual(
+            "runtime.local.data.cleanup@1", local_cleanup["capability"]
+        )
+        self.assertEqual("high", local_cleanup["risk"])
+        self.assertEqual("unsafe", local_cleanup["idempotency"])
+        self.assertFalse(local_cleanup["direct_invocation"])
+        self.assertNotIn(local_cleanup["capability"], capabilities)
 
 
 if __name__ == "__main__":

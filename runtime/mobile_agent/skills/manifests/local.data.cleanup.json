@@ -1,0 +1,15 @@
+{
+  "id": "local.data.cleanup",
+  "version": "1.0.0",
+  "name": "Clean approved expired local artifacts",
+  "description": "Permanently delete one exact prevalidated set of expired Mobile Agent Artifacts using a short-lived scoped approval.",
+  "kind": "deterministic",
+  "input_schema": "contracts/schemas/local-data-cleanup-approval.schema.json",
+  "output_schema": "contracts/schemas/local-data-cleanup-result.schema.json",
+  "required_capabilities": [],
+  "tool_allowlist": ["local.data.cleanup"],
+  "risk": "high",
+  "timeout_seconds": 120,
+  "max_steps": 1,
+  "verification": "artifacts_absent"
+}

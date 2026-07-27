@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/local-storage-summary/v1.json",
+  "title": "Local Storage Summary",
+  "type": "object",
+  "required": ["schema_version", "artifact_root_label", "retention_days", "scanned_at", "total_count", "total_bytes", "expired_count", "expired_bytes", "oldest_created_at", "newest_created_at", "by_kind"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "artifact_root_label": { "const": "mobile-agent-data/artifacts" },
+    "retention_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "total_count": { "type": "integer", "minimum": 0 },
+    "total_bytes": { "type": "integer", "minimum": 0 },
+    "expired_count": { "type": "integer", "minimum": 0 },
+    "expired_bytes": { "type": "integer", "minimum": 0 },
+    "oldest_created_at": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+    "newest_created_at": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+    "by_kind": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "screenshot": { "$ref": "#/$defs/countBytes" },
+        "ui_tree": { "$ref": "#/$defs/countBytes" },
+        "device_log": { "$ref": "#/$defs/countBytes" },
+        "device_performance": { "$ref": "#/$defs/countBytes" },
+        "diagnostic_bundle": { "$ref": "#/$defs/countBytes" }
+      }
+    }
+  },
+  "$defs": {
+    "countBytes": {
+      "type": "object",
+      "required": ["count", "size_bytes"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

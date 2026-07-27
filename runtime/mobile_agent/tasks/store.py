@@ -25,6 +25,9 @@ class TaskStore(Protocol):
     def list_task_summaries(self, limit: int = 20) -> list[dict[str, object]]:
         """Return recent task summaries ordered by completion time descending."""
 
+    def list_deleted_artifact_ids(self) -> set[str]:
+        """Return Artifact IDs recorded by completed local cleanup tasks."""
+
 
 class InMemoryTaskStore:
     """Keep completed task runs and compact events for this process lifetime."""
@@ -81,6 +84,22 @@ class InMemoryTaskStore:
         """Return stored task events as serializable dictionaries."""
 
         return [event.to_dict() for event in self.list_events(task_id)]
+
+    def list_deleted_artifact_ids(self) -> set[str]:
+        with self._lock:
+            tasks = tuple(self._runs.values())
+        deleted: set[str] = set()
+        for task in tasks:
+            if task.task_type != "local.data.cleanup":
+                continue
+            values = task.evidence_summary.get("deleted_artifact_ids")
+            if isinstance(values, list):
+                deleted.update(
+                    item
+                    for item in values
+                    if isinstance(item, str) and item.startswith("artifact_")
+                )
+        return deleted
 
 
 def task_not_found(task_id: str) -> MobileAgentError:

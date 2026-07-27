@@ -96,6 +96,21 @@ TASK_UI_HTML = """<!doctype html>
           <div class="label">模型 Provider</div>
           <div id="modelProviderStatus" class="value">加载中…</div>
         </div>
+        <div id="localStorageCard" class="model-status">
+          <div class="label">本地 Artifact 存储</div>
+          <div id="localStorageStatus" class="value">加载中…</div>
+          <div class="demo-actions">
+            <select id="retentionDays" aria-label="Artifact 保留周期">
+              <option value="7">保留 7 天</option>
+              <option value="14">保留 14 天</option>
+              <option value="30">保留 30 天</option>
+              <option value="90">保留 90 天</option>
+            </select>
+            <button id="refreshStorage">刷新存储</button>
+            <button id="prepareCleanup">预检并确认清理</button>
+          </div>
+          <div id="cleanupStatus" class="model-status-help"></div>
+        </div>
         <select id="deviceSelect"><option value="">加载设备中…</option></select>
         <div id="deviceCards" class="device-cards"></div>
         <div id="deviceInspection" class="device-inspection" hidden></div>
@@ -160,6 +175,11 @@ TASK_UI_HTML = """<!doctype html>
     const collectDiagnosticBundleEl = document.querySelector("#collectDiagnosticBundle");
     const diagnosticBundleStatusEl = document.querySelector("#diagnosticBundleStatus");
     const performanceStatusEl = document.querySelector("#performanceStatus");
+    const localStorageStatusEl = document.querySelector("#localStorageStatus");
+    const retentionDaysEl = document.querySelector("#retentionDays");
+    const refreshStorageEl = document.querySelector("#refreshStorage");
+    const prepareCleanupEl = document.querySelector("#prepareCleanup");
+    const cleanupStatusEl = document.querySelector("#cleanupStatus");
     const API_TOKEN = __MOBILE_AGENT_API_TOKEN__;
     let selectedTaskId = "";
     let compiledGoalSpec = null;
@@ -196,6 +216,65 @@ TASK_UI_HTML = """<!doctype html>
     function newIdempotencyKey() {
       if (globalThis.crypto?.randomUUID) return `web-${globalThis.crypto.randomUUID()}`;
       return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    async function loadLocalStorage() {
+      try {
+        const days = Number(retentionDaysEl.value);
+        const payload = await getJson(`/v1/storage?retention_days=${days}`);
+        const storage = payload.storage || {};
+        localStorageStatusEl.textContent = `${storage.total_count || 0} 个 Artifact · ${storage.total_bytes || 0} bytes；超过 ${days} 天：${storage.expired_count || 0} 个 / ${storage.expired_bytes || 0} bytes`;
+      } catch (error) {
+        localStorageStatusEl.textContent = `存储摘要加载失败：${error.message}`;
+      }
+    }
+
+    async function prepareLocalCleanup() {
+      prepareCleanupEl.disabled = true;
+      cleanupStatusEl.textContent = "正在只读预检过期 Artifact…";
+      try {
+        const days = Number(retentionDaysEl.value);
+        const payload = await postJson("/v1/storage/cleanup/prepare", {
+          retention_days: days,
+          max_artifacts: 500
+        });
+        const approval = payload.approval || {};
+        cleanupStatusEl.textContent = `预检：${approval.candidate_count || 0} 个 / ${approval.candidate_bytes || 0} bytes · 截止 ${approval.cutoff_at || "-"}${approval.truncated ? " · 结果已截断" : ""}`;
+        if (!approval.candidate_count) return;
+        const confirmed = globalThis.confirm(
+          `将永久删除 ${approval.candidate_count} 个本地 Artifact（${approval.candidate_bytes} bytes）。\\n截止时间：${approval.cutoff_at}\\n此操作无法恢复，是否继续？`
+        );
+        if (!confirmed) {
+          cleanupStatusEl.textContent += " · 用户已取消";
+          return;
+        }
+        const response = await fetch("/v1/tasks/local.data.cleanup/async", {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${API_TOKEN}`,
+            "Idempotency-Key": newIdempotencyKey()
+          },
+          body: JSON.stringify({
+            approval_id: approval.approval_id,
+            confirmed: true,
+            deadline_seconds: 120
+          })
+        });
+        const submitted = await response.json();
+        if (!response.ok) throw new Error(submitted?.error?.message || response.statusText);
+        activeExecutionId = submitted.execution.task_id;
+        selectedTaskId = activeExecutionId;
+        cleanupStatusEl.textContent = `清理任务已提交：${submitted.execution.status}`;
+        updateRunButtons();
+        await pollExecution();
+        await loadLocalStorage();
+      } catch (error) {
+        cleanupStatusEl.textContent = `本地数据清理失败：${error.message}`;
+      } finally {
+        prepareCleanupEl.disabled = false;
+      }
     }
 
     async function loadReadiness() {
@@ -657,6 +736,7 @@ TASK_UI_HTML = """<!doctype html>
       const summary = task.evidence_summary || {};
       const foreground = summary.final_foreground_app || {};
       const node = summary.verified_node || {};
+      const artifactAvailability = artifactAvailabilitySummary(task);
       return `<div class="grid">
         ${card("状态", `<span class="status ${esc(task.status)}">${esc(task.status)}</span>`)}
         ${card("任务", `<code>${esc(task.task_id)}</code>`)}
@@ -680,14 +760,33 @@ TASK_UI_HTML = """<!doctype html>
         ${card("Skill Call", `<code>${esc(summary.skill_call_id || "-")}</code>`)}
         ${card("Tap Action", `<code>${esc(summary.tap_action_id || "-")}</code>`)}
         ${card("Artifacts", (summary.artifact_refs || []).length ? summary.artifact_refs.map(item => `<code>${esc(item)}</code>`).join("<br>") : "-")}
+        ${card("Artifact 可用性", artifactAvailability || "-")}
         ${card("日志采集", summary.captured_bytes !== undefined ? `${esc(summary.captured_bytes)} bytes · 脱敏 ${esc(summary.redaction_count || 0)} 处 · ${summary.truncated ? "已截断" : "未截断"}` : "-")}
         ${card("性能快照", summary.cpu_total_usage_percent !== undefined ? `CPU ${esc(summary.cpu_total_usage_percent)}% · 内存 ${esc(summary.memory_used_percent)}% · 电量 ${esc(summary.battery_level_percent)}% · 温度 ${esc(summary.battery_temperature_celsius ?? "-")}°C` : "-")}
         ${card("应用生命周期", summary.operation ? `${esc(summary.operation)} · ${esc(summary.app?.app_id || "-")}<br>前台 ${esc(summary.state?.foreground ?? "-")} · 进程 ${esc(summary.state?.process_present ?? "-")} · stopped ${esc(summary.state?.stopped ?? "-")} · 数据清除 ${esc(summary.data_cleared ?? "-")}` : "-")}
         ${card("诊断包", summary.bundle_artifact ? `${esc(summary.bundle_artifact.artifact_id)} · ${esc(summary.bundle_artifact.size_bytes)} bytes<br><code>${esc(summary.bundle_artifact.relative_path)}</code><br>日志 ${esc(summary.log_summary?.captured_bytes ?? "-")} bytes · CPU ${esc(summary.performance_summary?.cpu?.total_usage_percent ?? "-")}%` : "-")}
+        ${card("本地数据清理", summary.deleted_count !== undefined ? `${esc(summary.deleted_count)} 个 / ${esc(summary.deleted_bytes)} bytes<br>保留周期 ${esc(summary.retention_days)} 天 · ${esc(summary.verification || "-")}` : "-")}
       </div>
       <h3>事件</h3>
       ${renderEvents(events)}
       ${task.error ? `<h3>失败原因</h3><div class="card error">${esc(task.error.code)} · ${esc(task.error.message || "")}${renderErrorDiagnostics(task.error)}</div>` : ""}`;
+    }
+
+    function artifactAvailabilitySummary(value) {
+      const ids = { available: new Set(), expired: new Set(), missing: new Set() };
+      const visit = item => {
+        if (Array.isArray(item)) return item.forEach(visit);
+        if (!item || typeof item !== "object") return;
+        if (typeof item.artifact_id === "string" && Object.hasOwn(ids, item.availability)) {
+          ids[item.availability].add(item.artifact_id);
+        }
+        Object.values(item).forEach(visit);
+      };
+      visit(value);
+      return Object.entries(ids)
+        .filter(([, values]) => values.size > 0)
+        .map(([status, values]) => `${esc(status)} ${esc(values.size)}`)
+        .join(" · ");
     }
 
     function renderPerformanceActions(taskId) {
@@ -801,6 +900,7 @@ TASK_UI_HTML = """<!doctype html>
 
     refreshEl.addEventListener("click", () => {
       loadReadiness();
+      loadLocalStorage();
       loadTasks();
     });
     deviceSelectEl.addEventListener("change", updateRunButtons);
@@ -821,8 +921,12 @@ TASK_UI_HTML = """<!doctype html>
     collectLogsEl.addEventListener("click", collectDeviceLogs);
     capturePerformanceEl.addEventListener("click", captureDevicePerformance);
     collectDiagnosticBundleEl.addEventListener("click", collectDiagnosticBundle);
+    refreshStorageEl.addEventListener("click", loadLocalStorage);
+    retentionDaysEl.addEventListener("change", loadLocalStorage);
+    prepareCleanupEl.addEventListener("click", prepareLocalCleanup);
     loadModelProviderStatus();
     loadReadiness();
+    loadLocalStorage();
     loadTasks();
   </script>
 </body>

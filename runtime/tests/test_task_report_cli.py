@@ -188,6 +188,33 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
             report,
         )
 
+    def test_renders_local_artifact_cleanup_summary(self) -> None:
+        task = {
+            "task_id": "task_cleanup",
+            "task_type": "local.data.cleanup",
+            "status": "succeeded",
+            "device_id": "local:runtime",
+            "goal": "清理过期证据",
+            "started_at": "2026-07-27T00:00:00Z",
+            "completed_at": "2026-07-27T00:00:01Z",
+            "steps": [],
+            "evidence_summary": {
+                "deleted_count": 3,
+                "deleted_bytes": 4096,
+                "retention_days": 7,
+                "verification": "artifacts_absent",
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn(
+            "Local Artifact cleanup: 3 files / 4096 bytes / "
+            "retention=7 days / verification=artifacts_absent",
+            report,
+        )
+
     async def test_renders_failure_reason_without_full_payload_noise(self) -> None:
         task = await self.runtime.run_settings_scroll_navigation_task(
             "fake:android-001",

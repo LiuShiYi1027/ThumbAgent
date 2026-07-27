@@ -60,6 +60,28 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             status, payload = self._runtime().model_provider_status_sync()
             self._write_json(status, payload)
             return
+        if path == "/v1/storage":
+            try:
+                query = parse_qs(parsed_path.query, keep_blank_values=True)
+                if set(query) - {"retention_days"}:
+                    raise ValueError("unknown query")
+                retention_days = _query_int(
+                    parsed_path.query,
+                    "retention_days",
+                    7,
+                    maximum=365,
+                )
+            except ValueError:
+                self._write_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}},
+                )
+                return
+            status, payload = self._runtime().local_storage_summary_sync(
+                retention_days
+            )
+            self._write_json(status, payload)
+            return
         inspection_match = re.fullmatch(r"/v1/devices/([^/]+)/inspection", path)
         if inspection_match:
             status, payload = self._runtime().inspect_device_sync(
@@ -219,6 +241,12 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         async_app_data_clear_match = re.fullmatch(
             r"/v1/tasks/app\.data\.clear/async", self.path
         )
+        local_cleanup_prepare_match = re.fullmatch(
+            r"/v1/storage/cleanup/prepare", self.path
+        )
+        async_local_cleanup_match = re.fullmatch(
+            r"/v1/tasks/local\.data\.cleanup/async", self.path
+        )
         execution_cancel_match = re.fullmatch(
             r"/v1/task-executions/(task_[a-f0-9]{32})/cancel", self.path
         )
@@ -261,6 +289,50 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 if set(body) != {"goal"} or not isinstance(body.get("goal"), str):
                     raise ValueError("goal")
                 status, payload = self._runtime().compile_goal_sync(body["goal"])
+                self._write_json(status, payload)
+                return
+            if local_cleanup_prepare_match:
+                if set(body) - {"retention_days", "max_artifacts"}:
+                    raise ValueError("local cleanup prepare fields")
+                retention_days = body.get("retention_days", 7)
+                max_artifacts = body.get("max_artifacts", 500)
+                if (
+                    isinstance(retention_days, bool)
+                    or not isinstance(retention_days, int)
+                    or isinstance(max_artifacts, bool)
+                    or not isinstance(max_artifacts, int)
+                ):
+                    raise ValueError("local cleanup prepare")
+                status, payload = (
+                    self._runtime().prepare_local_data_cleanup_sync(
+                        retention_days, max_artifacts
+                    )
+                )
+                self._write_json(status, payload)
+                return
+            if async_local_cleanup_match:
+                if set(body) - {"approval_id", "confirmed", "deadline_seconds"}:
+                    raise ValueError("local cleanup fields")
+                approval_id = body.get("approval_id")
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 120.0, 1.0, 1800.0
+                )
+                if not isinstance(approval_id, str) or not isinstance(confirmed, bool):
+                    raise ValueError("local cleanup")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = (
+                    self._runtime().submit_local_data_cleanup_task_sync(
+                        approval_id,
+                        confirmed,
+                        idempotency_key,
+                        deadline_seconds,
+                    )
+                )
                 self._write_json(status, payload)
                 return
             if apk_prepare_match:

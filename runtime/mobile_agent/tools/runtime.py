@@ -98,6 +98,13 @@ class ToolRegistry:
                 "device.diagnostics.bundle@1",
                 direct_invocation=False,
             ),
+            ToolDefinition(
+                "local.data.cleanup",
+                "runtime.local.data.cleanup@1",
+                RiskLevel.HIGH,
+                Idempotency.UNSAFE,
+                direct_invocation=False,
+            ),
         )
         self._definitions = {definition.tool_id: definition for definition in definitions}
 

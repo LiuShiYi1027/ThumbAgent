@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -13,6 +14,7 @@ from urllib.parse import urlparse
 from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.evidence.artifacts import ArtifactStore
+from mobile_agent.domain.artifact import ArtifactKind
 from mobile_agent.mcp.api_client import RuntimeApiClient
 from mobile_agent.mcp.server import PROTOCOL_VERSION, McpServer
 from mobile_agent.runtime import RuntimeService
@@ -20,6 +22,68 @@ from runtime.tests.test_apk_install import _write_apk
 
 
 class McpRuntimeIntegrationTests(unittest.TestCase):
+    def test_mcp_previews_and_cleans_exact_expired_local_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(Path(directory) / "artifacts")
+            artifact = store.write(
+                ArtifactKind.DEVICE_LOG, "text/plain", b"expired", ".log"
+            )
+            path = store.resolve(artifact.relative_path)
+            old = time.time() - 10 * 86400
+            os.utime(path, (old, old))
+            runtime = RuntimeService(FakeDeviceAdapter(), store)
+            server = McpServer(
+                RuntimeApiClient(
+                    "http://127.0.0.1:8765",
+                    "integration-token",
+                    _InProcessHttpTransport(runtime),
+                )
+            )
+            _ready(server)
+            storage = server.handle(
+                _request(
+                    3,
+                    "tools/call",
+                    {
+                        "name": "mobile_get_local_storage",
+                        "arguments": {"retention_days": 7},
+                    },
+                )
+            )["result"]["structuredContent"]["storage"]
+            approval = server.handle(
+                _request(
+                    4,
+                    "tools/call",
+                    {
+                        "name": "mobile_prepare_local_data_cleanup",
+                        "arguments": {
+                            "retention_days": 7,
+                            "max_artifacts": 500,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["approval"]
+            submitted = server.handle(
+                _request(
+                    5,
+                    "tools/call",
+                    {
+                        "name": "mobile_cleanup_local_data",
+                        "arguments": {
+                            "approval_id": approval["approval_id"],
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["execution"]
+            report = _wait_for_report(runtime, submitted["task_id"])
+            self.assertFalse(path.exists())
+
+        self.assertEqual(1, storage["expired_count"])
+        self.assertEqual(1, approval["candidate_count"])
+        self.assertEqual("succeeded", report["status"])
+        self.assertEqual(1, report["evidence_summary"]["deleted_count"])
+
     def test_mcp_collects_diagnostic_bundle_through_local_api(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = RuntimeService(

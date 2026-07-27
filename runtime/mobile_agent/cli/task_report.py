@@ -131,6 +131,16 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
     if not isinstance(summary, dict) or not summary:
         return ["(no evidence summary)"]
     lines: list[str] = []
+    availability = _artifact_availability_counts(task)
+    if availability:
+        lines.append(
+            "Artifact availability: "
+            + " / ".join(
+                f"{key}={availability[key]}"
+                for key in ("available", "expired", "missing")
+                if availability.get(key, 0)
+            )
+        )
     foreground = summary.get("final_foreground_app")
     if isinstance(foreground, dict):
         lines.append(
@@ -216,7 +226,46 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
                 f"CPU={cpu.get('total_usage_percent', '-')}% / "
                 f"memory={memory.get('used_percent', '-')}%"
             )
+    deleted_count = summary.get("deleted_count")
+    deleted_bytes = summary.get("deleted_bytes")
+    if (
+        isinstance(deleted_count, int)
+        and not isinstance(deleted_count, bool)
+        and isinstance(deleted_bytes, int)
+        and not isinstance(deleted_bytes, bool)
+    ):
+        lines.append(
+            "Local Artifact cleanup: "
+            f"{deleted_count} files / {deleted_bytes} bytes / "
+            f"retention={summary.get('retention_days', '-')} days / "
+            f"verification={summary.get('verification', '-')}"
+        )
     return lines or ["(no evidence summary)"]
+
+
+def _artifact_availability_counts(value: Any) -> dict[str, int]:
+    ids: dict[str, set[str]] = {
+        "available": set(),
+        "expired": set(),
+        "missing": set(),
+    }
+
+    def visit(item: Any) -> None:
+        if isinstance(item, list):
+            for child in item:
+                visit(child)
+            return
+        if not isinstance(item, dict):
+            return
+        availability = item.get("availability")
+        artifact_id = item.get("artifact_id")
+        if isinstance(artifact_id, str) and availability in ids:
+            ids[availability].add(artifact_id)
+        for child in item.values():
+            visit(child)
+
+    visit(value)
+    return {key: len(values) for key, values in ids.items() if values}
 
 
 def _step_decision(step: dict[str, Any]) -> str:

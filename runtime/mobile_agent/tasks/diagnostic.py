@@ -168,7 +168,20 @@ def _deadline_error() -> dict[str, Any]:
 
 
 def _failure_evidence(error: MobileAgentError) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
     refs = error.details.get("artifact_refs")
     if isinstance(refs, list) and all(isinstance(item, str) for item in refs):
-        return {"artifact_refs": list(refs)}
-    return {}
+        evidence["artifact_refs"] = list(refs)
+    deleted = error.details.get("deleted_artifact_ids")
+    if isinstance(deleted, list) and all(
+        isinstance(item, str) and item.startswith("artifact_") for item in deleted
+    ):
+        evidence["deleted_artifact_ids"] = list(deleted)
+        evidence["deleted_count"] = len(deleted)
+    deleted_bytes = error.details.get("deleted_bytes")
+    if isinstance(deleted_bytes, int) and not isinstance(deleted_bytes, bool):
+        evidence["deleted_bytes"] = deleted_bytes
+    failed = error.details.get("failed_artifact_id")
+    if isinstance(failed, str) and failed.startswith("artifact_"):
+        evidence["failed_artifact_id"] = failed
+    return evidence

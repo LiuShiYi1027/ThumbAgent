@@ -46,6 +46,27 @@ class RuntimeApiClient:
     def list_devices(self) -> dict[str, Any]:
         return self._request("GET", "/v1/devices")
 
+    def local_storage(self, retention_days: int) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/v1/storage?{urlencode({'retention_days': retention_days})}",
+        )
+
+    def prepare_local_data_cleanup(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST", "/v1/storage/cleanup/prepare", arguments
+        )
+
+    def cleanup_local_data(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/tasks/local.data.cleanup/async",
+            arguments,
+            idempotent_submission=True,
+        )
+
     def inspect_device(self, device_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/devices/{quote(device_id, safe='')}/inspection")
 

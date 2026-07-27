@@ -208,6 +208,12 @@ SHA-256，并写入固定文件集合和版本化 Manifest；路径由 ArtifactS
 REST、MCP、CLI 和 Web 仅展示摘要及 Artifact 元数据，不内联包内容、不上传数据，也不开放通用
 文件读取接口。部分采集失败时，Task 报告保留已完成证据引用以便定位问题。
 
+ITER-0048 为本地证据增加显式保留和删除边界。`GET /v1/storage` 只返回 Artifact 数量、分类和
+字节聚合；Cleanup Prepare 以保留周期和单次上限确定候选，并在内存 Approval 中绑定每个系统生成
+文件的 Artifact ID、相对路径、大小与 SHA-256。Submit 是 High 风险异步本地任务，不绑定设备
+Session 或 Lease；每个文件删除前重新验证范围和完整性，并在文件之间响应取消与 Deadline。任务、
+事件、配置、密钥、APK、未知文件和任意用户路径均不属于清理范围。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

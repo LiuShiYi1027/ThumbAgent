@@ -4,7 +4,8 @@
 
 ## 当前进展
 
-项目已完成 ITER-0045 Scoped App Removal：独立确认数据删除影响后，安全卸载非系统应用并验证包缺失。
+项目已完成 ITER-0048 Local Data Retention & Cleanup：可以查看本地证据占用，并通过范围绑定
+授权安全清理过期 Artifact。
 使用 Python 3.11+：
 
 ```bash
@@ -64,9 +65,9 @@ python3.11 -m mobile_agent.mcp
 ```
 
 MCP 提供目标级 Tools，覆盖就绪诊断、设备与已安装应用检查、应用生命周期、Agent 异步任务、
-任务查询/取消、脱敏日志、聚合性能快照、诊断证据包和性能比较。它不暴露 ADB、任意 Shell 或
-`input.tap` 等原子输入 Tool。需要确认的动作只有在 MCP Host 已向用户展示参数和影响并获得确认后，
-才允许传入 `confirmed=true`。
+任务查询/取消、脱敏日志、聚合性能快照、诊断证据包、性能比较和本地 Artifact 保留清理。它不暴露
+ADB、任意 Shell、任意文件路径或 `input.tap` 等原子 Tool。需要确认的动作只有在 MCP Host 已向
+用户展示参数和影响并获得确认后，才允许传入 `confirmed=true`。
 
 启动后可查看统一就绪诊断：
 
@@ -135,6 +136,25 @@ PYTHONPATH=runtime python3.11 -m mobile_agent.cli.diagnostic_bundle_collect \
 
 诊断包属于 Medium 风险，必须明确确认。CLI、Web、REST 与 MCP 仅返回 Artifact 元数据和安全摘要，
 不内联截图、UI Tree、日志或 ZIP 内容；包内文件名固定，总大小不超过 24 MiB，且不会上传或外发。
+
+查看本地 Artifact 占用，并只读预检超过默认 7 天保留周期的证据：
+
+```bash
+PYTHONPATH=runtime python3.11 -m mobile_agent.cli.local_storage
+PYTHONPATH=runtime python3.11 -m mobile_agent.cli.local_data_cleanup_prepare \
+  --retention-days 7 --max-artifacts 500 --token <runtime-token>
+```
+
+Prepare 不删除文件，只返回候选数量、大小、截止时间和短期 Approval。用户核对影响摘要并重新明确
+确认后，才可提交异步清理任务：
+
+```bash
+PYTHONPATH=runtime python3.11 -m mobile_agent.cli.local_data_cleanup \
+  <approval-id> --confirm --token <runtime-token>
+```
+
+清理只接受 Approval 中绑定的系统生成 Artifact ID、相对路径、大小和 SHA-256；不接受任意路径，
+不删除任务数据库、配置、密钥或 APK，也不会自动后台运行或自动重试失败。
 
 比较同一设备上两条已完成的性能快照任务：
 
@@ -298,6 +318,11 @@ ITER-0047 增加 `device.diagnostics.bundle`。一次已确认的异步任务在
 中组合 Observation、脱敏日志、聚合性能和可选应用状态，生成固定内容的本地 ZIP。Manifest 记录
 四个来源 Artifact 的名称、大小和 SHA-256；Runtime 在发布诊断包前重新校验来源完整性和 ZIP
 文件集合，失败时保留已经完成的安全 Artifact 引用。
+
+ITER-0048 增加本地 Artifact 存储摘要和两阶段过期清理。Preview 仅扫描系统生成文件并返回聚合
+影响摘要；Submit 只接受十分钟有效、单次、范围绑定的 High 风险 Approval，逐项复核路径、大小、
+SHA-256 和截止时间后删除。异步任务不获取设备 Session 或 Lease，取消与 Deadline 在 Artifact
+之间的安全边界阻止后续删除，并保留已完成删除摘要。
 
 真实 Provider 若持续在默认 30 秒预算附近完成响应，可在本地配置中将
 `timeout_seconds` 调高到 60（允许范围 1–120），或通过

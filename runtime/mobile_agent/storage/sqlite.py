@@ -179,6 +179,38 @@ class SQLiteTaskStore:
             ) from error
         return [task_summary(_json_object(str(row[0]))) for row in rows]
 
+    def list_deleted_artifact_ids(self) -> set[str]:
+        """Return cleanup tombstones derived from immutable TaskRun reports."""
+
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT task_json FROM tasks WHERE task_type = ?",
+                    ("local.data.cleanup",),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise MobileAgentError(
+                code="STORAGE_ERROR",
+                category=ErrorCategory.STORAGE,
+                message="无法读取本地清理审计记录",
+            ) from error
+        deleted: set[str] = set()
+        for row in rows:
+            task = _json_object(str(row[0]))
+            summary = task.get("evidence_summary")
+            values = (
+                summary.get("deleted_artifact_ids")
+                if isinstance(summary, dict)
+                else None
+            )
+            if isinstance(values, list):
+                deleted.update(
+                    item
+                    for item in values
+                    if isinstance(item, str) and item.startswith("artifact_")
+                )
+        return deleted
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path)
         connection.execute("PRAGMA foreign_keys = ON")

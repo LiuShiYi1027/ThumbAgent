@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/local-data-cleanup-result/v1.json",
+  "title": "Local Data Cleanup Result",
+  "type": "object",
+  "required": ["schema_version", "skill_call_id", "skill_id", "skill_version", "success", "status", "verification", "retention_days", "cutoff_at", "deleted_count", "deleted_bytes", "deleted_artifact_ids", "evidence_refs", "started_at", "completed_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "local.data.cleanup" },
+    "skill_version": { "const": "1.0.0" },
+    "success": { "const": true },
+    "status": { "const": "succeeded" },
+    "verification": { "const": "artifacts_absent" },
+    "retention_days": { "type": "integer", "minimum": 1, "maximum": 365 },
+    "cutoff_at": { "type": "string", "format": "date-time" },
+    "deleted_count": { "type": "integer", "minimum": 0, "maximum": 2000 },
+    "deleted_bytes": { "type": "integer", "minimum": 0 },
+    "deleted_artifact_ids": { "type": "array", "maxItems": 2000, "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" } },
+    "evidence_refs": { "type": "array", "maxItems": 0 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

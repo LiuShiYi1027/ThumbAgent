@@ -46,7 +46,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual({"tools": {"listChanged": False}}, initialize["result"]["capabilities"])
         self.assertEqual(-32002, between["error"]["code"])
         self.assertIsNone(notification)
-        self.assertEqual(23, len(after["result"]["tools"]))
+        self.assertEqual(26, len(after["result"]["tools"]))
 
     def test_negotiates_supported_older_version_and_falls_back_for_unknown(self) -> None:
         older = McpServer(self.client).handle(
@@ -86,7 +86,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(23, len(response["result"]["tools"]))
+        self.assertEqual(26, len(response["result"]["tools"]))
 
     def test_lists_only_goal_level_tools_with_annotations(self) -> None:
         _ready(self.server)
@@ -126,6 +126,14 @@ class McpServerTests(unittest.TestCase):
         self.assertFalse(bundle["annotations"]["destructiveHint"])
         self.assertEqual(
             True, bundle["inputSchema"]["properties"]["confirmed"]["const"]
+        )
+        cleanup = next(
+            tool for tool in tools if tool["name"] == "mobile_cleanup_local_data"
+        )
+        self.assertTrue(cleanup["annotations"]["destructiveHint"])
+        self.assertFalse(cleanup["annotations"]["readOnlyHint"])
+        self.assertEqual(
+            True, cleanup["inputSchema"]["properties"]["confirmed"]["const"]
         )
 
     def test_calls_readiness_and_returns_structured_content(self) -> None:
@@ -272,6 +280,23 @@ class _FakeRuntimeClient:
 
     def list_devices(self) -> dict[str, Any]:
         return self._result("list_devices", None, {"devices": []})
+
+    def local_storage(self, retention_days: int) -> dict[str, Any]:
+        return self._result("local_storage", retention_days, {"storage": {}})
+
+    def prepare_local_data_cleanup(
+        self, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self._result(
+            "prepare_local_data_cleanup", arguments, {"approval": {}}
+        )
+
+    def cleanup_local_data(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._result(
+            "cleanup_local_data",
+            arguments,
+            {"execution": {"task_id": TASK_ID}},
+        )
 
     def inspect_device(self, device_id: str) -> dict[str, Any]:
         return self._result("inspect_device", device_id, {"inspection": {}})

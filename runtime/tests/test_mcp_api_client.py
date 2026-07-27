@@ -94,6 +94,35 @@ class McpApiClientTests(unittest.TestCase):
         self.assertTrue(url.endswith("/v1/tasks/device.diagnostics.bundle/async"))
         self.assertIn("Idempotency-Key", headers)
 
+    def test_local_cleanup_uses_fixed_prepare_and_async_endpoints(self) -> None:
+        transport = _Transport({"approval": {}})
+        client = RuntimeApiClient(
+            "http://127.0.0.1:8765", "token", transport
+        )
+
+        client.local_storage(7)
+        client.prepare_local_data_cleanup(
+            {"retention_days": 7, "max_artifacts": 500}
+        )
+        client.cleanup_local_data(
+            {"approval_id": "approval_" + "1" * 32, "confirmed": True}
+        )
+
+        paths = [
+            url.removeprefix("http://127.0.0.1:8765")
+            for _, url, *_ in transport.calls
+        ]
+        self.assertEqual(
+            [
+                "/v1/storage?retention_days=7",
+                "/v1/storage/cleanup/prepare",
+                "/v1/tasks/local.data.cleanup/async",
+            ],
+            paths,
+        )
+        self.assertNotIn("Idempotency-Key", transport.calls[1][2])
+        self.assertIn("Idempotency-Key", transport.calls[2][2])
+
     def test_invalid_or_oversized_runtime_response_is_safe(self) -> None:
         invalid = RuntimeApiClient(
             "http://localhost:8765",

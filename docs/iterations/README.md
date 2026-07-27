@@ -1,7 +1,7 @@
 # 迭代索引
 
 > 状态：Active
-> 更新日期：2026-07-21
+> 更新日期：2026-07-27
 
 | 迭代 | 名称 | 状态 | 目标 |
 | --- | --- | --- | --- |
@@ -52,6 +52,7 @@
 | [ITER-0045](./0045-scoped-app-removal/plan.md) | Scoped App Removal | Completed | 独立确认数据删除影响后安全卸载非系统应用并验证包缺失 |
 | [ITER-0046](./0046-application-lifecycle-management/plan.md) | Application Lifecycle Management | Completed | 检查、启动、停止并安全清除非系统应用数据 |
 | [ITER-0047](./0047-diagnostic-evidence-bundle/plan.md) | Diagnostic Evidence Bundle | Completed | 一次受控调用采集并封装本地工程诊断证据 |
+| [ITER-0048](./0048-local-data-retention-cleanup/plan.md) | Local Data Retention & Cleanup | Completed | 查看本地证据占用并通过范围绑定授权清理过期 Artifact |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

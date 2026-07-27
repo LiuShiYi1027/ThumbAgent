@@ -181,6 +181,10 @@ ITER-0047 增加 `device.diagnostics.bundle@1`。它是 Medium 风险、safe 幂
 只生成固定文件名、大小有界且带来源 SHA-256 Manifest 的本地 ZIP；公共响应不内联证据内容，
 也不提供上传、任意文件选择或平台命令参数。
 
+ITER-0048 的 `local.data.cleanup` 是 Runtime 本地数据能力，不是设备 Capability，因此不进入
+Device advertised capabilities 或 Device Inspection。其风险和幂等性仍由 Tool Registry 固定为
+High / unsafe，且只能由范围绑定 Approval 放行；任何 Device Adapter 都不能声明或绕过该能力。
+
 ## 10. 测试要求
 
 - 每个 Adapter 有 Capability Contract 测试。

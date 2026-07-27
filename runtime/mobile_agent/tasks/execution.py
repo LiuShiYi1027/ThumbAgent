@@ -54,6 +54,7 @@ _SUPPORTED_TASK_TYPES = frozenset(
         "app.launch",
         "app.stop",
         "app.data.clear",
+        "local.data.cleanup",
     }
 )
 
