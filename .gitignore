@@ -10,6 +10,8 @@ __pycache__/
 htmlcov/
 build/
 dist/
+node_modules/
+apps/desktop/src-tauri/target/
 *.egg-info/
 data/
 artifacts/

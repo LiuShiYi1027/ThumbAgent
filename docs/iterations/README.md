@@ -1,7 +1,7 @@
 # 迭代索引
 
 > 状态：Active
-> 更新日期：2026-07-27
+> 更新日期：2026-08-02
 
 | 迭代 | 名称 | 状态 | 目标 |
 | --- | --- | --- | --- |
@@ -53,6 +53,7 @@
 | [ITER-0046](./0046-application-lifecycle-management/plan.md) | Application Lifecycle Management | Completed | 检查、启动、停止并安全清除非系统应用数据 |
 | [ITER-0047](./0047-diagnostic-evidence-bundle/plan.md) | Diagnostic Evidence Bundle | Completed | 一次受控调用采集并封装本地工程诊断证据 |
 | [ITER-0048](./0048-local-data-retention-cleanup/plan.md) | Local Data Retention & Cleanup | Completed | 查看本地证据占用并通过范围绑定授权清理过期 Artifact |
+| [ITER-0049](./0049-desktop-workbench-foundation/plan.md) | Desktop Workbench Foundation | Completed | 桌面应用自动拉起并认证本地 Runtime，首页展示就绪诊断与设备列表 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

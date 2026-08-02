@@ -1,7 +1,8 @@
 PYTHON ?= python3.11
 PYTHONPATH := runtime
+CARGO ?= $(shell command -v cargo 2>/dev/null || echo $(HOME)/.cargo/bin/cargo)
 
-.PHONY: format lint typecheck test test-contract test-integration check run run-mcp
+.PHONY: format lint typecheck test test-contract test-integration check check-desktop contracts check-contracts run run-mcp
 
 format:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/quality.py format
@@ -21,7 +22,17 @@ test-contract:
 test-integration:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest runtime.tests.test_runtime_service -v
 
-check: lint typecheck test
+contracts:
+	$(PYTHON) scripts/generate_ts_contracts.py
+
+check-contracts:
+	$(PYTHON) scripts/generate_ts_contracts.py --check
+
+check: lint typecheck test check-contracts
+
+check-desktop:
+	cd apps/desktop && npm run lint && npm run typecheck
+	cd apps/desktop/src-tauri && $(CARGO) fmt --check && $(CARGO) clippy --all-targets -- -D warnings && $(CARGO) test
 
 run:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m mobile_agent.api.server

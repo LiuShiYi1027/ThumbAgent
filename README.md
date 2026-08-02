@@ -4,8 +4,9 @@
 
 ## 当前进展
 
-项目已完成 ITER-0048 Local Data Retention & Cleanup：可以查看本地证据占用，并通过范围绑定
-授权安全清理过期 Artifact。
+项目已完成 ITER-0049 Desktop Workbench Foundation：macOS 桌面应用（Tauri 2）可自动拉起
+并认证本地 Runtime，首页展示统一就绪诊断与已发现设备列表。桌面端开发见
+[apps/desktop/README.md](./apps/desktop/README.md)。
 使用 Python 3.11+：
 
 ```bash
