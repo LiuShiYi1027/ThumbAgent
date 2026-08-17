@@ -10,7 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.generate_ts_contracts import check_files, expected_files
+from scripts.generate_ts_contracts import FileContext, check_files, expected_files, ts_type
 
 
 class TsContractsGeneratorTests(unittest.TestCase):
@@ -29,6 +29,26 @@ class TsContractsGeneratorTests(unittest.TestCase):
         self.assertIn("device: Device;", readiness)
         self.assertIn("issue: Issue | null;", readiness)
         self.assertIn('status: "ready" | "attention" | "blocked";', readiness)
+
+    def test_allof_refinement_keeps_referenced_type(self) -> None:
+        outputs = expected_files()
+        acceptance = outputs[
+            REPO_ROOT / "contracts/generated/typescript/agent-goal-acceptance.ts"
+        ]
+        self.assertIn('import type { UiSelector } from "./ui-selector";', acceptance)
+        self.assertIn("expected_selector?: UiSelector;", acceptance)
+
+    def test_task_run_closure_covers_agent_report_chain(self) -> None:
+        outputs = expected_files()
+        task_run = outputs[REPO_ROOT / "contracts/generated/typescript/task-run.ts"]
+        self.assertIn('import type { AgentStepResult } from "./agent-step-result";', task_run)
+        self.assertIn("goal_acceptance?: AgentGoalAcceptance;", task_run)
+        self.assertIn("NavigationResult | AgentStepResult |", task_run)
+        self.assertIn("Record<string, unknown> | null;", task_run)
+
+    def test_type_list_renders_union(self) -> None:
+        rendered = ts_type({"type": ["string", "null"]}, FileContext("test"), 0)
+        self.assertEqual(rendered, "string | null")
 
     def test_committed_generated_files_are_in_sync(self) -> None:
         self.assertEqual(check_files(expected_files()), [])

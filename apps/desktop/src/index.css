@@ -337,3 +337,252 @@ body {
   cursor: help;
   color: var(--accent);
 }
+
+.composer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composer-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.composer-select,
+.composer-textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+}
+
+.composer-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.composer-select:focus,
+.composer-textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.composer-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.primary-button,
+.plain-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.plain-button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-secondary);
+}
+
+.plain-button:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.primary-button:disabled,
+.plain-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 35, 40, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.dialog {
+  width: 460px;
+  max-width: calc(100vw - 48px);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: 0 12px 32px rgba(31, 35, 40, 0.25);
+}
+
+.dialog h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.dialog-facts {
+  margin: 0 0 12px;
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 6px 12px;
+}
+
+.dialog-facts dt {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.dialog-facts dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.dialog-device-id {
+  display: block;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.dialog-risk {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.dialog-risk p {
+  margin: 0;
+  color: var(--text);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.execution-goal {
+  margin: 0 0 6px;
+  font-weight: 500;
+}
+
+.execution-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+.event-timeline,
+.step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.event-timeline li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.event-timeline li:last-child {
+  border-bottom: none;
+}
+
+.event-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.event-failed .event-label,
+.event-failed .step-title {
+  color: var(--error);
+}
+
+.step-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.step-list li:last-child {
+  border-bottom: none;
+}
+
+.step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.step-title {
+  font-weight: 600;
+}
+
+.step-detail {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.step-detail code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  background: var(--muted-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin: 0 4px;
+}
+
+.step-detail .mono {
+  word-break: break-all;
+}

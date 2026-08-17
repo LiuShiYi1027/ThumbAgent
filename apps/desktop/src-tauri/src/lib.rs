@@ -19,6 +19,15 @@ fn runtime_api_get(path: String, state: State<'_, AppState>) -> Result<serde_jso
     state.sidecar.api_get(&path)
 }
 
+#[tauri::command]
+fn runtime_api_post(
+    path: String,
+    body: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    state.sidecar.api_post(&path, &body)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let sidecar = Sidecar::start();
@@ -37,7 +46,8 @@ pub fn run() {
         .manage(AppState { sidecar })
         .invoke_handler(tauri::generate_handler![
             runtime_bridge_status,
-            runtime_api_get
+            runtime_api_get,
+            runtime_api_post
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

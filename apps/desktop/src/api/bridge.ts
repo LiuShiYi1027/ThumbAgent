@@ -17,3 +17,11 @@ export function getBridgeStatus(): Promise<SidecarStatus> {
 export function runtimeApiGet<T>(path: string): Promise<T> {
   return invoke<T>('runtime_api_get', { path })
 }
+
+/**
+ * Authenticated POST against the local Runtime. The sidecar only forwards
+ * whitelisted paths (task submit/cancel); everything else is rejected.
+ */
+export function runtimeApiPost<T>(path: string, body: unknown): Promise<T> {
+  return invoke<T>('runtime_api_post', { path, body })
+}

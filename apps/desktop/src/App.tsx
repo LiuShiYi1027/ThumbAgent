@@ -1,13 +1,20 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MonitorSmartphone, RefreshCw } from 'lucide-react'
 
+import type { TaskExecution } from '@contracts/task-execution'
+
 import { getBridgeStatus } from './api/bridge'
-import { getDevices, getHealth, getReadiness } from './api/client'
+import { getDevices, getHealth, getReadiness, submitAgentTask } from './api/client'
+import { ConfirmTaskDialog } from './components/ConfirmTaskDialog'
 import { DeviceTable } from './components/DeviceTable'
+import { ExecutionView } from './components/ExecutionView'
 import { ReadinessPanel } from './components/ReadinessPanel'
 import { StatusBadge } from './components/StatusBadge'
+import { TaskComposer, type TaskIntent } from './components/TaskComposer'
+import { TaskReportView } from './components/TaskReportView'
+import { isTerminal } from './execution'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,8 +66,35 @@ function Workbench() {
     [readiness],
   )
 
+  // One active task at a time: the composer is hidden while an execution is
+  // live, and the finished execution keeps its report on screen until the
+  // user starts a new task.
+  const [pendingIntent, setPendingIntent] = useState<TaskIntent | null>(null)
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
+  const [finishedExecution, setFinishedExecution] = useState<TaskExecution | null>(null)
+
+  const submitMutation = useMutation({
+    mutationFn: (intent: TaskIntent) => submitAgentTask(intent.deviceId, intent.goal),
+    onSuccess: (execution) => {
+      setPendingIntent(null)
+      setFinishedExecution(null)
+      setActiveTaskId(execution.task_id)
+    },
+  })
+
+  const handleTerminal = useCallback((execution: TaskExecution) => {
+    setActiveTaskId(null)
+    setFinishedExecution(execution)
+  }, [])
+
+  const resetForNewTask = useCallback(() => {
+    setFinishedExecution(null)
+    setActiveTaskId(null)
+  }, [])
+
   const refreshing =
     readinessQuery.isFetching || devicesQuery.isFetching || statusQuery.isFetching
+  const taskBusy = activeTaskId !== null
 
   return (
     <div className="app-shell">
@@ -113,7 +147,53 @@ function Workbench() {
 
         {readiness ? <ReadinessPanel readiness={readiness} /> : null}
         {ready ? <DeviceTable devices={devices} availability={availability} /> : null}
+
+        {ready && !taskBusy && !finishedExecution ? (
+          <TaskComposer
+            devices={devices}
+            availability={availability}
+            busy={submitMutation.isPending}
+            onSubmit={setPendingIntent}
+          />
+        ) : null}
+
+        {activeTaskId ? (
+          <ExecutionView taskId={activeTaskId} onTerminal={handleTerminal} />
+        ) : null}
+
+        {finishedExecution ? (
+          <>
+            <section className="panel">
+              <div className="panel-title-row">
+                <h2>任务已结束</h2>
+                <button type="button" className="plain-button" onClick={resetForNewTask}>
+                  开始新任务
+                </button>
+              </div>
+              <p className="empty-state">
+                {finishedExecution.goal}（{isTerminal(finishedExecution) ? finishedExecution.status : ''}）
+              </p>
+            </section>
+            {finishedExecution.result_available ? (
+              <TaskReportView taskId={finishedExecution.task_id} />
+            ) : null}
+          </>
+        ) : null}
       </main>
+
+      {pendingIntent ? (
+        <ConfirmTaskDialog
+          intent={pendingIntent}
+          device={devices.find((device) => device.device_id === pendingIntent.deviceId)}
+          pending={submitMutation.isPending}
+          error={submitMutation.isError ? String(submitMutation.error) : null}
+          onConfirm={() => submitMutation.mutate(pendingIntent)}
+          onCancel={() => {
+            submitMutation.reset()
+            setPendingIntent(null)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

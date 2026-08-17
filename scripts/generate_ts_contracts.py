@@ -9,6 +9,7 @@ schemas and the committed generated files.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,37 @@ SCHEMAS_DIR = ROOT / "contracts" / "schemas"
 OUT_DIR = ROOT / "contracts" / "generated" / "typescript"
 
 # Desktop-consumed subset, in deterministic emission order.
-SCHEMA_NAMES = ("device", "runtime-readiness")
+SCHEMA_NAMES = (
+    "action-result",
+    "agent-action-feedback",
+    "agent-decision",
+    "agent-goal-acceptance",
+    "agent-goal-spec",
+    "agent-observation-summary",
+    "agent-step-result",
+    "apk-install-result",
+    "app-inspection-result",
+    "app-lifecycle-result",
+    "app-removal-result",
+    "app-runtime-state",
+    "artifact",
+    "device",
+    "device-log-capture-result",
+    "device-performance-snapshot",
+    "device-performance-snapshot-result",
+    "diagnostic-bundle-result",
+    "local-data-cleanup-result",
+    "navigation-result",
+    "observation",
+    "runtime-readiness",
+    "skill-result",
+    "task-event",
+    "task-execution",
+    "task-run",
+    "ui-match",
+    "ui-node",
+    "ui-selector",
+)
 
 HEADER = (
     "/**\n"
@@ -30,9 +61,9 @@ HEADER = (
 
 
 def pascal_case(name: str) -> str:
-    """Convert snake/kebab identifiers to PascalCase type names."""
+    """Convert snake/kebab/space-separated identifiers to PascalCase type names."""
 
-    parts = name.replace("-", "_").split("_")
+    parts = re.split(r"[^0-9A-Za-z]+", name)
     return "".join(part[:1].upper() + part[1:] for part in parts if part)
 
 
@@ -96,8 +127,24 @@ def ts_type(schema: dict[str, Any], ctx: FileContext, indent: int) -> str:
     for combiner in ("oneOf", "anyOf"):
         if combiner in schema:
             return " | ".join(ts_type(item, ctx, indent) for item in schema[combiner])
+    if "allOf" in schema:
+        # $ref + local constraint refinement (e.g. a stricter selector). The
+        # intersection keeps the referenced type; items that carry no
+        # renderable shape (unknown) or conditional if/then branches are
+        # dropped rather than degrading the whole type.
+        parts = [
+            ts_type(item, ctx, indent) for item in schema["allOf"] if "if" not in item
+        ]
+        parts = [part for part in parts if part != "unknown"]
+        if parts:
+            return " & ".join(parts)
+        return "unknown"
 
     kind = schema.get("type")
+    if isinstance(kind, list):
+        return " | ".join(
+            ts_type({**schema, "type": item}, ctx, indent) for item in kind
+        )
     if kind == "string":
         return "string"
     if kind in {"integer", "number"}:
@@ -152,7 +199,10 @@ def generate_file(name: str, schema: dict[str, Any]) -> str:
 
     ctx = FileContext(name)
     sections: list[str] = []
-    root_name = pascal_case(name) if "title" not in schema else str(schema["title"])
+    # The file name is the canonical type name: cross-file $ref imports resolve
+    # from file names, and several schema titles ("APK Install Result") would
+    # otherwise diverge from what importers expect.
+    root_name = pascal_case(name)
     for def_key, def_schema in schema.get("$defs", {}).items():
         sections.append(render_interface(pascal_case(def_key), def_schema, ctx))
     sections.append(render_interface(root_name, schema, ctx))

@@ -4,7 +4,8 @@
 //! loopback port with a one-time API token passed through the child
 //! environment, polls `/v1/health` until ready, and kills the child on app
 //! exit. The token never leaves this module; the webview reaches the Runtime
-//! exclusively through the `runtime_api_get` command.
+//! through the `runtime_api_get` command and the whitelist-bounded
+//! `runtime_api_post` command (task submit/cancel only).
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -20,6 +21,12 @@ const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_HTTP_RESPONSE_BYTES: usize = 1 << 20;
 const STDERR_TAIL_BYTES: usize = 4 * 1024;
 const MAX_API_PATH_BYTES: usize = 512;
+const MAX_API_BODY_BYTES: usize = 16 * 1024;
+/// Only these Runtime writes are reachable from the webview: asynchronous
+/// Agent task submission and task cancellation. Everything else stays GET-only.
+const AGENT_RUN_ASYNC_PATH: &str = "/v1/tasks/agent.run/async";
+const TASK_CANCEL_PREFIX: &str = "/v1/task-executions/";
+const TASK_CANCEL_SUFFIX: &str = "/cancel";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -197,24 +204,48 @@ impl Sidecar {
     /// Execute an authenticated GET against the sidecar Runtime.
     pub fn api_get(&self, path: &str) -> Result<serde_json::Value, String> {
         validate_api_path(path)?;
-        let (port, token) = {
-            let inner = self.inner.lock().unwrap();
-            if inner.phase != SidecarPhase::Ready {
-                return Err("本地 Runtime 尚未就绪".to_string());
-            }
-            (inner.port, inner.token.clone())
-        };
+        let (port, token) = self.ready_endpoint()?;
         let (status, body) = http_get(port, path, &token)?;
-        let value: serde_json::Value = serde_json::from_slice(&body)
-            .map_err(|error| format!("Runtime 响应不是有效 JSON：{error}"))?;
-        if status != 200 {
-            let message = value
-                .pointer("/error/message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("未知错误");
-            return Err(format!("Runtime 返回 {status}：{message}"));
+        parse_api_response(status, &body, &[200])
+    }
+
+    /// Execute an authenticated POST against the sidecar Runtime.
+    ///
+    /// Restricted to the desktop write whitelist (task submit/cancel). Task
+    /// submission gets a fresh Rust-generated Idempotency-Key per call; the
+    /// frontend must debounce repeat submissions of the same user intent.
+    pub fn api_post(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        validate_api_post_path(path)?;
+        let payload =
+            serde_json::to_vec(body).map_err(|error| format!("请求体不是有效 JSON：{error}"))?;
+        if payload.is_empty() || payload.len() > MAX_API_BODY_BYTES {
+            return Err("请求体大小无效".to_string());
         }
-        Ok(value)
+        let (port, token) = self.ready_endpoint()?;
+        let idempotency_key = (path == AGENT_RUN_ASYNC_PATH)
+            .then(|| generate_token().map_err(|error| format!("无法生成幂等键：{error}")))
+            .transpose()?;
+        let (status, response) = http_request(
+            port,
+            "POST",
+            path,
+            &token,
+            Some(&payload),
+            idempotency_key.as_deref(),
+        )?;
+        parse_api_response(status, &response, &[200, 202])
+    }
+
+    fn ready_endpoint(&self) -> Result<(u16, String), String> {
+        let inner = self.inner.lock().unwrap();
+        if inner.phase != SidecarPhase::Ready {
+            return Err("本地 Runtime 尚未就绪".to_string());
+        }
+        Ok((inner.port, inner.token.clone()))
     }
 
     /// Kill the sidecar child. Idempotent; safe to call on every exit path.
@@ -360,23 +391,94 @@ fn validate_api_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Minimal blocking HTTP/1.x GET for the loopback Runtime. The Runtime always
-/// sets Content-Length and closes the connection per request (HTTP/1.0), so
-/// reading to EOF is both correct and bounded.
-fn http_get(port: u16, path: &str, token: &str) -> Result<(u16, Vec<u8>), String> {
+fn parse_api_response(
+    status: u16,
+    body: &[u8],
+    accepted: &[u16],
+) -> Result<serde_json::Value, String> {
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|error| format!("Runtime 响应不是有效 JSON：{error}"))?;
+    if !accepted.contains(&status) {
+        let code = value
+            .pointer("/error/code")
+            .and_then(serde_json::Value::as_str);
+        let message = value
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("未知错误");
+        return Err(match code {
+            Some(code) => format!("{code}：{message}"),
+            None => format!("Runtime 返回 {status}：{message}"),
+        });
+    }
+    Ok(value)
+}
+
+fn validate_api_post_path(path: &str) -> Result<(), String> {
+    validate_api_path(path)?;
+    if path == AGENT_RUN_ASYNC_PATH || is_task_cancel_path(path) {
+        return Ok(());
+    }
+    Err("POST 路径不在桌面端白名单内".to_string())
+}
+
+/// `/v1/task-executions/task_<32 lowercase hex>/cancel`, mirroring the Runtime
+/// route pattern without pulling in a regex dependency.
+fn is_task_cancel_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix(TASK_CANCEL_PREFIX) else {
+        return false;
+    };
+    let Some(task_id) = rest.strip_suffix(TASK_CANCEL_SUFFIX) else {
+        return false;
+    };
+    let Some(hex) = task_id.strip_prefix("task_") else {
+        return false;
+    };
+    hex.len() == 32
+        && hex
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
+}
+
+/// Minimal blocking HTTP/1.x request for the loopback Runtime. The Runtime
+/// always sets Content-Length and closes the connection per request
+/// (HTTP/1.0), so reading to EOF is both correct and bounded.
+fn http_request(
+    port: u16,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: Option<&[u8]>,
+    idempotency_key: Option<&str>,
+) -> Result<(u16, Vec<u8>), String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut stream = TcpStream::connect_timeout(&addr, HTTP_CONNECT_TIMEOUT)
         .map_err(|error| format!("连接本地 Runtime 失败：{error}"))?;
     stream
         .set_read_timeout(Some(HTTP_READ_TIMEOUT))
         .map_err(|error| error.to_string())?;
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n\
-         Accept: application/json\r\nConnection: close\r\n\r\n"
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\n\
+         Accept: application/json\r\nConnection: close\r\n"
     );
+    if let Some(body) = body {
+        request.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            body.len()
+        ));
+    }
+    if let Some(key) = idempotency_key {
+        request.push_str(&format!("Idempotency-Key: {key}\r\n"));
+    }
+    request.push_str("\r\n");
     stream
         .write_all(request.as_bytes())
         .map_err(|error| format!("发送请求失败：{error}"))?;
+    if let Some(body) = body {
+        stream
+            .write_all(body)
+            .map_err(|error| format!("发送请求体失败：{error}"))?;
+    }
 
     let mut raw = Vec::with_capacity(4096);
     let mut chunk = [0u8; 8192];
@@ -408,6 +510,10 @@ fn http_get(port: u16, path: &str, token: &str) -> Result<(u16, Vec<u8>), String
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| format!("Runtime 响应状态行无效：{status_text}"))?;
     Ok((status, raw[header_end + 4..].to_vec()))
+}
+
+fn http_get(port: u16, path: &str, token: &str) -> Result<(u16, Vec<u8>), String> {
+    http_request(port, "GET", path, token, None, None)
 }
 
 #[cfg(test)]
@@ -494,6 +600,110 @@ mod tests {
         assert!(validate_api_path("/v1/with space").is_err());
         assert!(validate_api_path("/v1/with\"quote").is_err());
         assert!(validate_api_path(&format!("/v1/{}", "x".repeat(600))).is_err());
+    }
+
+    #[test]
+    fn post_path_whitelist_accepts_only_submit_and_cancel() {
+        assert!(validate_api_post_path(AGENT_RUN_ASYNC_PATH).is_ok());
+        assert!(validate_api_post_path(
+            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/cancel"
+        )
+        .is_ok());
+        // Sync agent.run, skill invoke and arbitrary writes stay blocked.
+        assert!(validate_api_post_path("/v1/tasks/agent.run").is_err());
+        assert!(validate_api_post_path("/v1/skills/app.open/invoke").is_err());
+        assert!(validate_api_post_path("/v1/devices/emulator-5554/observe").is_err());
+        // Cancel path must mirror the Runtime route pattern exactly.
+        assert!(validate_api_post_path(
+            "/v1/task-executions/task_0123456789ABCDEF0123456789abcdef/cancel"
+        )
+        .is_err());
+        assert!(
+            validate_api_post_path("/v1/task-executions/task_0123456789abcdef/cancel").is_err()
+        );
+        assert!(validate_api_post_path(
+            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/cancel/extra"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn api_post_sends_body_and_idempotency_key() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 512];
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if String::from_utf8_lossy(&request).contains("\"goal\"") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request).to_string();
+            let body = b"{\"task_id\":\"task_0123456789abcdef0123456789abcdef\"}";
+            let response = format!(
+                "HTTP/1.0 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+            request_text
+        });
+        let sidecar = Sidecar {
+            inner: Mutex::new(SidecarInner {
+                phase: SidecarPhase::Ready,
+                detail: String::new(),
+                child: None,
+                port,
+                token: "secret-token".to_string(),
+                stderr_tail: Arc::new(Mutex::new(String::new())),
+            }),
+        };
+        let payload = serde_json::json!({"device_id": "adb:emulator-5554", "goal": "打开系统设置"});
+        let value = sidecar.api_post(AGENT_RUN_ASYNC_PATH, &payload).unwrap();
+        let request_text = server.join().unwrap();
+        assert_eq!(
+            value.pointer("/task_id").and_then(|v| v.as_str()),
+            Some("task_0123456789abcdef0123456789abcdef")
+        );
+        assert!(request_text.starts_with("POST /v1/tasks/agent.run/async HTTP/1.1"));
+        assert!(request_text.contains("Authorization: Bearer secret-token"));
+        assert!(request_text.contains("Content-Type: application/json"));
+        let key_line = request_text
+            .lines()
+            .find(|line| line.starts_with("Idempotency-Key: "))
+            .expect("idempotency key header missing");
+        let key = key_line.trim_start_matches("Idempotency-Key: ").trim();
+        assert_eq!(key.len(), 64);
+        assert!(key.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert!(
+            request_text.contains("\"goal\":\"打开系统设置\"")
+                || request_text.contains("打开系统设置")
+        );
+    }
+
+    #[test]
+    fn api_post_rejects_oversized_body_and_non_whitelisted_path() {
+        let sidecar = Sidecar {
+            inner: Mutex::new(SidecarInner {
+                phase: SidecarPhase::Ready,
+                detail: String::new(),
+                child: None,
+                port: 1,
+                token: "secret-token".to_string(),
+                stderr_tail: Arc::new(Mutex::new(String::new())),
+            }),
+        };
+        let oversized = serde_json::json!({"goal": "x".repeat(MAX_API_BODY_BYTES)});
+        assert!(sidecar.api_post(AGENT_RUN_ASYNC_PATH, &oversized).is_err());
+        let small = serde_json::json!({"goal": "ok"});
+        assert!(sidecar.api_post("/v1/tasks/agent.run", &small).is_err());
     }
 
     #[test]
