@@ -55,7 +55,7 @@
 | [ITER-0048](./0048-local-data-retention-cleanup/plan.md) | Local Data Retention & Cleanup | Completed | 查看本地证据占用并通过范围绑定授权清理过期 Artifact |
 | [ITER-0049](./0049-desktop-workbench-foundation/plan.md) | Desktop Workbench Foundation | Completed | 桌面应用自动拉起并认证本地 Runtime，首页展示就绪诊断与设备列表 |
 | [ITER-0050](./0050-desktop-task-workbench/plan.md) | Desktop Task Workbench | Completed | 桌面端提交自然语言 Agent 任务、展示执行时间线并查看完整报告 |
-| [ITER-0051](./0051-agent-execution-resilience/plan.md) | Agent Execution Resilience | Active | 观察瞬时故障有界重试、轮次预算数据校准与真机成功率基线 |
+| [ITER-0051](./0051-agent-execution-resilience/plan.md) | Agent Execution Resilience | Completed | 观察瞬时故障有界重试、轮次预算数据校准与真机成功率基线 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。
