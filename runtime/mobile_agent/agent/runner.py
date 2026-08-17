@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -47,6 +48,12 @@ class AgentRunner:
             "navigation.home",
         }
     )
+    # 转场动画期间 uiautomator 可能 dump 出无法解析或 bounds 非法的 UI Tree；
+    # 这两类观察错误是瞬时的，允许有界重试。DEVICE_OFFLINE / DEVICE_SESSION_CHANGED
+    # 等连接性错误不在此列，必须立即终止任务（ITER-0033 语义）。
+    _OBSERVE_RETRYABLE_CODES = frozenset({"UI_TREE_INVALID", "OBSERVATION_FAILED"})
+    _OBSERVE_MAX_ATTEMPTS = 3
+    _OBSERVE_RETRY_DELAY_SECONDS = 0.3
 
     def __init__(
         self,
@@ -83,7 +90,7 @@ class AgentRunner:
 
         task_started_at = _now()
         task_id = task_id or f"task_{uuid.uuid4().hex}"
-        if not isinstance(max_rounds, int) or isinstance(max_rounds, bool) or max_rounds < 1 or max_rounds > 6:
+        if not isinstance(max_rounds, int) or isinstance(max_rounds, bool) or max_rounds < 1 or max_rounds > 12:
             failed = self._failed_task(
                 task_id,
                 device_id,
@@ -91,7 +98,7 @@ class AgentRunner:
                 task_started_at,
                 1,
                 "INVALID_ARGUMENT",
-                "max_rounds 必须在 1 到 6 之间",
+                "max_rounds 必须在 1 到 12 之间",
                 acceptance,
                 goal_spec,
             )
@@ -117,7 +124,9 @@ class AgentRunner:
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
                 step_started_at = _now()
                 step_id = f"step_{uuid.uuid4().hex}"
-                observation = await self._adapter.observe(device_id, self._artifacts)
+                observation = await self._observe_with_retry(
+                    device_id, cancellation_requested, deadline_exceeded
+                )
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
                 summary = self._summarize_observation(observation, last_action_feedback)
                 pending_summary = summary
@@ -371,6 +380,32 @@ class AgentRunner:
                 message="任务已超过总执行时间预算",
                 suggested_action="提高任务 deadline 或缩小目标范围后重试",
             )
+
+    async def _observe_with_retry(
+        self,
+        device_id: str,
+        cancellation_requested: Callable[[], bool] | None,
+        deadline_exceeded: Callable[[], bool] | None,
+    ) -> Observation:
+        """Observe once, retrying transient capture/parse failures with a bounded budget.
+
+        重试只读、无副作用；每次重试前检查取消与 Deadline，重试耗尽后原错误继续
+        传播为任务终态，已完成轮次的证据由上层错误处理保留。
+        """
+        attempts = 0
+        while True:
+            try:
+                return await self._adapter.observe(device_id, self._artifacts)
+            except MobileAgentError as error:
+                attempts += 1
+                if (
+                    attempts >= self._OBSERVE_MAX_ATTEMPTS
+                    or error.category is not ErrorCategory.DEVICE
+                    or error.code not in self._OBSERVE_RETRYABLE_CODES
+                ):
+                    raise
+                self._raise_if_stopped(cancellation_requested, deadline_exceeded)
+                await asyncio.sleep(self._OBSERVE_RETRY_DELAY_SECONDS)
 
     def _summarize_observation(
         self,

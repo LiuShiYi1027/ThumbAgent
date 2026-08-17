@@ -15,8 +15,16 @@ from mobile_agent.agent import (
     UnavailablePlanner,
     parse_llm_decision_payload,
 )
+from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.devices.fake import FakeDeviceAdapter
+from mobile_agent.domain.app import InstalledApp
+from mobile_agent.domain.app_lifecycle import AppRuntimeState
+from mobile_agent.domain.artifact import ArtifactWriter
+from mobile_agent.domain.device import Device
+from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.observation import Observation
+from mobile_agent.domain.performance import DevicePerformanceSnapshot
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.runtime import RuntimeService
@@ -766,6 +774,130 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             step_properties["result"]["oneOf"],
         )
 
+    def _runner_for(self, adapter: DeviceAdapter) -> AgentRunner:
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        return AgentRunner(
+            adapter,
+            artifacts,
+            RuleBasedPlanner(),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+        )
+
+    async def test_observe_retry_succeeds_after_transient_ui_tree_failure(self) -> None:
+        """首次 observe 抛 UI_TREE_INVALID、二次成功时，任务有界重试并正常继续。"""
+        adapter = _FlakyObserveAdapter(failures=1)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual(1, adapter.failed_observe_calls)
+        self.assertGreater(adapter.observe_calls, 1)
+
+    async def test_observe_retry_succeeds_after_transient_observation_failure(self) -> None:
+        """OBSERVATION_FAILED 同属可重试的瞬时观察错误。"""
+        adapter = _FlakyObserveAdapter(failures=1, code="OBSERVATION_FAILED")
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual(1, adapter.failed_observe_calls)
+
+    async def test_observe_retry_exhausted_terminates_with_evidence(self) -> None:
+        """持续观察失败在最多 2 次重试后以明确终态结束，失败轮次证据保留。"""
+        adapter = _FlakyObserveAdapter(failures=None)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=3
+        )
+
+        self.assertEqual("failed", task.status.value)
+        assert task.error is not None
+        self.assertEqual("UI_TREE_INVALID", task.error["code"])
+        # 1 次首次尝试 + 2 次重试，不超过重试上限
+        self.assertEqual(3, adapter.observe_calls)
+        self.assertEqual(1, len(task.steps))
+        self.assertEqual("failed", task.steps[0].status.value)
+        self.assertEqual("UI_TREE_INVALID", task.steps[0].error["code"])
+
+    async def test_observe_retry_respects_cancellation(self) -> None:
+        """重试窗口内收到取消请求时，不再发起新的观察尝试。"""
+        adapter = _FlakyObserveAdapter(failures=None)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            max_rounds=3,
+            cancellation_requested=lambda: adapter.observe_calls >= 1,
+        )
+
+        self.assertEqual("cancelled", task.status.value)
+        self.assertEqual(1, adapter.observe_calls)
+
+    async def test_observe_retry_respects_deadline(self) -> None:
+        """重试窗口内超过 Deadline 时，任务以 timed_out 结束且不再观察。"""
+        adapter = _FlakyObserveAdapter(failures=None)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            max_rounds=3,
+            deadline_exceeded=lambda: adapter.observe_calls >= 1,
+        )
+
+        self.assertEqual("timed_out", task.status.value)
+        self.assertEqual(1, adapter.observe_calls)
+
+    async def test_observe_does_not_retry_non_transient_device_error(self) -> None:
+        """设备 Session 变化等连接性错误不属于瞬时故障，必须立即终止。"""
+        adapter = _FlakyObserveAdapter(failures=None, code="DEVICE_SESSION_CHANGED")
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=3
+        )
+
+        self.assertEqual("failed", task.status.value)
+        assert task.error is not None
+        self.assertEqual("DEVICE_SESSION_CHANGED", task.error["code"])
+        self.assertEqual(1, adapter.observe_calls)
+
+    async def test_agent_runner_accepts_max_rounds_twelve(self) -> None:
+        """轮次预算上限校准后，12 是合法输入且任务在演示 Planner 预算内完成。"""
+        runtime = RuntimeService(
+            FakeDeviceAdapter(),
+            ArtifactStore(Path(self.directory.name)),
+        )
+
+        task = await runtime.run_agent_task(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=12
+        )
+
+        self.assertEqual("succeeded", task["status"])
+
+    async def test_agent_runner_rejects_max_rounds_outside_one_to_twelve(self) -> None:
+        runtime = RuntimeService(
+            FakeDeviceAdapter(),
+            ArtifactStore(Path(self.directory.name)),
+        )
+
+        for invalid in (0, 13):
+            task = await runtime.run_agent_task(
+                "fake:android-001",
+                "open display settings",
+                confirmed=True,
+                max_rounds=invalid,
+            )
+
+            self.assertEqual("failed", task["status"])
+            self.assertEqual("INVALID_ARGUMENT", task["error"]["code"])
+
     def test_rule_planner_reverses_swipe_after_unchanged_feedback(self) -> None:
         planner = RuleBasedPlanner()
         summary = AgentObservationSummary(
@@ -786,6 +918,82 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("input.swipe", decision.tool_id)
         self.assertEqual("down", decision.arguments["direction"])
+
+
+class _FlakyObserveAdapter:
+    """Adapter whose observe raises a device error for a bounded number of calls.
+
+    failures=None 表示 observe 始终失败；其余方法委托给 FakeDeviceAdapter，
+    以便观察恢复后任务能够继续完成。
+    """
+
+    def __init__(self, failures: int | None, code: str = "UI_TREE_INVALID") -> None:
+        self.observe_calls = 0
+        self.failed_observe_calls = 0
+        self._failures = failures
+        self._code = code
+        self._inner = FakeDeviceAdapter()
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        self.observe_calls += 1
+        if self._failures is None or self.observe_calls <= self._failures:
+            self.failed_observe_calls += 1
+            raise MobileAgentError(
+                code=self._code,
+                category=ErrorCategory.DEVICE,
+                message="注入的观察故障",
+            )
+        return await self._inner.observe(device_id, artifacts)
+
+    async def list_devices(self) -> list[Device]:
+        return await self._inner.list_devices()
+
+    async def launch_app(self, device_id: str, app_id: str) -> None:
+        await self._inner.launch_app(device_id, app_id)
+
+    async def press_back(self, device_id: str) -> None:
+        await self._inner.press_back(device_id)
+
+    async def press_home(self, device_id: str) -> None:
+        await self._inner.press_home(device_id)
+
+    async def tap(self, device_id: str, x: int, y: int) -> None:
+        await self._inner.tap(device_id, x, y)
+
+    async def swipe(
+        self, device_id: str, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int
+    ) -> None:
+        await self._inner.swipe(device_id, start_x, start_y, end_x, end_y, duration_ms)
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        await self._inner.input_text(device_id, text)
+
+    async def list_installed_apps(self, device_id: str) -> tuple[str, ...]:
+        return await self._inner.list_installed_apps(device_id)
+
+    async def inspect_installed_app(self, device_id: str, app_id: str) -> InstalledApp:
+        return await self._inner.inspect_installed_app(device_id, app_id)
+
+    async def install_apk(self, device_id: str, apk_path: Path, replace_existing: bool) -> None:
+        await self._inner.install_apk(device_id, apk_path, replace_existing)
+
+    async def uninstall_app(self, device_id: str, app_id: str, keep_data: bool) -> None:
+        await self._inner.uninstall_app(device_id, app_id, keep_data)
+
+    async def inspect_app_runtime_state(self, device_id: str, app: InstalledApp) -> AppRuntimeState:
+        return await self._inner.inspect_app_runtime_state(device_id, app)
+
+    async def force_stop_app(self, device_id: str, app_id: str) -> None:
+        await self._inner.force_stop_app(device_id, app_id)
+
+    async def clear_app_data(self, device_id: str, app_id: str) -> None:
+        await self._inner.clear_app_data(device_id, app_id)
+
+    async def collect_logs(self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel) -> bytes:
+        return await self._inner.collect_logs(device_id, max_lines, minimum_level)
+
+    async def capture_performance(self, device_id: str) -> DevicePerformanceSnapshot:
+        return await self._inner.capture_performance(device_id)
 
 
 class UnsafePlanner:

@@ -715,7 +715,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     not isinstance(max_rounds, int)
                     or isinstance(max_rounds, bool)
                     or max_rounds < 1
-                    or max_rounds > 6
+                    or max_rounds > 12
                 ):
                     raise ValueError("max_rounds")
                 if acceptance is not None and not isinstance(acceptance, dict):

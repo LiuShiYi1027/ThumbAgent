@@ -62,6 +62,54 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertEqual("queued", payload["execution"]["status"])
         self.assertRegex(payload["execution"]["task_id"], r"^task_[a-f0-9]{32}$")
 
+    def test_post_async_agent_run_max_rounds_boundary(self) -> None:
+        """max_rounds 接受 1–12（含 12），拒绝 0 与 13。"""
+
+        def post(max_rounds: object) -> tuple[HTTPStatus, dict[str, object], bool]:
+            store = _ApiExecutionStore()
+            with TemporaryDirectory() as directory:
+                runtime = RuntimeService(
+                    FakeDeviceAdapter(),
+                    ArtifactStore(Path(directory)),
+                    task_execution_store=store,
+                )
+                handler = object.__new__(RuntimeRequestHandler)
+                handler.path = "/v1/tasks/agent.run/async"
+                headers = Message()
+                headers["Content-Type"] = "application/json"
+                headers["Authorization"] = "Bearer test-token"
+                handler.headers = headers
+                handler.server = SimpleNamespace(
+                    runtime=runtime,
+                    api_token="test-token",
+                    allowed_origins=frozenset(),
+                    server_port=8765,
+                )
+                handler._read_json = lambda: {
+                    "device_id": "fake:android-001",
+                    "goal": "open display settings",
+                    "confirmed": True,
+                    "max_rounds": max_rounds,
+                }
+                captured: dict[str, object] = {}
+                handler._write_json = lambda status, payload: captured.update(
+                    {"status": status, "payload": payload}
+                )
+
+                handler.do_POST()
+                finished = store.terminal.wait(2) if captured["status"] == HTTPStatus.ACCEPTED else False
+
+            return captured["status"], captured["payload"], finished
+
+        status, payload, finished = post(12)
+        self.assertEqual(HTTPStatus.ACCEPTED, status)
+        self.assertTrue(finished, "max_rounds=12 的异步任务未完成")
+
+        for invalid in (0, 13):
+            status, payload, _ = post(invalid)
+            self.assertEqual(HTTPStatus.BAD_REQUEST, status)
+            self.assertEqual("INVALID_ARGUMENT", payload["error"]["code"])
+
     def test_post_compiles_goal_without_device_action(self) -> None:
         adapter = FakeDeviceAdapter()
         with TemporaryDirectory() as directory:
