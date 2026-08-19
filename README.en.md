@@ -4,6 +4,8 @@
 
 [中文](./README.md) | English
 
+[![CI](https://github.com/LiuShiYi1027/ThumbAgent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LiuShiYi1027/ThumbAgent/actions/workflows/ci.yml)
+
 > Note: the [Chinese README](./README.md) is the primary maintained version; this
 > English translation may lag behind the latest iteration notes.
 

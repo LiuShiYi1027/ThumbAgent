@@ -4,6 +4,8 @@
 
 中文 | [English](./README.en.md)
 
+[![CI](https://github.com/LiuShiYi1027/ThumbAgent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LiuShiYi1027/ThumbAgent/actions/workflows/ci.yml)
+
 面向 AI Agent 的本地优先、跨平台移动设备 Skills 平台。
 
 ## 当前进展
