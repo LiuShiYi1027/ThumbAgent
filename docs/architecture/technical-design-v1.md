@@ -214,6 +214,16 @@ ITER-0048 为本地证据增加显式保留和删除边界。`GET /v1/storage` �
 Session 或 Lease；每个文件删除前重新验证范围和完整性，并在文件之间响应取消与 Deadline。任务、
 事件、配置、密钥、APK、未知文件和任意用户路径均不属于清理范围。
 
+ITER-0051 起，`AgentRunner` 对观察阶段的瞬时 `DEVICE` 类错误（`UI_TREE_INVALID`、
+`OBSERVATION_FAILED`）做最多 2 次有界重试，重试间检查取消与 Deadline；连接性错误仍立即
+终止。`max_rounds` 允许范围放宽到 1–12，默认值 6 不变。
+
+ITER-0052 起，Runtime 提供证据内容的唯一读取通道
+`GET /v1/artifacts/{artifact_id}/content`：仅截图 PNG、Bearer token 认证、单文件 8 MiB
+上限、no-store，不开放其他 Artifact 类型或任意路径。`task.step_completed` 事件 payload
+携带该轮动作后截图的 `screenshot_artifact_id`，桌面工作台据此在执行中与报告内展示设备画面；
+桌面 IPC 增加仅匹配该端点模式的二进制白名单桥，截图只在 webview 内存中渲染。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

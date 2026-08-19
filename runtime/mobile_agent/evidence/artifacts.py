@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -12,6 +13,11 @@ from pathlib import Path
 
 from mobile_agent.domain.artifact import Artifact, ArtifactKind
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+
+_ARTIFACT_ID = re.compile(r"^artifact_[a-f0-9]{32}$")
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+
 
 class ArtifactStore:
     """Persist artifacts below a configured root using generated names."""
@@ -87,6 +93,42 @@ class ArtifactStore:
                 message="Artifact 路径越界",
             )
         return candidate
+
+    def screenshot_content(self, artifact_id: str) -> bytes:
+        """Return bounded PNG bytes for a stored screenshot artifact.
+
+        只按系统生成的 `{artifact_id}.png` 文件名在日期目录内定位，不接受路径；
+        重新校验大小上限与 PNG 签名，其他 Artifact 类型不可经此读取。
+        """
+        if not _ARTIFACT_ID.fullmatch(artifact_id):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="无效的 Artifact ID",
+            )
+        matches = sorted(self._root.glob(f"*/*/*/{artifact_id}.png"))
+        if not matches:
+            raise MobileAgentError(
+                code="ARTIFACT_NOT_FOUND",
+                category=ErrorCategory.STORAGE,
+                message="截图 Artifact 不存在或已被清理",
+            )
+        path = self.resolve(matches[0].relative_to(self._root).as_posix())
+        size = path.stat().st_size
+        if size == 0 or size > _MAX_SCREENSHOT_BYTES:
+            raise MobileAgentError(
+                code="ARTIFACT_INVALID",
+                category=ErrorCategory.STORAGE,
+                message="截图 Artifact 大小无效",
+            )
+        data = path.read_bytes()
+        if not data.startswith(_PNG_SIGNATURE):
+            raise MobileAgentError(
+                code="ARTIFACT_INVALID",
+                category=ErrorCategory.STORAGE,
+                message="截图 Artifact 内容无效",
+            )
+        return data
 
 
 def default_artifact_root() -> Path:

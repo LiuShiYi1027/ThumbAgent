@@ -427,6 +427,9 @@ class AsyncTaskExecutor:
                     }
                     if step.error is not None:
                         payload["error_code"] = step.error.get("code", "")
+                    screenshot_artifact_id = _step_screenshot_artifact_id(step.result)
+                    if screenshot_artifact_id is not None:
+                        payload["screenshot_artifact_id"] = screenshot_artifact_id
                     self._append_event(
                         self._store.get_execution(running.task_id),
                         TaskEventType.STEP_COMPLETED,
@@ -519,3 +522,34 @@ def _cancelled_error() -> dict[str, Any]:
         "retryable": False,
         "outcome": "known_failure",
     }
+
+
+def _step_screenshot_artifact_id(result: dict[str, Any] | None) -> str | None:
+    """Extract the after-action screenshot artifact id from a completed step.
+
+    客户端据此经只读内容端点拉取该轮动作后的设备画面；无法定位时返回 None，
+    事件 payload 不携带该字段。
+    """
+    if not isinstance(result, dict):
+        return None
+    action = result.get("action_result")
+    if not isinstance(action, dict):
+        skill = result.get("skill_result")
+        if isinstance(skill, dict):
+            # SkillResult 使用 action，NavigationResult 使用 tap_action 承载动作结果
+            action = skill.get("action")
+            if not isinstance(action, dict):
+                action = skill.get("tap_action")
+    if not isinstance(action, dict):
+        return None
+    after = action.get("after")
+    if not isinstance(after, dict):
+        return None
+    screen = after.get("screen")
+    if not isinstance(screen, dict):
+        return None
+    screenshot = screen.get("screenshot")
+    if not isinstance(screenshot, dict):
+        return None
+    artifact_id = screenshot.get("artifact_id")
+    return artifact_id if isinstance(artifact_id, str) else None

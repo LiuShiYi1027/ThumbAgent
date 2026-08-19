@@ -1811,6 +1811,20 @@ class RuntimeService:
         except MobileAgentError as error:
             return self._error_response(error)
 
+    def artifact_screenshot_content_sync(
+        self, artifact_id: str
+    ) -> tuple[HTTPStatus, bytes | dict[str, Any]]:
+        """Read one stored screenshot artifact as bounded PNG bytes.
+
+        与 JSON 端点不同，成功时返回原始字节；该端点只服务截图 Artifact，
+        由 API 层在调用前完成 Bearer token 认证。
+        """
+        try:
+            return HTTPStatus.OK, self._artifacts.screenshot_content(artifact_id)
+        except MobileAgentError as error:
+            status, payload = self._error_response(error)
+            return status, payload
+
     def prepare_local_data_cleanup_sync(
         self, retention_days: int | None = None, max_artifacts: int = 500
     ) -> tuple[HTTPStatus, dict[str, Any]]:
@@ -2308,6 +2322,7 @@ class RuntimeService:
             "APP_NOT_FOUND",
             "TOOL_NOT_FOUND",
             "TASK_NOT_FOUND",
+            "ARTIFACT_NOT_FOUND",
         }:
             status = HTTPStatus.NOT_FOUND
         elif error.code in {

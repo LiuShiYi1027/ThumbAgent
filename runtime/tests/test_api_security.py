@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.api.server import _query_int
 from mobile_agent.devices.fake import FakeDeviceAdapter
+from mobile_agent.domain.artifact import ArtifactKind
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.goals import AgentGoalSpec
 from mobile_agent.providers import ModelProviderSettings
@@ -194,6 +195,82 @@ class ApiSecurityTests(unittest.TestCase):
             _query_int("limit=101", "limit", 20)
         with self.assertRaises(ValueError):
             _query_int("limit=abc", "limit", 20)
+
+    def _artifact_get_handler(
+        self,
+        directory: str,
+        path: str,
+        token: str | None,
+    ) -> tuple[RuntimeRequestHandler, dict[str, object]]:
+        handler = object.__new__(RuntimeRequestHandler)
+        handler.path = path
+        headers = Message()
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        handler.headers = headers
+        handler.server = SimpleNamespace(
+            runtime=RuntimeService(FakeDeviceAdapter(), ArtifactStore(Path(directory))),
+            api_token="test-token",
+            allowed_origins=frozenset(),
+            server_port=8765,
+        )
+        captured: dict[str, object] = {}
+        handler._write_json = lambda status, payload: captured.update(
+            {"status": status, "payload": payload}
+        )
+        handler._write_png = lambda status, body: captured.update(
+            {"status": status, "png": body}
+        )
+        return handler, captured
+
+    def test_get_artifact_content_requires_token(self) -> None:
+        with TemporaryDirectory() as directory:
+            for token in (None, "wrong-token"):
+                handler, captured = self._artifact_get_handler(
+                    directory, f"/v1/artifacts/artifact_{'0' * 32}/content", token
+                )
+
+                handler.do_GET()
+
+                self.assertEqual(HTTPStatus.UNAUTHORIZED, captured["status"])
+                self.assertEqual("UNAUTHORIZED", captured["payload"]["error"]["code"])
+
+    def test_get_artifact_content_serves_screenshot_png(self) -> None:
+        data = b"\x89PNG\r\n\x1a\n" + b"fixture-image-body"
+        with TemporaryDirectory() as directory:
+            store = ArtifactStore(Path(directory))
+            artifact = store.write(ArtifactKind.SCREENSHOT, "image/png", data, ".png")
+            handler, captured = self._artifact_get_handler(
+                directory, f"/v1/artifacts/{artifact.artifact_id}/content", "test-token"
+            )
+
+            handler.do_GET()
+
+        self.assertEqual(HTTPStatus.OK, captured["status"])
+        self.assertEqual(data, captured["png"])
+
+    def test_get_artifact_content_unknown_id_returns_404(self) -> None:
+        with TemporaryDirectory() as directory:
+            handler, captured = self._artifact_get_handler(
+                directory, f"/v1/artifacts/artifact_{'f' * 32}/content", "test-token"
+            )
+
+            handler.do_GET()
+
+        self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+        self.assertEqual("ARTIFACT_NOT_FOUND", captured["payload"]["error"]["code"])
+
+    def test_get_artifact_content_rejects_non_id_path(self) -> None:
+        with TemporaryDirectory() as directory:
+            handler, captured = self._artifact_get_handler(
+                directory, "/v1/artifacts/../../etc/passwd/content", "test-token"
+            )
+
+            handler.do_GET()
+
+        # 不匹配内容端点路由，落入通用 404；且不触发任何文件读取
+        self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+        self.assertEqual("RESOURCE_NOT_FOUND", captured["payload"]["error"]["code"])
 
     def test_get_model_provider_status_returns_redacted_payload(self) -> None:
         with TemporaryDirectory() as directory:

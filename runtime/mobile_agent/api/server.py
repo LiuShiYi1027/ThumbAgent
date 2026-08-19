@@ -60,6 +60,20 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             status, payload = self._runtime().model_provider_status_sync()
             self._write_json(status, payload)
             return
+        artifact_content_match = re.fullmatch(
+            r"/v1/artifacts/(artifact_[a-f0-9]{32})/content", path
+        )
+        if artifact_content_match:
+            if not self._authorize_artifact_get():
+                return
+            status, content = self._runtime().artifact_screenshot_content_sync(
+                artifact_content_match.group(1)
+            )
+            if isinstance(content, bytes):
+                self._write_png(status, content)
+            else:
+                self._write_json(status, content)
+            return
         if path == "/v1/storage":
             try:
                 query = parse_qs(parsed_path.query, keep_blank_values=True)
@@ -830,6 +844,28 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _write_png(self, status: HTTPStatus, body: bytes) -> None:
+        self.send_response(status.value)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authorize_artifact_get(self) -> bool:
+        """证据内容端点单独要求 Bearer token，即使其他 GET 只读端点不强制。"""
+        expected = getattr(self.server, "api_token", "")
+        authorization = self.headers.get("Authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        if not expected or not secrets.compare_digest(supplied, expected):
+            self._write_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": {"code": "UNAUTHORIZED", "message": "缺少有效的本地 API 令牌"}},
+            )
+            return False
+        return True
 
 
 def create_server(

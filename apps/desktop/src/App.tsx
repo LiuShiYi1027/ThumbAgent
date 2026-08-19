@@ -8,6 +8,7 @@ import type { TaskExecution } from '@contracts/task-execution'
 import { getBridgeStatus } from './api/bridge'
 import { getDevices, getHealth, getReadiness, submitAgentTask } from './api/client'
 import { ConfirmTaskDialog } from './components/ConfirmTaskDialog'
+import { DeviceScreenPanel } from './components/DeviceScreenPanel'
 import { DeviceTable } from './components/DeviceTable'
 import { ExecutionView } from './components/ExecutionView'
 import { ReadinessPanel } from './components/ReadinessPanel'
@@ -158,7 +159,10 @@ function Workbench() {
         ) : null}
 
         {activeTaskId ? (
-          <ExecutionView taskId={activeTaskId} onTerminal={handleTerminal} />
+          <div className="workbench-grid">
+            <DeviceScreenPanel taskId={activeTaskId} live />
+            <ExecutionView taskId={activeTaskId} onTerminal={handleTerminal} />
+          </div>
         ) : null}
 
         {finishedExecution ? (
@@ -175,7 +179,10 @@ function Workbench() {
               </p>
             </section>
             {finishedExecution.result_available ? (
-              <TaskReportView taskId={finishedExecution.task_id} />
+              <div className="workbench-grid">
+                <DeviceScreenPanel taskId={finishedExecution.task_id} live={false} />
+                <TaskReportView taskId={finishedExecution.task_id} />
+              </div>
             ) : null}
           </>
         ) : null}

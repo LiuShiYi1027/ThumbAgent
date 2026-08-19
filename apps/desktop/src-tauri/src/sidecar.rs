@@ -19,6 +19,11 @@ const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_HTTP_RESPONSE_BYTES: usize = 1 << 20;
+/// Screenshot PNG content is larger than JSON responses but stays bounded.
+const MAX_ARTIFACT_RESPONSE_BYTES: usize = 12 << 20;
+const ARTIFACT_CONTENT_PREFIX: &str = "/v1/artifacts/";
+const ARTIFACT_CONTENT_SUFFIX: &str = "/content";
+const ARTIFACT_ID_LENGTH: usize = 41; // "artifact_" + 32 lowercase hex
 const STDERR_TAIL_BYTES: usize = 4 * 1024;
 const MAX_API_PATH_BYTES: usize = 512;
 const MAX_API_BODY_BYTES: usize = 16 * 1024;
@@ -209,6 +214,32 @@ impl Sidecar {
         parse_api_response(status, &body, &[200])
     }
 
+    /// Execute an authenticated GET for screenshot artifact bytes.
+    ///
+    /// The path whitelist admits only `/v1/artifacts/{artifact_id}/content`;
+    /// the response is bounded and returned base64-encoded for IPC transport.
+    pub fn api_get_bytes(&self, path: &str) -> Result<String, String> {
+        validate_artifact_content_path(path)?;
+        let (port, token) = self.ready_endpoint()?;
+        let (status, body) = http_request(
+            port,
+            "GET",
+            path,
+            &token,
+            None,
+            None,
+            MAX_ARTIFACT_RESPONSE_BYTES,
+        )?;
+        // 成功响应是二进制 PNG，只有错误响应才是 JSON，先判状态再解析。
+        if status != 200 {
+            parse_api_response(status, &body, &[200])?;
+        }
+        if body.is_empty() {
+            return Err("Runtime 返回了空的截图内容".to_string());
+        }
+        Ok(base64_encode(&body))
+    }
+
     /// Execute an authenticated POST against the sidecar Runtime.
     ///
     /// Restricted to the desktop write whitelist (task submit/cancel). Task
@@ -236,6 +267,7 @@ impl Sidecar {
             &token,
             Some(&payload),
             idempotency_key.as_deref(),
+            MAX_HTTP_RESPONSE_BYTES,
         )?;
         parse_api_response(status, &response, &[200, 202])
     }
@@ -450,6 +482,7 @@ fn http_request(
     token: &str,
     body: Option<&[u8]>,
     idempotency_key: Option<&str>,
+    max_response_bytes: usize,
 ) -> Result<(u16, Vec<u8>), String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut stream = TcpStream::connect_timeout(&addr, HTTP_CONNECT_TIMEOUT)
@@ -487,7 +520,7 @@ fn http_request(
             Ok(0) => break,
             Ok(read) => {
                 raw.extend_from_slice(&chunk[..read]);
-                if raw.len() > MAX_HTTP_RESPONSE_BYTES {
+                if raw.len() > max_response_bytes {
                     return Err("Runtime 响应超过大小上限".to_string());
                 }
             }
@@ -513,7 +546,62 @@ fn http_request(
 }
 
 fn http_get(port: u16, path: &str, token: &str) -> Result<(u16, Vec<u8>), String> {
-    http_request(port, "GET", path, token, None, None)
+    http_request(
+        port,
+        "GET",
+        path,
+        token,
+        None,
+        None,
+        MAX_HTTP_RESPONSE_BYTES,
+    )
+}
+
+/// `/v1/artifacts/artifact_<32 lowercase hex>/content`, mirroring the Runtime
+/// route exactly; no regex dependency.
+fn validate_artifact_content_path(path: &str) -> Result<(), String> {
+    validate_api_path(path)?;
+    let rejected = || "Artifact 内容路径不在桌面端白名单内".to_string();
+    let Some(rest) = path.strip_prefix(ARTIFACT_CONTENT_PREFIX) else {
+        return Err(rejected());
+    };
+    let Some(artifact_id) = rest.strip_suffix(ARTIFACT_CONTENT_SUFFIX) else {
+        return Err(rejected());
+    };
+    let valid = artifact_id.len() == ARTIFACT_ID_LENGTH
+        && artifact_id.starts_with("artifact_")
+        && artifact_id[9..]
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase());
+    if !valid {
+        return Err(rejected());
+    }
+    Ok(())
+}
+
+/// Minimal RFC 4648 base64 encoder; avoids a new crate for one IPC transport.
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
+        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[((triple >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[(triple & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -740,6 +828,110 @@ mod tests {
         assert_eq!(body, b"{\"ok\":true}");
         assert!(request_text.contains("Authorization: Bearer secret-token"));
         assert!(request_text.starts_with("GET /v1/health HTTP/1.1"));
+    }
+
+    #[test]
+    fn artifact_content_path_whitelist_is_exact() {
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789abcdef0123456789abcdef/content"
+        )
+        .is_ok());
+        // Other Runtime routes, other artifact suffixes and malformed ids stay blocked.
+        assert!(validate_artifact_content_path("/v1/tasks").is_err());
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789abcdef0123456789abcdef"
+        )
+        .is_err());
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789ABCDEF0123456789abcdef/content"
+        )
+        .is_err());
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789abcdef0123456789abcde/content"
+        )
+        .is_err());
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789abcdef0123456789abcdef/content/extra"
+        )
+        .is_err());
+        assert!(validate_artifact_content_path(
+            "/v1/artifacts/artifact_0123456789abcdef0123456789abcdef/../content"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn base64_encode_matches_rfc4648_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn api_get_bytes_fetches_binary_body_with_auth() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let png: &[u8] = b"\x89PNG\r\n\x1a\nfake-image-body";
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 512];
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request).to_string();
+            let response = format!(
+                "HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\r\n",
+                png.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(png).unwrap();
+            request_text
+        });
+        let sidecar = Sidecar {
+            inner: Mutex::new(SidecarInner {
+                phase: SidecarPhase::Ready,
+                detail: String::new(),
+                child: None,
+                port,
+                token: "secret-token".to_string(),
+                stderr_tail: Arc::new(Mutex::new(String::new())),
+            }),
+        };
+        let encoded = sidecar
+            .api_get_bytes("/v1/artifacts/artifact_0123456789abcdef0123456789abcdef/content")
+            .unwrap();
+        let request_text = server.join().unwrap();
+        assert_eq!(encoded, base64_encode(png));
+        assert!(!encoded.is_empty());
+        assert!(request_text.contains("Authorization: Bearer secret-token"));
+    }
+
+    #[test]
+    fn api_get_bytes_rejects_non_whitelisted_path_before_io() {
+        let sidecar = Sidecar {
+            inner: Mutex::new(SidecarInner {
+                phase: SidecarPhase::Ready,
+                detail: String::new(),
+                child: None,
+                port: 1,
+                token: "secret-token".to_string(),
+                stderr_tail: Arc::new(Mutex::new(String::new())),
+            }),
+        };
+        assert!(sidecar.api_get_bytes("/v1/tasks").is_err());
+        assert!(sidecar.api_get_bytes("/v1/devices").is_err());
     }
 
     #[test]

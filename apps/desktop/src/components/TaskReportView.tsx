@@ -1,9 +1,12 @@
+import { useState } from 'react'
+
 import { useQuery } from '@tanstack/react-query'
 
 import type { AgentStepResult } from '@contracts/agent-step-result'
 import type { TaskRun } from '@contracts/task-run'
 
-import { getTaskRun } from '../api/client'
+import { getTaskRun, stepScreenshotArtifactId } from '../api/client'
+import { ScreenshotImage } from './ScreenshotImage'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 
 const runStatusLabel: Record<TaskRun['status'], string> = {
@@ -60,12 +63,25 @@ function formatArguments(args: Record<string, unknown>): string {
 }
 
 export function TaskReportView({ taskId }: { taskId: string }) {
+  const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<string>>(new Set())
   const reportQuery = useQuery({
     queryKey: ['task-run', taskId],
     queryFn: () => getTaskRun(taskId),
     refetchInterval: false,
     staleTime: Infinity,
   })
+
+  const toggleStep = (stepId: string) => {
+    setExpandedSteps((current) => {
+      const next = new Set(current)
+      if (next.has(stepId)) {
+        next.delete(stepId)
+      } else {
+        next.add(stepId)
+      }
+      return next
+    })
+  }
 
   if (reportQuery.isPending) {
     return (
@@ -112,6 +128,8 @@ export function TaskReportView({ taskId }: { taskId: string }) {
         {report.steps.map((step) => {
           const agentStep = step.kind === 'agent_round' ? asAgentStepResult(step.result) : null
           const stepError = errorSummary(step.error)
+          const screenshotId = stepScreenshotArtifactId(step)
+          const expanded = expandedSteps.has(step.step_id)
           return (
             <li key={step.step_id} className={step.status === 'failed' ? 'event-failed' : ''}>
               <div className="step-head">
@@ -121,10 +139,21 @@ export function TaskReportView({ taskId }: { taskId: string }) {
                     ? ` · ${decisionTypeLabel[agentStep.decision.decision_type] ?? agentStep.decision.decision_type}`
                     : ` · ${step.name}`}
                 </span>
-                <StatusBadge
-                  tone={step.status === 'succeeded' ? 'ok' : 'error'}
-                  label={step.status === 'succeeded' ? '成功' : '失败'}
-                />
+                <span className="step-head-actions">
+                  {screenshotId ? (
+                    <button
+                      type="button"
+                      className="plain-button step-screenshot-toggle"
+                      onClick={() => toggleStep(step.step_id)}
+                    >
+                      {expanded ? '收起截图' : '查看截图'}
+                    </button>
+                  ) : null}
+                  <StatusBadge
+                    tone={step.status === 'succeeded' ? 'ok' : 'error'}
+                    label={step.status === 'succeeded' ? '成功' : '失败'}
+                  />
+                </span>
               </div>
               {agentStep ? (
                 <div className="step-detail">
@@ -149,6 +178,12 @@ export function TaskReportView({ taskId }: { taskId: string }) {
                 </div>
               ) : null}
               {stepError ? <p className="error-detail">{stepError}</p> : null}
+              {expanded && screenshotId ? (
+                <ScreenshotImage
+                  artifactId={screenshotId}
+                  alt={`第 ${step.sequence} 轮动作后的设备截图`}
+                />
+              ) : null}
             </li>
           )
         })}

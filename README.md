@@ -4,8 +4,13 @@
 
 ## 当前进展
 
-项目已完成 ITER-0049 Desktop Workbench Foundation：macOS 桌面应用（Tauri 2）可自动拉起
-并认证本地 Runtime，首页展示统一就绪诊断与已发现设备列表。桌面端开发见
+项目已完成 ITER-0052 Desktop Device Screen & Live Observation：桌面工作台在执行 Agent 任务时
+展示设备画面栏，随轮次实时更新动作后的真实截图；任务报告可按轮次展开截图证据。Runtime 新增
+只读内容端点 `GET /v1/artifacts/{artifact_id}/content`（Bearer token 认证，仅截图 PNG、
+单文件上限 8 MiB、no-store），`task.step_completed` 事件携带该轮 `screenshot_artifact_id`。
+
+桌面工作台（Tauri 2）自动拉起并认证本地 Runtime，首页展示统一就绪诊断与已发现设备列表，
+支持自然语言任务提交、执行时间线与完整报告。桌面端开发见
 [apps/desktop/README.md](./apps/desktop/README.md)。
 使用 Python 3.11+：
 

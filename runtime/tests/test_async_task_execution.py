@@ -20,6 +20,7 @@ from mobile_agent.tasks.execution import (
     ExecutionStatus,
     InMemoryTaskExecutionStore,
     TaskExecution,
+    _step_screenshot_artifact_id,
 )
 
 
@@ -85,6 +86,61 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         self.assertEqual(
             [1, 2, 3, 4, 5, 6], [event["sequence"] for event in events]
         )
+
+    def test_step_completed_events_carry_screenshot_artifact_reference(self) -> None:
+        """轮次完成事件携带动作后截图 Artifact ID，且可经内容通道取回 PNG。"""
+        store = _NotifyingExecutionStore()
+        artifacts = ArtifactStore(self.root / "artifacts")
+        runtime = RuntimeService(
+            FakeDeviceAdapter(),
+            artifacts,
+            task_execution_store=store,
+        )
+
+        status, payload = runtime.submit_agent_task_sync(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+
+        self.assertEqual(202, status.value)
+        task_id = payload["execution"]["task_id"]
+        self.assertTrue(store.terminal.wait(2), "asynchronous task did not finish")
+        self.assertEqual("succeeded", runtime.get_task(task_id)["status"])
+
+        events = runtime.list_task_execution_events(task_id)
+        step_events = [
+            event for event in events if event["event_type"] == "task.step_completed"
+        ]
+        self.assertGreater(len(step_events), 0)
+        referenced = [
+            event["payload"]["screenshot_artifact_id"]
+            for event in step_events
+            if "screenshot_artifact_id" in event["payload"]
+        ]
+        # 动作轮次携带截图引用；finish 轮次没有动作结果，不携带
+        self.assertGreaterEqual(len(referenced), 2)
+        self.assertLess(len(referenced), len(step_events))
+        for artifact_id in referenced:
+            self.assertRegex(artifact_id, r"^artifact_[a-f0-9]{32}$")
+            content_status, content = runtime.artifact_screenshot_content_sync(artifact_id)
+            self.assertEqual(200, content_status.value)
+            self.assertIsInstance(content, bytes)
+            self.assertTrue(content.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_step_screenshot_extraction_covers_tool_skill_and_finish_rounds(self) -> None:
+        screenshot = {"screenshot": {"artifact_id": "artifact_" + "a" * 32}}
+        observation = {"screen": screenshot}
+
+        tool_round = {"action_result": {"after": observation}}
+        skill_round_action = {"skill_result": {"action": {"after": observation}}}
+        skill_round_tap = {"skill_result": {"tap_action": {"after": observation}}}
+        finish_round = {"verified_node": {"node_id": "0/1"}}
+
+        expected = "artifact_" + "a" * 32
+        self.assertEqual(expected, _step_screenshot_artifact_id(tool_round))
+        self.assertEqual(expected, _step_screenshot_artifact_id(skill_round_action))
+        self.assertEqual(expected, _step_screenshot_artifact_id(skill_round_tap))
+        self.assertIsNone(_step_screenshot_artifact_id(finish_round))
+        self.assertIsNone(_step_screenshot_artifact_id(None))
 
     def test_async_execution_contracts_are_versioned(self) -> None:
         execution_schema = json.loads(

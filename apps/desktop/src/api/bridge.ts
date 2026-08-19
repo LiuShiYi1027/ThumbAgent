@@ -19,6 +19,15 @@ export function runtimeApiGet<T>(path: string): Promise<T> {
 }
 
 /**
+ * Authenticated binary GET against the local Runtime. The sidecar only
+ * forwards `/v1/artifacts/{artifact_id}/content` paths and returns the
+ * bounded body as base64.
+ */
+export function runtimeApiGetBytes(path: string): Promise<string> {
+  return invoke<string>('runtime_api_get_bytes', { path })
+}
+
+/**
  * Authenticated POST against the local Runtime. The sidecar only forwards
  * whitelisted paths (task submit/cancel); everything else is rejected.
  */

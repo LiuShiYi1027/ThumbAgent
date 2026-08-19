@@ -20,6 +20,11 @@ fn runtime_api_get(path: String, state: State<'_, AppState>) -> Result<serde_jso
 }
 
 #[tauri::command]
+fn runtime_api_get_bytes(path: String, state: State<'_, AppState>) -> Result<String, String> {
+    state.sidecar.api_get_bytes(&path)
+}
+
+#[tauri::command]
 fn runtime_api_post(
     path: String,
     body: serde_json::Value,
@@ -47,6 +52,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_bridge_status,
             runtime_api_get,
+            runtime_api_get_bytes,
             runtime_api_post
         ])
         .build(tauri::generate_context!())
