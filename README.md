@@ -2,6 +2,8 @@
 
 > Local-first platform that gives AI agents a real thumb on mobile devices.
 
+中文 | [English](./README.en.md)
+
 面向 AI Agent 的本地优先、跨平台移动设备 Skills 平台。
 
 ## 当前进展
@@ -360,3 +362,7 @@ SHA-256 和截止时间后删除。异步任务不获取设备 Session 或 Lease
 - [多 Agent 协作规范](./docs/engineering/agent-collaboration.md)
 - [架构决策记录](./docs/adr/README.md)
 - [迭代索引](./docs/iterations/README.md)
+
+## 许可证
+
+[Apache-2.0](./LICENSE)
