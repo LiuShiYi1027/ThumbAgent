@@ -1,8 +1,8 @@
-# Contributing to Mobile Agent
+# Contributing to ThumbAgent
 
 ## 开发原则
 
-Mobile Agent 采用 Skills-first、Contract-first 和本地优先的工程方式。开发者与 Agent 都必须遵守根目录 `AGENTS.md`。
+ThumbAgent 采用 Skills-first、Contract-first 和本地优先的工程方式。开发者与 Agent 都必须遵守根目录 `AGENTS.md`。
 
 ## 工作流程
 

@@ -612,7 +612,7 @@ mod tests {
         let mut bytes = [0u8; 8];
         getrandom::getrandom(&mut bytes).unwrap();
         let suffix = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let dir = std::env::temp_dir().join(format!("mobile-agent-desktop-{label}-{suffix}"));
+        let dir = std::env::temp_dir().join(format!("thumbagent-desktop-{label}-{suffix}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

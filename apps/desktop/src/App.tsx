@@ -103,7 +103,7 @@ function Workbench() {
         <div className="app-brand">
           <MonitorSmartphone className="app-logo" aria-hidden />
           <div>
-            <h1>Mobile Agent</h1>
+            <h1>ThumbAgent</h1>
             <span className="app-subtitle">
               {healthQuery.data
                 ? `Runtime ${healthQuery.data.runtime_version} · API ${healthQuery.data.api_version}`

@@ -1,4 +1,4 @@
-# Mobile Agent Agent Guide
+# ThumbAgent Agent Guide
 
 本文件适用于整个仓库。子目录存在更具体的 `AGENTS.md` 时，子目录规则在其作用域内优先。
 

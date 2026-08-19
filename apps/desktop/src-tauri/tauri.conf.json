@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Mobile Agent",
+  "productName": "ThumbAgent",
   "version": "0.1.0",
-  "identifier": "dev.mobileagent.desktop",
+  "identifier": "dev.thumbagent.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mobile Agent",
+        "title": "ThumbAgent",
         "width": 1200,
         "height": 760,
         "minWidth": 960,

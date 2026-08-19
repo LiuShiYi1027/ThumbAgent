@@ -1,6 +1,6 @@
-# Mobile Agent Desktop
+# ThumbAgent Desktop
 
-Mobile Agent 的 macOS 桌面工作台（Tauri 2 + React 19 + TypeScript + Vite）。桌面端不直接
+ThumbAgent 的 macOS 桌面工作台（Tauri 2 + React 19 + TypeScript + Vite）。桌面端不直接
 执行 ADB 或任何系统命令；所有设备数据来自本地 Python Runtime 的 REST API。
 
 ## 架构

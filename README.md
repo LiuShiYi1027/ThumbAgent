@@ -1,4 +1,6 @@
-# Mobile Agent
+# ThumbAgent
+
+> Local-first platform that gives AI agents a real thumb on mobile devices.
 
 面向 AI Agent 的本地优先、跨平台移动设备 Skills 平台。
 
@@ -317,7 +319,7 @@ ITER-0039 增加 `POST /v1/performance-comparisons`，以同一设备上两个�
 
 ITER-0040 增加 MCP `2025-11-25` stdio 开发者预览。MCP 子进程只调用已启动 Runtime 的固定
 localhost REST API，因此与 Web 共享任务、Session、Lease 和 Policy；所有耗时能力异步返回
-Mobile Agent task_id。Tool 输入来自公共 Contract，调用前经过严格校验和限流，领域错误以
+ThumbAgent task_id。Tool 输入来自公共 Contract，调用前经过严格校验和限流，领域错误以
 structuredContent 返回。暂不实现 MCP Tasks、远程传输、Resources 或 Prompts。
 
 ITER-0047 增加 `device.diagnostics.bundle`。一次已确认的异步任务在同一 Device Session 与 Lease
