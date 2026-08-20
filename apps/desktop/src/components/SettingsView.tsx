@@ -205,7 +205,10 @@ export function SettingsView({ taskBusy }: { taskBusy: boolean }) {
             <span className="composer-label">Base URL</span>
             <input
               className="composer-select"
-              type="text"
+              type="url"
+              name="base_url"
+              autoComplete="off"
+              spellCheck={false}
               placeholder="https://api.siliconflow.cn/v1"
               value={form.baseUrl}
               onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
@@ -217,6 +220,9 @@ export function SettingsView({ taskBusy }: { taskBusy: boolean }) {
             <input
               className="composer-select"
               type="text"
+              name="model"
+              autoComplete="off"
+              spellCheck={false}
               placeholder="例如 moonshotai/Kimi-K2-Instruct"
               value={form.model}
               onChange={(event) => setForm({ ...form, model: event.target.value })}
@@ -228,6 +234,7 @@ export function SettingsView({ taskBusy }: { taskBusy: boolean }) {
             <input
               className="composer-select"
               type="number"
+              name="timeout_seconds"
               min={1}
               max={120}
               value={form.timeoutSeconds}
@@ -249,7 +256,9 @@ export function SettingsView({ taskBusy }: { taskBusy: boolean }) {
             <input
               className="composer-select"
               type="password"
+              name="api_key"
               autoComplete="off"
+              spellCheck={false}
               placeholder={secretQuery.data ? '输入新密钥以替换' : '粘贴 API 密钥'}
               value={form.secret}
               onChange={(event) => setForm({ ...form, secret: event.target.value })}

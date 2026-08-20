@@ -52,6 +52,7 @@ export function TaskComposer({
             <span className="composer-label">目标设备</span>
             <select
               className="composer-select"
+              name="device_id"
               value={selected}
               disabled={busy}
               onChange={(event) => setDeviceId(event.target.value)}
@@ -67,9 +68,10 @@ export function TaskComposer({
             <span className="composer-label">任务目标</span>
             <textarea
               className="composer-textarea"
+              name="goal"
               rows={3}
               maxLength={500}
-              placeholder="例如：打开系统设置，进入显示和亮度页面"
+              placeholder="例如：打开系统设置，进入显示和亮度页面…"
               value={goal}
               disabled={busy}
               onChange={(event) => setGoal(event.target.value)}

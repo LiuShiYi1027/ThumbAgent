@@ -125,6 +125,7 @@ function Workbench() {
             type="button"
             className="icon-button"
             title="刷新设备与诊断状态"
+            aria-label="刷新设备与诊断状态"
             disabled={!ready}
             onClick={() => void client.invalidateQueries()}
           >
@@ -134,6 +135,7 @@ function Workbench() {
             type="button"
             className="icon-button"
             title={showSettings ? '返回工作台' : '设置'}
+            aria-label={showSettings ? '返回工作台' : '设置'}
             disabled={!ready && !showSettings}
             onClick={() => setShowSettings((current) => !current)}
           >

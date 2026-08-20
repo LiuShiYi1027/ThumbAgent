@@ -115,6 +115,7 @@ body {
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  text-wrap: balance;
 }
 
 .app-subtitle {
@@ -202,6 +203,7 @@ body {
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.02em;
+  text-wrap: balance;
 }
 
 .panel-title-row {
@@ -416,6 +418,7 @@ body {
 
 .device-name {
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .device-id {
@@ -485,11 +488,19 @@ body {
   border-color: #b8c0cf;
 }
 
-.composer-select:focus,
-.composer-textarea:focus {
+.composer-select:focus-visible,
+.composer-textarea:focus-visible {
   outline: none;
   border-color: var(--accent);
   background: var(--panel);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* keyboard focus rings for buttons (click stays ring-free) */
+.primary-button:focus-visible,
+.plain-button:focus-visible,
+.icon-button:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
@@ -518,6 +529,7 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  touch-action: manipulation;
   transition:
     background var(--ease),
     color var(--ease),
@@ -671,6 +683,8 @@ body {
   margin: 0 0 8px;
   font-size: 14px;
   font-weight: 600;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .execution-meta {
@@ -918,4 +932,20 @@ body {
   background: rgba(100, 116, 139, 0.55);
   background-clip: content-box;
   border: 2.5px solid transparent;
+}
+
+/* ---------- reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .spin {
+    animation: none;
+  }
 }
