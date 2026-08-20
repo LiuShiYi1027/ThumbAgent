@@ -37,6 +37,11 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "signingIdentity": "Developer ID Application: guoqing liu (JRDVQ57V39)",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist"
     }
   }
 }
