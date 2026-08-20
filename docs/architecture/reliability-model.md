@@ -44,6 +44,13 @@ draft → ready → running
 
 Task 进入 `unknown_outcome` 时必须停止后续写动作，先尝试只读 Observation 和验证。
 
+`paused` 由 `POST /v1/task-executions/{task_id}/pause` 显式请求（ITER-0053）：请求持久化后
+在轮次安全边界生效，不强杀在途模型或 ADB 调用；暂停期间不派发新动作、继续持有设备租约，
+供用户直接在设备上人工接管。`/resume` 恢复后 Agent 基于最新 Observation 重新规划。
+Task deadline 在暂停期间继续计时：到期自动恢复并按超时收尾；暂停中收到取消请求同样
+自动恢复并按取消收尾。Runtime 重启时 `paused` 与 `running` 一样以 `TASK_INTERRUPTED`
+失败，不在新进程自动续跑。
+
 ## 5. 幂等与重试
 
 动作注册时声明：
@@ -127,7 +134,9 @@ Observation 和写动作前核对绑定 Session；设备消失、非 online 或�
 - 同一 Device Session 同时最多一个写任务。
 - 锁具有 Owner、创建时间和租约。
 - 续租失败停止新动作。
-- 人工接管持有更高优先级锁并暂停 Agent。
+- 人工接管持有更高优先级锁并暂停 Agent。V1 单机场景中该更高优先级锁即人对设备的
+  物理持有：Runtime 侧通过 ITER-0053 的 `paused` 状态停止派发，任务租约不释放，
+  暂停-恢复区间以 `task.paused` / `task.resumed` 事件计入证据。
 - 锁过期不代表设备动作可安全重试，只代表需要重新协调所有权。
 
 V1 租约由单 Runtime 进程管理，公开写 Tool、Skill 和 Task 共享同一 device_id 锁。租约到期只

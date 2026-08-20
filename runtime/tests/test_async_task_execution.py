@@ -159,9 +159,11 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         )
         self.assertIn("cancelling", execution_schema["properties"]["status"]["enum"])
         self.assertIn("timed_out", execution_schema["properties"]["status"]["enum"])
+        self.assertIn("paused", execution_schema["properties"]["status"]["enum"])
         self.assertIn("deadline_seconds", execution_schema["required"])
         self.assertIn("deadline_at", execution_schema["required"])
         self.assertIn("device_session_id", execution_schema["required"])
+        self.assertIn("pause_requested", execution_schema["required"])
         self.assertIn(
             "device.logs.collect",
             execution_schema["properties"]["task_type"]["enum"],
@@ -174,6 +176,10 @@ class AsyncTaskExecutionTests(unittest.TestCase):
             "task.cancel_requested",
             event_schema["properties"]["event_type"]["enum"],
         )
+        for event_type in ("task.pause_requested", "task.paused", "task.resumed"):
+            self.assertIn(
+                event_type, event_schema["properties"]["event_type"]["enum"]
+            )
 
     def test_running_execution_exposes_session_after_write_ownership(self) -> None:
         store = _NotifyingExecutionStore()
@@ -530,6 +536,342 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         self.assertEqual(ExecutionStatus.FAILED, recovered.status)
         self.assertEqual("TASK_INTERRUPTED", recovered.error["code"])
         self.assertEqual("known_failure", recovered.error["outcome"])
+
+    def test_sqlite_recovery_fails_paused_execution_without_replay(self) -> None:
+        """paused 执行在 Runtime 重启后以 TASK_INTERRUPTED 失败，不自动续跑。"""
+        store = SQLiteTaskExecutionStore(self.root / "paused.db")
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000003",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="paused work",
+            status=ExecutionStatus.PAUSED,
+            submitted_at=_now(),
+            started_at=_now(),
+            pause_requested=True,
+        )
+        store.save_execution(execution)
+
+        store.recover_incomplete_executions()
+
+        recovered = store.get_execution(execution.task_id)
+        events = store.list_execution_events(execution.task_id)
+        self.assertEqual(ExecutionStatus.FAILED, recovered.status)
+        self.assertEqual("TASK_INTERRUPTED", recovered.error["code"])
+        self.assertEqual("unknown_outcome", recovered.error["outcome"])
+        self.assertEqual("task.completed", events[-1]["event_type"])
+
+    def test_pause_engages_at_safe_boundary_and_resume_continues(self) -> None:
+        """暂停在探针边界生效，暂停期间无后续动作，恢复后续跑并完成。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        first_probe = threading.Event()
+        second_probe = threading.Event()
+        release = threading.Event()
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            cancelled()
+            first_probe.set()
+            await asyncio.to_thread(release.wait)
+            cancelled()
+            second_probe.set()
+            return _task(task_id, "pause me", TaskStatus.SUCCEEDED)
+
+        execution = executor.submit("fake:android-001", "pause me", run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(first_probe.wait(2), "task did not reach first boundary")
+        paused_request = executor.pause(execution.task_id)
+        self.assertTrue(paused_request.pause_requested)
+        self.assertEqual(ExecutionStatus.RUNNING, paused_request.status)
+
+        release.set()
+        paused_snapshot = _wait_for_status(executor, execution.task_id, ExecutionStatus.PAUSED)
+        self.assertIsNotNone(paused_snapshot, "task did not pause at the boundary")
+        self.assertFalse(second_probe.is_set(), "work continued while paused")
+
+        resumed = executor.resume(execution.task_id)
+        self.assertFalse(resumed.pause_requested)
+        self.assertTrue(second_probe.wait(2), "task did not continue after resume")
+        self.assertTrue(store.terminal.wait(2), "resumed task did not finish")
+
+        final = executor.get(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, final.status)
+        self.assertFalse(final.pause_requested)
+        event_types = [event["event_type"] for event in executor.list_events(execution.task_id)]
+        self.assertIn("task.pause_requested", event_types)
+        self.assertIn("task.paused", event_types)
+        self.assertIn("task.resumed", event_types)
+        resumed_event = [
+            event
+            for event in executor.list_events(execution.task_id)
+            if event["event_type"] == "task.resumed"
+        ][-1]
+        self.assertTrue(resumed_event["payload"]["takeover"])
+        self.assertEqual("user", resumed_event["payload"]["resume_reason"])
+
+    def test_pause_is_idempotent_and_terminal_states_return_current(self) -> None:
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        probing = threading.Event()
+        release = threading.Event()
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            probing.set()
+            await asyncio.to_thread(release.wait)
+            cancelled()
+            return _task(task_id, "idem", TaskStatus.SUCCEEDED)
+
+        execution = executor.submit("fake:android-001", "idem", run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(probing.wait(2), "task did not start")
+        first = executor.pause(execution.task_id)
+        second = executor.pause(execution.task_id)
+        self.assertTrue(first.pause_requested)
+        self.assertTrue(second.pause_requested)
+        pause_events = [
+            event
+            for event in executor.list_events(execution.task_id)
+            if event["event_type"] == "task.pause_requested"
+        ]
+        self.assertEqual(1, len(pause_events))
+
+        # 撤回尚未到达边界的暂停请求，任务在下一探针处不进入暂停
+        withdrawn = executor.resume(execution.task_id)
+        self.assertFalse(withdrawn.pause_requested)
+
+        release.set()
+        self.assertTrue(store.terminal.wait(2), "task did not finish")
+        terminal = executor.pause(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, terminal.status)
+        terminal_resume = executor.resume(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, terminal_resume.status)
+
+    def test_resume_before_boundary_withdraws_pause_request(self) -> None:
+        """暂停请求未到达边界时恢复，只撤回请求，不产生 paused/resumed 事件。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        probing = threading.Event()
+        release = threading.Event()
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            probing.set()
+            await asyncio.to_thread(release.wait)
+            cancelled()
+            return _task(task_id, "abort", TaskStatus.SUCCEEDED)
+
+        execution = executor.submit("fake:android-001", "abort", run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(probing.wait(2), "task did not start")
+        executor.pause(execution.task_id)
+        withdrawn = executor.resume(execution.task_id)
+        self.assertFalse(withdrawn.pause_requested)
+        self.assertEqual(ExecutionStatus.RUNNING, withdrawn.status)
+
+        release.set()
+        self.assertTrue(store.terminal.wait(2), "task did not finish")
+        final = executor.get(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, final.status)
+        event_types = [event["event_type"] for event in executor.list_events(execution.task_id)]
+        self.assertIn("task.pause_requested", event_types)
+        self.assertNotIn("task.paused", event_types)
+        self.assertNotIn("task.resumed", event_types)
+
+    def test_pause_on_queued_task_conflicts(self) -> None:
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        blocking = threading.Event()
+        release = threading.Event()
+
+        async def blocking_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            blocking.set()
+            await asyncio.to_thread(release.wait)
+            return _task(task_id, "first", TaskStatus.SUCCEEDED)
+
+        async def second_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            return _task(task_id, "second", TaskStatus.SUCCEEDED)
+
+        first = executor.submit("fake:android-001", "first", blocking_run, lambda task: None)
+        second = executor.submit("fake:android-001", "second", second_run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(blocking.wait(2), "first task did not start")
+        with self.assertRaises(MobileAgentError) as raised:
+            executor.pause(second.task_id)
+        self.assertEqual("TASK_STATE_CONFLICT", raised.exception.code)
+        with self.assertRaises(MobileAgentError) as resume_raised:
+            executor.resume(second.task_id)
+        self.assertEqual("TASK_STATE_CONFLICT", resume_raised.exception.code)
+
+        release.set()
+        self.assertTrue(store.terminal.wait(2), "queued tasks did not finish")
+        self.assertEqual(
+            ExecutionStatus.SUCCEEDED, executor.get(first.task_id).status
+        )
+
+    def test_cancel_while_paused_finishes_cancelled(self) -> None:
+        """暂停中取消：自动退出暂停等待并按取消收尾。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        first_probe = threading.Event()
+        release = threading.Event()
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            cancelled()
+            first_probe.set()
+            await asyncio.to_thread(release.wait)
+            if cancelled():
+                return _task(task_id, "cancel me", TaskStatus.CANCELLED)
+            return _task(task_id, "cancel me", TaskStatus.SUCCEEDED)
+
+        execution = executor.submit(
+            "fake:android-001", "cancel me", run, lambda task: None
+        )
+        self.addCleanup(release.set)
+
+        self.assertTrue(first_probe.wait(2), "task did not reach first boundary")
+        executor.pause(execution.task_id)
+        release.set()
+        paused = _wait_for_status(executor, execution.task_id, ExecutionStatus.PAUSED)
+        self.assertIsNotNone(paused, "task did not pause")
+
+        cancelling = executor.cancel(execution.task_id)
+        self.assertEqual(ExecutionStatus.CANCELLING, cancelling.status)
+        self.assertTrue(store.terminal.wait(2), "cancelled task did not finish")
+
+        final = executor.get(execution.task_id)
+        self.assertEqual(ExecutionStatus.CANCELLED, final.status)
+        resumed_events = [
+            event
+            for event in executor.list_events(execution.task_id)
+            if event["event_type"] == "task.resumed"
+        ]
+        self.assertEqual("cancel", resumed_events[-1]["payload"]["resume_reason"])
+
+    def test_deadline_during_pause_auto_resumes_and_times_out(self) -> None:
+        """暂停不延长任务预算：暂停中到达 deadline 自动恢复并以 timed_out 结束。"""
+        store = _NotifyingExecutionStore()
+        clock = [0.0]
+        executor = AsyncTaskExecutor(store, monotonic_clock=lambda: clock[0])
+        first_probe = threading.Event()
+        release = threading.Event()
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            cancelled()
+            first_probe.set()
+            await asyncio.to_thread(release.wait)
+            cancelled()
+            if deadline_exceeded():
+                return _task(task_id, "slow", TaskStatus.TIMED_OUT)
+            return _task(task_id, "slow", TaskStatus.SUCCEEDED)
+
+        execution = executor.submit(
+            "fake:android-001",
+            "slow",
+            run,
+            lambda task: None,
+            deadline_seconds=10.0,
+        )
+        self.addCleanup(release.set)
+
+        self.assertTrue(first_probe.wait(2), "task did not reach first boundary")
+        executor.pause(execution.task_id)
+        release.set()
+        paused = _wait_for_status(executor, execution.task_id, ExecutionStatus.PAUSED)
+        self.assertIsNotNone(paused, "task did not pause")
+
+        clock[0] = 100.0
+        self.assertTrue(store.terminal.wait(2), "task did not finish after deadline")
+
+        final = executor.get(execution.task_id)
+        self.assertEqual(ExecutionStatus.TIMED_OUT, final.status)
+        resumed_events = [
+            event
+            for event in executor.list_events(execution.task_id)
+            if event["event_type"] == "task.resumed"
+        ]
+        self.assertEqual("deadline", resumed_events[-1]["payload"]["resume_reason"])
+
+    def test_pause_resume_roundtrip_persists_pause_requested(self) -> None:
+        """execution_json 往返保留 pause_requested，缺省字段按 False 兼容旧数据。"""
+        store = SQLiteTaskExecutionStore(self.root / "roundtrip.db")
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000004",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="roundtrip",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+            pause_requested=True,
+        )
+        store.save_execution(execution)
+        self.assertTrue(store.get_execution(execution.task_id).pause_requested)
+
+        legacy = TaskExecution(
+            task_id="task_00000000000000000000000000000005",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="legacy",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+        )
+        payload = legacy.to_dict()
+        payload.pop("pause_requested")
+        restored = TaskExecution.from_dict(payload)
+        self.assertFalse(restored.pause_requested)
+
+
+def _wait_for_status(
+    executor: AsyncTaskExecutor, task_id: str, status: ExecutionStatus
+) -> TaskExecution | None:
+    """轮询执行状态直到目标状态或超时（2 秒）。"""
+
+    deadline = datetime.now(timezone.utc).timestamp() + 2.0
+    while datetime.now(timezone.utc).timestamp() < deadline:
+        execution = executor.get(task_id)
+        if execution.status is status:
+            return execution
+        threading.Event().wait(0.01)
+    return None
 
 
 def _task(task_id: str, goal: str, status: TaskStatus) -> TaskRun:

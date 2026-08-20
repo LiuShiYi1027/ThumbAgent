@@ -4,7 +4,7 @@
   "title": "TaskExecution",
   "type": "object",
   "additionalProperties": false,
-    "required": ["schema_version", "task_id", "task_type", "device_id", "device_session_id", "goal", "status", "submitted_at", "started_at", "completed_at", "deadline_seconds", "deadline_at", "cancel_requested", "result_available", "error"],
+    "required": ["schema_version", "task_id", "task_type", "device_id", "device_session_id", "goal", "status", "submitted_at", "started_at", "completed_at", "deadline_seconds", "deadline_at", "cancel_requested", "pause_requested", "result_available", "error"],
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
@@ -12,13 +12,14 @@
     "device_id": { "type": "string", "minLength": 1 },
     "device_session_id": { "oneOf": [{ "type": "string", "pattern": "^session_[a-f0-9]{32}$" }, { "type": "null" }] },
     "goal": { "type": "string", "minLength": 1, "maxLength": 500 },
-    "status": { "enum": ["queued", "running", "cancelling", "succeeded", "failed", "cancelled", "timed_out"] },
+    "status": { "enum": ["queued", "running", "paused", "cancelling", "succeeded", "failed", "cancelled", "timed_out"] },
     "submitted_at": { "type": "string", "format": "date-time" },
     "started_at": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
     "completed_at": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
     "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800 },
     "deadline_at": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
     "cancel_requested": { "type": "boolean" },
+    "pause_requested": { "type": "boolean" },
     "result_available": { "type": "boolean" },
     "error": { "oneOf": [{ "type": "object" }, { "type": "null" }] }
   }

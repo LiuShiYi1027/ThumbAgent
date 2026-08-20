@@ -224,6 +224,15 @@ ITER-0052 起，Runtime 提供证据内容的唯一读取通道
 携带该轮动作后截图的 `screenshot_artifact_id`，桌面工作台据此在执行中与报告内展示设备画面；
 桌面 IPC 增加仅匹配该端点模式的二进制白名单桥，截图只在 webview 内存中渲染。
 
+ITER-0053 起，异步任务支持协作式暂停与人工接管：`POST /v1/task-executions/{task_id}/pause`
+与 `/resume`（Bearer token，无高风险确认）。`ExecutionStatus` 增加 `paused`，`TaskExecution`
+增加 `pause_requested`；暂停请求在轮次安全边界生效，执行器通过包装既有取消探针实现，
+Runner 与十类任务处理器零改动。暂停期间不派发设备动作、继续持有设备租约；deadline 继续
+计时，到期或收到取消时自动恢复并按超时/取消收尾。事件流增加 `task.pause_requested`、
+`task.paused`、`task.resumed`（payload 含 `takeover` 与 `resume_reason`），桌面工作台提供
+暂停/恢复控制、接管横幅与报告内接管区间。Runtime 重启时 `paused` 以 `TASK_INTERRUPTED`
+失败，不自动续跑（可靠性模型 §4、§9、§10）。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

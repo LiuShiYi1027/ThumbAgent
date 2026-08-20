@@ -648,3 +648,21 @@ body {
 .step-screenshot-toggle {
   font-size: 12px;
 }
+
+.takeover-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--warn, #8a6d00);
+  background: var(--muted-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.takeover-hint {
+  font-size: 12px;
+  color: var(--warn, #8a6d00);
+}

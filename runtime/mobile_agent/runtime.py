@@ -1680,6 +1680,16 @@ class RuntimeService:
 
         return self._task_executor.cancel(task_id).to_dict()
 
+    def pause_task_execution(self, task_id: str) -> dict[str, Any]:
+        """Request a cooperative pause for manual takeover at a safe boundary."""
+
+        return self._task_executor.pause(task_id).to_dict()
+
+    def resume_task_execution(self, task_id: str) -> dict[str, Any]:
+        """Resume a paused execution; the agent re-observes before its next action."""
+
+        return self._task_executor.resume(task_id).to_dict()
+
     def compile_goal(self, goal: str) -> dict[str, Any]:
         """Compile a goal without observing or mutating a device."""
 
@@ -2256,6 +2266,26 @@ class RuntimeService:
         try:
             return HTTPStatus.ACCEPTED, {
                 "execution": self.cancel_task_execution(task_id)
+            }
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def pause_task_execution_sync(
+        self, task_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.ACCEPTED, {
+                "execution": self.pause_task_execution(task_id)
+            }
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def resume_task_execution_sync(
+        self, task_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.ACCEPTED, {
+                "execution": self.resume_task_execution(task_id)
             }
         except MobileAgentError as error:
             return self._error_response(error)

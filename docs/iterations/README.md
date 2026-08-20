@@ -57,6 +57,7 @@
 | [ITER-0050](./0050-desktop-task-workbench/plan.md) | Desktop Task Workbench | Completed | 桌面端提交自然语言 Agent 任务、展示执行时间线并查看完整报告 |
 | [ITER-0051](./0051-agent-execution-resilience/plan.md) | Agent Execution Resilience | Completed | 观察瞬时故障有界重试、轮次预算数据校准与真机成功率基线 |
 | [ITER-0052](./0052-desktop-device-screen/plan.md) | Desktop Device Screen & Live Observation | Completed | 桌面工作台设备画面栏：执行中与报告内查看真实轮次截图 |
+| [ITER-0053](./0053-manual-takeover/plan.md) | Manual Takeover (Pause & Resume) | Completed | 执行中安全边界暂停 Agent、人工接管设备后恢复续跑，事件流记录接管区间 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

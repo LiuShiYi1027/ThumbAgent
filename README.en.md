@@ -13,13 +13,15 @@ A local-first, cross-platform mobile-device Skills platform for AI agents.
 
 ## Current Progress
 
-The project has completed ITER-0052 Desktop Device Screen & Live Observation: while an
-agent task runs, the desktop workbench shows a device-screen panel that updates with the
-real post-action screenshot on every round; task reports can expand per-round screenshot
-evidence. The Runtime gained a read-only content endpoint
-`GET /v1/artifacts/{artifact_id}/content` (Bearer-token authenticated, screenshot PNGs
-only, 8 MiB per-file limit, `no-store`), and `task.step_completed` events now carry that
-round's `screenshot_artifact_id`.
+The project has completed ITER-0053 Manual Takeover (Pause & Resume): a running agent
+task can be paused at a round safe boundary (`POST /v1/task-executions/{task_id}/pause`)
+so the user can take over the device directly, then resumed (`/resume`) so the agent
+re-observes the current screen and keeps planning. While paused, no device actions are
+dispatched and the device lease is retained; the deadline keeps ticking, and expiry or a
+cancel request auto-resumes the task into its timeout/cancel path. The event stream gains
+`task.pause_requested` / `task.paused` / `task.resumed` (with `takeover` and
+`resume_reason`), and the desktop workbench offers pause/resume controls, a takeover
+banner, a frozen device-screen panel during takeover, and takeover intervals in reports.
 
 The desktop workbench (Tauri 2) automatically launches and authenticates against the
 local Runtime. Its home page shows unified readiness diagnostics and discovered devices,

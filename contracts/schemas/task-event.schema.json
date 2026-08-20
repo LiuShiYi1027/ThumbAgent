@@ -11,7 +11,7 @@
     "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
     "device_id": { "type": "string", "minLength": 1 },
     "sequence": { "type": "integer", "minimum": 1 },
-    "event_type": { "enum": ["task.queued", "task.started", "task.step_completed", "task.cancel_requested", "task.completed"] },
+    "event_type": { "enum": ["task.queued", "task.started", "task.step_completed", "task.pause_requested", "task.paused", "task.resumed", "task.cancel_requested", "task.completed"] },
     "occurred_at": { "type": "string", "format": "date-time" },
     "payload": { "type": "object" }
   }

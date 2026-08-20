@@ -264,6 +264,12 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         execution_cancel_match = re.fullmatch(
             r"/v1/task-executions/(task_[a-f0-9]{32})/cancel", self.path
         )
+        execution_pause_match = re.fullmatch(
+            r"/v1/task-executions/(task_[a-f0-9]{32})/pause", self.path
+        )
+        execution_resume_match = re.fullmatch(
+            r"/v1/task-executions/(task_[a-f0-9]{32})/resume", self.path
+        )
         goal_compile_match = re.fullmatch(r"/v1/goals/compile", self.path)
         evaluation_match = re.fullmatch(
             r"/v1/tasks/(task_[a-f0-9]{32})/evaluate", self.path
@@ -460,6 +466,22 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("empty body")
                 status, payload = self._runtime().cancel_task_execution_sync(
                     execution_cancel_match.group(1)
+                )
+                self._write_json(status, payload)
+                return
+            if execution_pause_match:
+                if body:
+                    raise ValueError("empty body")
+                status, payload = self._runtime().pause_task_execution_sync(
+                    execution_pause_match.group(1)
+                )
+                self._write_json(status, payload)
+                return
+            if execution_resume_match:
+                if body:
+                    raise ValueError("empty body")
+                status, payload = self._runtime().resume_task_execution_sync(
+                    execution_resume_match.group(1)
                 )
                 self._write_json(status, payload)
                 return

@@ -10,10 +10,13 @@
 
 ## 当前进展
 
-项目已完成 ITER-0052 Desktop Device Screen & Live Observation：桌面工作台在执行 Agent 任务时
-展示设备画面栏，随轮次实时更新动作后的真实截图；任务报告可按轮次展开截图证据。Runtime 新增
-只读内容端点 `GET /v1/artifacts/{artifact_id}/content`（Bearer token 认证，仅截图 PNG、
-单文件上限 8 MiB、no-store），`task.step_completed` 事件携带该轮 `screenshot_artifact_id`。
+项目已完成 ITER-0053 Manual Takeover (Pause & Resume)：执行中的 Agent 任务可以在轮次
+安全边界暂停（`POST /v1/task-executions/{task_id}/pause`），用户直接在设备上人工接管，
+随后恢复（`/resume`）让 Agent 基于最新画面重新观察并继续规划。暂停期间不派发设备动作、
+继续持有设备租约；deadline 继续计时，到期或收到取消时自动恢复并按超时/取消收尾。
+事件流新增 `task.pause_requested` / `task.paused` / `task.resumed`（含 `takeover` 与
+`resume_reason`），桌面工作台提供暂停/恢复按钮、接管横幅、设备画面接管占位和报告内
+接管区间。
 
 桌面工作台（Tauri 2）自动拉起并认证本地 Runtime，首页展示统一就绪诊断与已发现设备列表，
 支持自然语言任务提交、执行时间线与完整报告。桌面端开发见

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 import threading
 from email.message import Message
@@ -12,6 +13,7 @@ from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.api.server import _query_int
 from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.artifact import ArtifactKind
+from mobile_agent.domain.task import TaskRun, TaskStatus
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.goals import AgentGoalSpec
 from mobile_agent.providers import ModelProviderSettings
@@ -776,6 +778,107 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
         self.assertIsNone(runtime.arguments)
 
+    def test_pause_and_resume_require_bearer_token(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            for action in ("pause", "resume"):
+                captured = _post_execution_control(
+                    runtime,
+                    f"/v1/task-executions/task_00000000000000000000000000000009/{action}",
+                    token=None,
+                    body={},
+                )
+                self.assertEqual(HTTPStatus.UNAUTHORIZED, captured["status"])
+
+    def test_pause_and_resume_unknown_task_return_not_found(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            for action in ("pause", "resume"):
+                captured = _post_execution_control(
+                    runtime,
+                    f"/v1/task-executions/task_00000000000000000000000000000009/{action}",
+                    token="test-token",
+                    body={},
+                )
+                self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+
+    def test_pause_rejects_non_empty_body(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            captured = _post_execution_control(
+                runtime,
+                "/v1/task-executions/task_00000000000000000000000000000009/pause",
+                token="test-token",
+                body={"note": "unexpected"},
+            )
+            self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+
+    def test_pause_then_resume_running_task_returns_accepted(self) -> None:
+        """端点链路：RUNNING 任务 pause/resume 均 202 且翻转 pause_requested。"""
+        store = _ApiExecutionStore()
+        probing = threading.Event()
+        release = threading.Event()
+
+        async def hold(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            probing.set()
+            await asyncio.to_thread(release.wait)
+            cancelled()
+            return TaskRun(
+                task_id=task_id,
+                task_type="agent.run",
+                device_id="fake:android-001",
+                goal="hold",
+                status=TaskStatus.SUCCEEDED,
+                started_at="2026-08-20T00:00:00Z",
+                completed_at="2026-08-20T00:00:01Z",
+                steps=(),
+                evidence_summary={},
+            )
+
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(),
+                ArtifactStore(Path(directory)),
+                task_execution_store=store,
+            )
+            execution = runtime._task_executor.submit(
+                "fake:android-001", "hold", hold, lambda task: None
+            )
+            self.addCleanup(release.set)
+            self.assertTrue(probing.wait(2), "task did not start")
+
+            paused = _post_execution_control(
+                runtime,
+                f"/v1/task-executions/{execution.task_id}/pause",
+                token="test-token",
+                body={},
+            )
+            self.assertEqual(HTTPStatus.ACCEPTED, paused["status"])
+            self.assertTrue(paused["payload"]["execution"]["pause_requested"])
+
+            resumed = _post_execution_control(
+                runtime,
+                f"/v1/task-executions/{execution.task_id}/resume",
+                token="test-token",
+                body={},
+            )
+            self.assertEqual(HTTPStatus.ACCEPTED, resumed["status"])
+            self.assertFalse(resumed["payload"]["execution"]["pause_requested"])
+
+            release.set()
+            self.assertTrue(store.terminal.wait(2), "held task did not finish")
+
 
 class FakeGoalCompiler:
     compiler_id = "test.goal-compiler"
@@ -820,3 +923,30 @@ class _ApiExecutionStore(InMemoryTaskExecutionStore):
             ExecutionStatus.TIMED_OUT,
         }:
             self.terminal.set()
+
+
+def _post_execution_control(
+    runtime: RuntimeService, path: str, token: str | None, body: dict[str, object]
+) -> dict[str, object]:
+    """以可控输入驱动 do_POST 的暂停/恢复路由并捕获响应。"""
+
+    handler = object.__new__(RuntimeRequestHandler)
+    handler.path = path
+    headers = Message()
+    headers["Content-Type"] = "application/json"
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    handler.headers = headers
+    handler.server = SimpleNamespace(
+        runtime=runtime,
+        api_token="test-token",
+        allowed_origins=frozenset(),
+        server_port=8765,
+    )
+    handler._read_json = lambda: body
+    captured: dict[str, object] = {}
+    handler._write_json = lambda status, payload: captured.update(
+        {"status": status, "payload": payload}
+    )
+    handler.do_POST()
+    return captured

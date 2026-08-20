@@ -27,6 +27,7 @@ class ExecutionStatus(str, Enum):
 
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     CANCELLING = "cancelling"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -74,6 +75,7 @@ class TaskExecution:
     started_at: str | None = None
     completed_at: str | None = None
     cancel_requested: bool = False
+    pause_requested: bool = False
     result_available: bool = False
     error: dict[str, Any] | None = None
     device_session_id: str | None = None
@@ -93,6 +95,7 @@ class TaskExecution:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "cancel_requested": self.cancel_requested,
+            "pause_requested": self.pause_requested,
             "result_available": self.result_available,
             "error": self.error,
             "device_session_id": self.device_session_id,
@@ -116,6 +119,7 @@ class TaskExecution:
                 str(value["completed_at"]) if value.get("completed_at") else None
             ),
             cancel_requested=bool(value.get("cancel_requested", False)),
+            pause_requested=bool(value.get("pause_requested", False)),
             result_available=bool(value.get("result_available", False)),
             error=value.get("error") if isinstance(value.get("error"), dict) else None,
             device_session_id=(
@@ -230,6 +234,8 @@ class _WorkItem:
     run_factory: RunFactory
     completion_handler: CompletionHandler
     cancel_event: threading.Event
+    pause_event: threading.Event
+    resume_event: threading.Event
 
 
 class AsyncTaskExecutor:
@@ -290,7 +296,12 @@ class AsyncTaskExecutor:
                 deadline_seconds=deadline_seconds,
             )
             item = _WorkItem(
-                execution, run_factory, completion_handler, threading.Event()
+                execution,
+                run_factory,
+                completion_handler,
+                threading.Event(),
+                threading.Event(),
+                threading.Event(),
             )
             self._items[execution.task_id] = item
             self._store.create_execution(
@@ -394,6 +405,77 @@ class AsyncTaskExecutor:
             self._store.save_execution(updated)
         return updated
 
+    def pause(self, task_id: str) -> TaskExecution:
+        """Request a cooperative pause for manual takeover at the next safe boundary.
+
+        暂停只阻止后续设备动作，不产生副作用；到达边界前 pause_requested 已对
+        客户端可见。重复暂停与对终态任务的暂停幂等返回当前状态（ITER-0053
+        设计决策 1、7）。
+        """
+
+        with self._lock:
+            execution = self._store.get_execution(task_id)
+            if execution.status in _TERMINAL or execution.status is ExecutionStatus.PAUSED:
+                return execution
+            if execution.status is not ExecutionStatus.RUNNING:
+                raise MobileAgentError(
+                    code="TASK_STATE_CONFLICT",
+                    category=ErrorCategory.EXECUTION,
+                    message="任务当前状态不能请求暂停",
+                )
+            if execution.pause_requested:
+                return execution
+            item = self._items.get(task_id)
+            if item is None:
+                raise MobileAgentError(
+                    code="TASK_STATE_CONFLICT",
+                    category=ErrorCategory.EXECUTION,
+                    message="任务不在当前 Runtime 的可暂停执行上下文中",
+                )
+            item.pause_event.set()
+            updated = replace(execution, pause_requested=True)
+            self._store.save_execution(updated)
+        self._append_event(updated, TaskEventType.PAUSE_REQUESTED, {})
+        return updated
+
+    def resume(self, task_id: str) -> TaskExecution:
+        """Resume a paused task; the agent re-observes before its next action.
+
+        暂停请求尚未到达边界时恢复只需撤回请求；已暂停时唤醒执行器，
+        task.resumed 事件由执行器在真正继续时发出。
+        """
+
+        with self._lock:
+            execution = self._store.get_execution(task_id)
+            if execution.status in _TERMINAL:
+                return execution
+            if execution.status is ExecutionStatus.PAUSED:
+                item = self._items.get(task_id)
+                if item is None:
+                    raise MobileAgentError(
+                        code="TASK_STATE_CONFLICT",
+                        category=ErrorCategory.EXECUTION,
+                        message="任务不在当前 Runtime 的可恢复执行上下文中",
+                    )
+                item.pause_event.clear()
+                item.resume_event.set()
+                updated = replace(execution, pause_requested=False)
+                self._store.save_execution(updated)
+                return updated
+            if execution.status is ExecutionStatus.RUNNING and execution.pause_requested:
+                item = self._items.get(task_id)
+                if item is not None:
+                    item.pause_event.clear()
+                    item.resume_event.set()
+                updated = replace(execution, pause_requested=False)
+                self._store.save_execution(updated)
+                return updated
+            raise MobileAgentError(
+                code="TASK_STATE_CONFLICT",
+                category=ErrorCategory.EXECUTION,
+                message="任务当前状态不能恢复",
+            )
+
     def _worker_loop(self) -> None:
         while True:
             item = self._queue.get()
@@ -441,7 +523,7 @@ class AsyncTaskExecutor:
                     item.run_factory(
                         running.task_id,
                         on_step,
-                        item.cancel_event.is_set,
+                        lambda: self._control_probe(item, deadline_monotonic),
                         lambda: self._monotonic() >= deadline_monotonic,
                     )
                 )
@@ -491,6 +573,54 @@ class AsyncTaskExecutor:
                 with self._lock:
                     self._items.pop(item.execution.task_id, None)
                 self._queue.task_done()
+
+    def _control_probe(self, item: _WorkItem, deadline_monotonic: float) -> bool:
+        """Apply a requested pause at this safe boundary, then report cancellation.
+
+        Runner 在轮次边界调用；返回 True 表示取消。暂停等待期间持续检查取消与
+        deadline：取消立即结束暂停并按取消收尾；deadline 到期自动恢复，Runner 在
+        下一检查点按既有逻辑以 timed_out 结束——任务预算不因暂停延长（ITER-0053
+        设计决策 4）。整个暂停期间工作线程阻塞在此，同一执行上下文不会再次进入。
+        """
+
+        with self._lock:
+            execution = self._store.get_execution(item.execution.task_id)
+            engaging = (
+                item.pause_event.is_set()
+                and execution.status is ExecutionStatus.RUNNING
+            )
+            if engaging:
+                item.resume_event.clear()
+                execution = replace(execution, status=ExecutionStatus.PAUSED)
+                self._store.save_execution(execution)
+        if not engaging:
+            return item.cancel_event.is_set()
+        self._append_event(execution, TaskEventType.PAUSED, {})
+        resume_reason = "user"
+        while item.pause_event.is_set():
+            if item.cancel_event.is_set():
+                resume_reason = "cancel"
+                break
+            if self._monotonic() >= deadline_monotonic:
+                resume_reason = "deadline"
+                item.pause_event.clear()
+                break
+            item.resume_event.wait(0.2)
+        with self._lock:
+            current = self._store.get_execution(item.execution.task_id)
+            if current.status is ExecutionStatus.PAUSED:
+                current = replace(
+                    current,
+                    status=ExecutionStatus.RUNNING,
+                    pause_requested=False,
+                )
+                self._store.save_execution(current)
+        self._append_event(
+            current,
+            TaskEventType.RESUMED,
+            {"takeover": True, "resume_reason": resume_reason},
+        )
+        return item.cancel_event.is_set()
 
     def _append_event(
         self,

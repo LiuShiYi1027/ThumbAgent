@@ -1,17 +1,24 @@
 import { useEffect, useRef } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Ban } from 'lucide-react'
+import { Ban, Pause, Play } from 'lucide-react'
 
 import type { TaskEvent } from '@contracts/task-event'
 import type { TaskExecution } from '@contracts/task-execution'
 
-import { cancelTaskExecution, getTaskExecution, getTaskExecutionEvents } from '../api/client'
+import {
+  cancelTaskExecution,
+  getTaskExecution,
+  getTaskExecutionEvents,
+  pauseTaskExecution,
+  resumeTaskExecution,
+} from '../api/client'
 import { isTerminal } from '../execution'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 
 const statusLabel: Record<TaskExecution['status'], string> = {
   queued: '排队中',
   running: '执行中',
+  paused: '已暂停（人工接管）',
   cancelling: '取消中',
   succeeded: '已成功',
   failed: '已失败',
@@ -22,6 +29,7 @@ const statusLabel: Record<TaskExecution['status'], string> = {
 const statusTone: Record<TaskExecution['status'], BadgeTone> = {
   queued: 'muted',
   running: 'busy',
+  paused: 'warn',
   cancelling: 'warn',
   succeeded: 'ok',
   failed: 'error',
@@ -47,6 +55,20 @@ function eventLabel(event: TaskEvent, roundIndex: number): string {
     }
     case 'task.cancel_requested':
       return '已请求取消，将在安全边界停止'
+    case 'task.pause_requested':
+      return '已请求暂停，将在安全边界进入人工接管'
+    case 'task.paused':
+      return '已暂停：人工接管中，可直接操作设备'
+    case 'task.resumed': {
+      const reason = typeof event.payload.resume_reason === 'string' ? event.payload.resume_reason : ''
+      if (reason === 'cancel') {
+        return '暂停结束：任务按取消请求收尾'
+      }
+      if (reason === 'deadline') {
+        return '暂停结束：任务预算已到期'
+      }
+      return '已恢复：Agent 重新观察设备画面后继续'
+    }
     case 'task.completed': {
       const status = typeof event.payload.status === 'string' ? event.payload.status : ''
       const errorCode =
@@ -80,6 +102,12 @@ export function ExecutionView({
   })
   const cancelMutation = useMutation({
     mutationFn: () => cancelTaskExecution(taskId),
+  })
+  const pauseMutation = useMutation({
+    mutationFn: () => pauseTaskExecution(taskId),
+  })
+  const resumeMutation = useMutation({
+    mutationFn: () => resumeTaskExecution(taskId),
   })
 
   const execution = executionQuery.data
@@ -135,11 +163,49 @@ export function ExecutionView({
       {execution.error ? (
         <p className="error-detail">{JSON.stringify(execution.error)}</p>
       ) : null}
+      {execution.status === 'paused' ? (
+        <p className="takeover-banner" role="status">
+          <Pause size={14} aria-hidden />
+          任务已暂停：你现在可以直接操作设备；恢复后 Agent 会重新观察画面并继续规划。
+        </p>
+      ) : null}
       {cancelMutation.isError ? (
         <p className="error-detail">{String(cancelMutation.error)}</p>
       ) : null}
+      {pauseMutation.isError ? (
+        <p className="error-detail">{String(pauseMutation.error)}</p>
+      ) : null}
+      {resumeMutation.isError ? (
+        <p className="error-detail">{String(resumeMutation.error)}</p>
+      ) : null}
       {!isTerminal(execution) ? (
         <div className="composer-actions">
+          {execution.status === 'paused' ? (
+            <button
+              type="button"
+              className="plain-button"
+              disabled={resumeMutation.isPending}
+              onClick={() => resumeMutation.mutate()}
+            >
+              <Play size={14} aria-hidden />
+              恢复执行
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="plain-button"
+              disabled={
+                pauseMutation.isPending ||
+                execution.pause_requested ||
+                execution.cancel_requested ||
+                execution.status !== 'running'
+              }
+              onClick={() => pauseMutation.mutate()}
+            >
+              <Pause size={14} aria-hidden />
+              {execution.pause_requested ? '已请求暂停' : '暂停（人工接管）'}
+            </button>
+          )}
           <button
             type="button"
             className="plain-button"

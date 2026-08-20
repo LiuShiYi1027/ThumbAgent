@@ -91,6 +91,22 @@ export async function cancelTaskExecution(taskId: string): Promise<TaskExecution
   return payload.execution
 }
 
+export async function pauseTaskExecution(taskId: string): Promise<TaskExecution> {
+  const payload = await runtimeApiPost<ExecutionResponse>(
+    `/v1/task-executions/${taskId}/pause`,
+    {},
+  )
+  return payload.execution
+}
+
+export async function resumeTaskExecution(taskId: string): Promise<TaskExecution> {
+  const payload = await runtimeApiPost<ExecutionResponse>(
+    `/v1/task-executions/${taskId}/resume`,
+    {},
+  )
+  return payload.execution
+}
+
 export async function getTaskRun(taskId: string): Promise<TaskRun> {
   const payload = await runtimeApiGet<TaskRunResponse>(`/v1/tasks/${taskId}`)
   return payload.task

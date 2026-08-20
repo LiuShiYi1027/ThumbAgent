@@ -145,7 +145,7 @@ class SQLiteTaskExecutionStore:
                 rows = connection.execute(
                     """
                     SELECT execution_json FROM task_executions
-                    WHERE status IN ('queued', 'running', 'cancelling')
+                    WHERE status IN ('queued', 'running', 'paused', 'cancelling')
                     """
                 ).fetchall()
                 for row in rows:

@@ -22,6 +22,9 @@ class TaskEventType(str, Enum):
     QUEUED = "task.queued"
     STARTED = "task.started"
     STEP_COMPLETED = "task.step_completed"
+    PAUSE_REQUESTED = "task.pause_requested"
+    PAUSED = "task.paused"
+    RESUMED = "task.resumed"
     CANCEL_REQUESTED = "task.cancel_requested"
     COMPLETED = "task.completed"
 

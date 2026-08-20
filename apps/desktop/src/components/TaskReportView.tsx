@@ -3,9 +3,10 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import type { AgentStepResult } from '@contracts/agent-step-result'
+import type { TaskEvent } from '@contracts/task-event'
 import type { TaskRun } from '@contracts/task-run'
 
-import { getTaskRun, stepScreenshotArtifactId } from '../api/client'
+import { getTaskExecutionEvents, getTaskRun, stepScreenshotArtifactId } from '../api/client'
 import { ScreenshotImage } from './ScreenshotImage'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 
@@ -62,11 +63,58 @@ function formatArguments(args: Record<string, unknown>): string {
   return text.length > 160 ? `${text.slice(0, 160)}…` : text
 }
 
+interface TakeoverInterval {
+  start: string
+  end: string | null
+  reason: string | null
+}
+
+/** 从事件流提取暂停-恢复区间；报告据此区分 Agent 动作与人工接管窗口。 */
+function collectTakeoverIntervals(events: TaskEvent[]): TakeoverInterval[] {
+  const intervals: TakeoverInterval[] = []
+  for (const event of events) {
+    if (event.event_type === 'task.paused') {
+      intervals.push({ start: event.occurred_at, end: null, reason: null })
+    } else if (event.event_type === 'task.resumed') {
+      const open = intervals.findLast((interval) => interval.end === null)
+      if (open) {
+        open.end = event.occurred_at
+        open.reason =
+          typeof event.payload.resume_reason === 'string' ? event.payload.resume_reason : null
+      }
+    }
+  }
+  return intervals
+}
+
+function takeoverReasonLabel(reason: string | null): string {
+  switch (reason) {
+    case 'user':
+      return '用户恢复'
+    case 'cancel':
+      return '因取消请求结束'
+    case 'deadline':
+      return '因任务预算到期结束'
+    default:
+      return '原因未记录'
+  }
+}
+
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString()
+}
+
 export function TaskReportView({ taskId }: { taskId: string }) {
   const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<string>>(new Set())
   const reportQuery = useQuery({
     queryKey: ['task-run', taskId],
     queryFn: () => getTaskRun(taskId),
+    refetchInterval: false,
+    staleTime: Infinity,
+  })
+  const eventsQuery = useQuery({
+    queryKey: ['task-execution-events', taskId],
+    queryFn: () => getTaskExecutionEvents(taskId),
     refetchInterval: false,
     staleTime: Infinity,
   })
@@ -102,6 +150,7 @@ export function TaskReportView({ taskId }: { taskId: string }) {
 
   const report = reportQuery.data
   const taskError = errorSummary(report.error)
+  const takeoverIntervals = collectTakeoverIntervals(eventsQuery.data ?? [])
 
   return (
     <section className="panel">
@@ -124,6 +173,17 @@ export function TaskReportView({ taskId }: { taskId: string }) {
         </span>
       </div>
       {taskError ? <p className="error-detail">{taskError}</p> : null}
+      {takeoverIntervals.length > 0 ? (
+        <div className="execution-meta">
+          {takeoverIntervals.map((interval, index) => (
+            <span key={`${interval.start}-${index}`} className="takeover-hint">
+              人工接管 {formatClock(interval.start)} —{' '}
+              {interval.end ? formatClock(interval.end) : '未闭合'}（
+              {takeoverReasonLabel(interval.reason)}）
+            </span>
+          ))}
+        </div>
+      ) : null}
       <ol className="step-list">
         {report.steps.map((step) => {
           const agentStep = step.kind === 'agent_round' ? asAgentStepResult(step.result) : null

@@ -10,7 +10,7 @@ export interface TaskEvent {
   task_id: string;
   device_id: string;
   sequence: number;
-  event_type: "task.queued" | "task.started" | "task.step_completed" | "task.cancel_requested" | "task.completed";
+  event_type: "task.queued" | "task.started" | "task.step_completed" | "task.pause_requested" | "task.paused" | "task.resumed" | "task.cancel_requested" | "task.completed";
   occurred_at: string;
   payload: Record<string, unknown>;
 }

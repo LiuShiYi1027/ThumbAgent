@@ -11,13 +11,14 @@ export interface TaskExecution {
   device_id: string;
   device_session_id: string | null;
   goal: string;
-  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "timed_out";
+  status: "queued" | "running" | "paused" | "cancelling" | "succeeded" | "failed" | "cancelled" | "timed_out";
   submitted_at: string;
   started_at: string | null;
   completed_at: string | null;
   deadline_seconds: number;
   deadline_at: string | null;
   cancel_requested: boolean;
+  pause_requested: boolean;
   result_available: boolean;
   error: Record<string, unknown> | null;
 }
