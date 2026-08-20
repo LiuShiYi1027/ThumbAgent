@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MonitorSmartphone, RefreshCw } from 'lucide-react'
+import { MonitorSmartphone, RefreshCw, Settings } from 'lucide-react'
 
 import type { TaskExecution } from '@contracts/task-execution'
 
@@ -12,6 +12,7 @@ import { DeviceScreenPanel } from './components/DeviceScreenPanel'
 import { DeviceTable } from './components/DeviceTable'
 import { ExecutionView } from './components/ExecutionView'
 import { ReadinessPanel } from './components/ReadinessPanel'
+import { SettingsView } from './components/SettingsView'
 import { StatusBadge } from './components/StatusBadge'
 import { TaskComposer, type TaskIntent } from './components/TaskComposer'
 import { TaskReportView } from './components/TaskReportView'
@@ -73,6 +74,7 @@ function Workbench() {
   const [pendingIntent, setPendingIntent] = useState<TaskIntent | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [finishedExecution, setFinishedExecution] = useState<TaskExecution | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
 
   const submitMutation = useMutation({
     mutationFn: (intent: TaskIntent) => submitAgentTask(intent.deviceId, intent.goal),
@@ -128,10 +130,23 @@ function Workbench() {
           >
             <RefreshCw className={refreshing ? 'spin' : ''} size={16} aria-hidden />
           </button>
+          <button
+            type="button"
+            className="icon-button"
+            title={showSettings ? '返回工作台' : '设置'}
+            disabled={!ready && !showSettings}
+            onClick={() => setShowSettings((current) => !current)}
+          >
+            <Settings size={16} aria-hidden />
+          </button>
         </div>
       </header>
 
       <main className="app-main">
+        {showSettings ? (
+          <SettingsView taskBusy={taskBusy} />
+        ) : (
+          <>
         {phase === 'failed' ? (
           <section className="panel panel-error">
             <h2>本地 Runtime 启动失败</h2>
@@ -186,6 +201,8 @@ function Workbench() {
             ) : null}
           </>
         ) : null}
+          </>
+        )}
       </main>
 
       {pendingIntent ? (

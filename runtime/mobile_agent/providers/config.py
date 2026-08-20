@@ -76,6 +76,99 @@ def model_provider_status(settings: ModelProviderSettings | None = None) -> dict
     }
 
 
+_SECRET_REF_FULL = re.compile(r"env:MOBILE_AGENT_MODEL_SECRET_[A-Z0-9_]+")
+
+_ENV_OVERRIDE_NAMES = (
+    "MOBILE_AGENT_MODEL_ENABLED",
+    "MOBILE_AGENT_MODEL_PROVIDER",
+    "MOBILE_AGENT_MODEL_BASE_URL",
+    "MOBILE_AGENT_MODEL_NAME",
+    "MOBILE_AGENT_MODEL_API_KEY_REF",
+    "MOBILE_AGENT_MODEL_TIMEOUT_SECONDS",
+)
+
+
+def read_model_provider_file(config_path: Path) -> ModelProviderSettings:
+    """Read the on-disk model provider file without applying env overrides."""
+
+    if not config_path.exists():
+        return ModelProviderSettings()
+    return _coerce_settings(_read_settings_file(config_path))
+
+
+def model_provider_config_view(
+    settings: ModelProviderSettings,
+    config_path: Path,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Return the non-secret on-disk model provider config for the settings UI."""
+
+    env = environ if environ is not None else os.environ
+    return {
+        "enabled": settings.enabled,
+        "provider": settings.provider,
+        "base_url": settings.base_url,
+        "model": settings.model,
+        "api_key_ref": settings.api_key_ref,
+        "timeout_seconds": settings.timeout_seconds,
+        "config_file": str(config_path),
+        "env_override": any(
+            env.get(name, "").strip() for name in _ENV_OVERRIDE_NAMES
+        ),
+    }
+
+
+def coerce_model_provider_payload(payload: Mapping[str, object]) -> ModelProviderSettings:
+    """Coerce a client payload into settings, rejecting unknown fields."""
+
+    allowed = {
+        "enabled",
+        "provider",
+        "base_url",
+        "model",
+        "api_key_ref",
+        "timeout_seconds",
+    }
+    unknown = sorted(set(str(key) for key in payload) - allowed)
+    if unknown:
+        raise _invalid_config(f"模型配置包含未知字段：{unknown[0]}")
+    if "enabled" not in payload:
+        raise _invalid_config("模型配置缺少 enabled 字段")
+    return _coerce_settings(payload)
+
+
+def save_model_provider_settings(
+    config_path: Path, settings: ModelProviderSettings
+) -> None:
+    """Atomically persist non-secret model provider settings with strict permissions.
+
+    密钥值永不经过此函数：api_key_ref 强制 env:MOBILE_AGENT_MODEL_SECRET_* 引用
+    模式（ITER-0054 设计决策 1）；临时文件 + os.replace 保证写坏不破坏旧配置。
+    """
+
+    if settings.api_key_ref and not _SECRET_REF_FULL.fullmatch(settings.api_key_ref):
+        raise _invalid_settings(
+            "模型 api_key_ref 只允许 env:MOBILE_AGENT_MODEL_SECRET_* 引用", settings
+        )
+    if settings.enabled:
+        _validate_openai_compatible_settings(settings)
+    payload = {
+        "enabled": settings.enabled,
+        "provider": settings.provider,
+        "base_url": settings.base_url,
+        "model": settings.model,
+        "api_key_ref": settings.api_key_ref,
+        "timeout_seconds": settings.timeout_seconds,
+    }
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = config_path.with_suffix(config_path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    temporary.chmod(0o600)
+    os.replace(temporary, config_path)
+
+
 def load_model_provider_settings(
     default_config_path: Path | None = None,
     environ: Mapping[str, str] | None = None,

@@ -63,6 +63,12 @@ from mobile_agent.providers import (
 )
 from mobile_agent.providers import build_planner_from_settings
 from mobile_agent.providers import load_model_provider_settings
+from mobile_agent.providers import (
+    coerce_model_provider_payload,
+    model_provider_config_view,
+    read_model_provider_file,
+    save_model_provider_settings,
+)
 from mobile_agent.providers import model_provider_status as redacted_model_provider_status
 from mobile_agent.skills.open_app import OpenAppSkill
 from mobile_agent.skills.app_inventory import AppInspectSkill, AppListSkill
@@ -267,6 +273,31 @@ class RuntimeService:
                 "message": error["message"],
             }
         return status
+
+    def get_model_provider_config(self) -> dict[str, Any]:
+        """Return the non-secret on-disk model provider configuration."""
+
+        path = self._model_config_path()
+        return model_provider_config_view(read_model_provider_file(path), path)
+
+    def update_model_provider_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate and persist model provider settings; a restart applies them.
+
+        密钥值不接受也不落盘：payload 只允许 env:MOBILE_AGENT_MODEL_SECRET_*
+        引用（见 providers.config.save_model_provider_settings）。
+        """
+
+        settings = coerce_model_provider_payload(payload)
+        path = self._model_config_path()
+        save_model_provider_settings(path, settings)
+        return {
+            "saved": True,
+            "restart_required": True,
+            "config": model_provider_config_view(read_model_provider_file(path), path),
+        }
+
+    def _model_config_path(self) -> Path:
+        return self._artifacts.root.parent / "model-provider.json"
 
     def local_storage_summary(
         self, retention_days: int | None = None
@@ -2287,6 +2318,28 @@ class RuntimeService:
             return HTTPStatus.ACCEPTED, {
                 "execution": self.resume_task_execution(task_id)
             }
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def get_model_provider_config_sync(self) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, {"config": self.get_model_provider_config()}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def update_model_provider_config_sync(
+        self, payload: object
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return self._error_response(
+                MobileAgentError(
+                    code="INVALID_ARGUMENT",
+                    category=ErrorCategory.VALIDATION,
+                    message="模型配置请求体必须是 JSON object",
+                )
+            )
+        try:
+            return HTTPStatus.OK, self.update_model_provider_config(payload)
         except MobileAgentError as error:
             return self._error_response(error)
 

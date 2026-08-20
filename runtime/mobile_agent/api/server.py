@@ -60,6 +60,10 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             status, payload = self._runtime().model_provider_status_sync()
             self._write_json(status, payload)
             return
+        if path == "/v1/model-provider/config":
+            status, payload = self._runtime().get_model_provider_config_sync()
+            self._write_json(status, payload)
+            return
         artifact_content_match = re.fullmatch(
             r"/v1/artifacts/(artifact_[a-f0-9]{32})/content", path
         )
@@ -279,6 +283,10 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         )
         try:
             body = self._read_json()
+            if self.path == "/v1/model-provider/config":
+                status, payload = self._runtime().update_model_provider_config_sync(body)
+                self._write_json(status, payload)
+                return
             if performance_comparison_match:
                 if set(body) != {"baseline_task_id", "candidate_task_id"}:
                     raise ValueError("performance comparison fields")

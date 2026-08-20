@@ -666,3 +666,19 @@ body {
   font-size: 12px;
   color: var(--warn, #8a6d00);
 }
+
+.settings-warning {
+  margin: 8px 0;
+}
+
+.settings-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-toggle input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent, #2563eb);
+}

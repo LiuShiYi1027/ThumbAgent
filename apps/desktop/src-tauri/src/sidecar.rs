@@ -5,7 +5,7 @@
 //! environment, polls `/v1/health` until ready, and kills the child on app
 //! exit. The token never leaves this module; the webview reaches the Runtime
 //! through the `runtime_api_get` command and the whitelist-bounded
-//! `runtime_api_post` command (task submit/cancel only).
+//! `runtime_api_post` command (task submit/cancel and model settings save).
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -28,10 +28,24 @@ const STDERR_TAIL_BYTES: usize = 4 * 1024;
 const MAX_API_PATH_BYTES: usize = 512;
 const MAX_API_BODY_BYTES: usize = 16 * 1024;
 /// Only these Runtime writes are reachable from the webview: asynchronous
-/// Agent task submission and task cancellation. Everything else stays GET-only.
+/// Agent task submission, task cancellation and model settings save.
+/// Everything else stays GET-only.
 const AGENT_RUN_ASYNC_PATH: &str = "/v1/tasks/agent.run/async";
 const TASK_CANCEL_PREFIX: &str = "/v1/task-executions/";
 const TASK_CANCEL_SUFFIX: &str = "/cancel";
+/// Settings page writes go through the same whitelist as task submit/cancel.
+const MODEL_PROVIDER_CONFIG_PATH: &str = "/v1/model-provider/config";
+
+/// Model API keys live in the macOS Keychain and are injected into the
+/// Runtime child environment at (re)start; the Runtime config file only ever
+/// stores the `env:MOBILE_AGENT_MODEL_SECRET_DESKTOP` reference (ITER-0054).
+/// `/usr/bin/security` is invoked with a fixed argv (no shell, no new crate).
+const MODEL_SECRET_SERVICE: &str = "dev.thumbagent.desktop.model-secret";
+const MODEL_SECRET_ACCOUNT: &str = "model-api-key";
+const MODEL_SECRET_ENV: &str = "MOBILE_AGENT_MODEL_SECRET_DESKTOP";
+const SECURITY_TOOL: &str = "/usr/bin/security";
+const OPEN_TOOL: &str = "/usr/bin/open";
+const MAX_SECRET_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +101,12 @@ impl Sidecar {
     }
 
     fn spawn() -> Result<Self, String> {
+        Ok(Sidecar {
+            inner: Mutex::new(Self::spawn_inner()?),
+        })
+    }
+
+    fn spawn_inner() -> Result<SidecarInner, String> {
         let repo_root = resolve_repo_root(
             std::env::var_os("MOBILE_AGENT_REPO_ROOT").map(PathBuf::from),
             Path::new(env!("CARGO_MANIFEST_DIR")),
@@ -124,6 +144,12 @@ impl Sidecar {
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
 
+        // 密钥只在子进程环境中注入，永不写入配置文件、日志或 IPC。
+        // Keychain 查询失败（含条目不存在）视为未配置，不阻断启动。
+        if let Some(secret) = keychain_lookup(MODEL_SECRET_SERVICE, MODEL_SECRET_ACCOUNT) {
+            command.env(MODEL_SECRET_ENV, secret);
+        }
+
         let mut child = command
             .spawn()
             .map_err(|error| format!("启动 Runtime 进程失败（{}）：{error}", python.display()))?;
@@ -133,15 +159,13 @@ impl Sidecar {
             start_stderr_drain(stderr, Arc::clone(&stderr_tail));
         }
 
-        Ok(Sidecar {
-            inner: Mutex::new(SidecarInner {
-                phase: SidecarPhase::Starting,
-                detail: "正在启动本地 Runtime…".to_string(),
-                child: Some(child),
-                port,
-                token,
-                stderr_tail,
-            }),
+        Ok(SidecarInner {
+            phase: SidecarPhase::Starting,
+            detail: "正在启动本地 Runtime…".to_string(),
+            child: Some(child),
+            port,
+            token,
+            stderr_tail,
         })
     }
 
@@ -242,7 +266,8 @@ impl Sidecar {
 
     /// Execute an authenticated POST against the sidecar Runtime.
     ///
-    /// Restricted to the desktop write whitelist (task submit/cancel). Task
+    /// Restricted to the desktop write whitelist (task submit/cancel and
+    /// model settings save). Task
     /// submission gets a fresh Rust-generated Idempotency-Key per call; the
     /// frontend must debounce repeat submissions of the same user intent.
     pub fn api_post(
@@ -280,8 +305,27 @@ impl Sidecar {
         Ok((inner.port, inner.token.clone()))
     }
 
+    /// Restart the Runtime child so newly saved settings take effect.
+    ///
+    /// A restart issues a fresh port and token; in-flight tasks die with the
+    /// old child, so the UI must confirm with the user before invoking this.
+    pub fn restart(self: &Arc<Self>) -> Result<(), String> {
+        self.shutdown_child();
+        let fresh = Self::spawn_inner()?;
+        {
+            let mut inner = self.inner.lock().unwrap();
+            *inner = fresh;
+        }
+        Sidecar::start_health_loop(Arc::clone(self));
+        Ok(())
+    }
+
     /// Kill the sidecar child. Idempotent; safe to call on every exit path.
     pub fn shutdown(&self) {
+        self.shutdown_child();
+    }
+
+    fn shutdown_child(&self) {
         let child = {
             let mut inner = self.inner.lock().unwrap();
             inner.child.take()
@@ -291,6 +335,145 @@ impl Sidecar {
             let _ = child.wait();
         }
     }
+}
+
+/// Validate a user-supplied model API key before it enters the Keychain argv.
+fn validate_secret(secret: &str) -> Result<&str, String> {
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        return Err("密钥不能为空".to_string());
+    }
+    if trimmed.len() > MAX_SECRET_BYTES {
+        return Err("密钥长度超出限制".to_string());
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("密钥包含非法控制字符".to_string());
+    }
+    Ok(trimmed)
+}
+
+fn keychain_set_args(service: &str, account: &str, secret: &str) -> Vec<String> {
+    vec![
+        "add-generic-password".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+        "-w".to_string(),
+        secret.to_string(),
+        "-U".to_string(),
+    ]
+}
+
+fn keychain_delete_args(service: &str, account: &str) -> Vec<String> {
+    vec![
+        "delete-generic-password".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+    ]
+}
+
+fn keychain_lookup_args(service: &str, account: &str) -> Vec<String> {
+    vec![
+        "find-generic-password".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+        "-w".to_string(),
+    ]
+}
+
+fn run_security(args: &[String]) -> Result<std::process::Output, String> {
+    Command::new(SECURITY_TOOL)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|error| format!("无法调用系统钥匙串工具：{error}"))
+}
+
+/// Store (or update) the model API key in the login Keychain.
+pub fn model_secret_store(secret: &str) -> Result<(), String> {
+    let secret = validate_secret(secret)?;
+    let args = keychain_set_args(MODEL_SECRET_SERVICE, MODEL_SECRET_ACCOUNT, secret);
+    let output = run_security(&args)?;
+    if !output.status.success() {
+        return Err(format!(
+            "钥匙串写入失败（退出码 {}）",
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
+/// Remove the stored model API key. A missing entry is not an error.
+pub fn model_secret_clear() -> Result<(), String> {
+    let args = keychain_delete_args(MODEL_SECRET_SERVICE, MODEL_SECRET_ACCOUNT);
+    let output = run_security(&args)?;
+    // errSecItemNotFound (-25300) 视为已清除。
+    if !output.status.success() && output.status.code() != Some(-25300) {
+        return Err(format!(
+            "钥匙串删除失败（退出码 {}）",
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a model API key is currently stored in the Keychain.
+pub fn model_secret_is_stored() -> bool {
+    keychain_lookup(MODEL_SECRET_SERVICE, MODEL_SECRET_ACCOUNT).is_some()
+}
+
+/// Read the secret for child-process injection. Never logged or returned
+/// across IPC; any failure is treated as "not configured".
+fn keychain_lookup(service: &str, account: &str) -> Option<String> {
+    let args = keychain_lookup_args(service, account);
+    let output = run_security(&args).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let trimmed = value.trim_end_matches(['\r', '\n']);
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Runtime data directory, mirroring `default_artifact_root` on macOS.
+fn data_dir_from(override_dir: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(dir) = override_dir {
+        return Some(dir);
+    }
+    home.map(|home| home.join("Library/Application Support/MobileAgent"))
+}
+
+pub fn data_dir() -> Result<PathBuf, String> {
+    data_dir_from(
+        std::env::var_os("MOBILE_AGENT_DATA_DIR").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+    .ok_or_else(|| "无法定位数据目录（HOME 未设置）".to_string())
+}
+
+/// Open the Runtime data directory in Finder so users can inspect artifacts.
+pub fn reveal_data_dir() -> Result<PathBuf, String> {
+    let dir = data_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("无法创建数据目录（{}）：{error}", dir.display()))?;
+    let status = Command::new(OPEN_TOOL)
+        .arg(&dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("无法打开 Finder：{error}"))?;
+    if !status.success() {
+        return Err("打开数据目录失败".to_string());
+    }
+    Ok(dir)
 }
 
 fn early_exit_detail(code: Option<i32>, stderr_tail: &str) -> String {
@@ -448,7 +631,10 @@ fn parse_api_response(
 
 fn validate_api_post_path(path: &str) -> Result<(), String> {
     validate_api_path(path)?;
-    if path == AGENT_RUN_ASYNC_PATH || is_task_cancel_path(path) {
+    if path == AGENT_RUN_ASYNC_PATH
+        || path == MODEL_PROVIDER_CONFIG_PATH
+        || is_task_cancel_path(path)
+    {
         return Ok(());
     }
     Err("POST 路径不在桌面端白名单内".to_string())
@@ -943,5 +1129,69 @@ mod tests {
         assert!(detail.contains("已有 Runtime"));
         let generic = early_exit_detail(Some(1), "Traceback\nValueError: boom\n");
         assert!(generic.contains("ValueError: boom"));
+    }
+
+    #[test]
+    fn keychain_argv_is_fixed_and_shell_free() {
+        let set = keychain_set_args("svc", "acct", "sk-secret");
+        assert_eq!(
+            set,
+            vec![
+                "add-generic-password",
+                "-s",
+                "svc",
+                "-a",
+                "acct",
+                "-w",
+                "sk-secret",
+                "-U"
+            ]
+        );
+        let delete = keychain_delete_args("svc", "acct");
+        assert_eq!(
+            delete,
+            vec!["delete-generic-password", "-s", "svc", "-a", "acct"]
+        );
+        let lookup = keychain_lookup_args("svc", "acct");
+        assert_eq!(
+            lookup,
+            vec!["find-generic-password", "-s", "svc", "-a", "acct", "-w"]
+        );
+        // 密钥只能出现在 -w 参数值位置，不参与任何其他字段拼接。
+        let injected = keychain_set_args("svc", "acct", "weird;rm -rf");
+        assert_eq!(injected[6], "weird;rm -rf");
+    }
+
+    #[test]
+    fn secret_validation_rejects_empty_control_and_oversized() {
+        assert_eq!(validate_secret("  sk-ok  ").unwrap(), "sk-ok");
+        assert!(validate_secret("").is_err());
+        assert!(validate_secret("   ").is_err());
+        assert!(validate_secret("sk-with\nnewline").is_err());
+        assert!(validate_secret(&"x".repeat(MAX_SECRET_BYTES + 1)).is_err());
+        assert!(validate_secret(&"x".repeat(MAX_SECRET_BYTES)).is_ok());
+    }
+
+    #[test]
+    fn data_dir_honors_override_then_macos_default() {
+        let override_dir = PathBuf::from("/tmp/custom-data");
+        assert_eq!(
+            data_dir_from(Some(override_dir.clone()), None),
+            Some(override_dir)
+        );
+        let home = PathBuf::from("/Users/example");
+        assert_eq!(
+            data_dir_from(None, Some(home.clone())),
+            Some(home.join("Library/Application Support/MobileAgent"))
+        );
+        assert_eq!(data_dir_from(None, None), None);
+    }
+
+    #[test]
+    fn post_path_whitelist_accepts_model_provider_config() {
+        assert!(validate_api_post_path(MODEL_PROVIDER_CONFIG_PATH).is_ok());
+        // 其他写路径仍然拒绝。
+        assert!(validate_api_post_path("/v1/model-provider/config/extra").is_err());
+        assert!(validate_api_post_path("/v1/model-provider/status").is_err());
     }
 }

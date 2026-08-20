@@ -13,8 +13,12 @@ from mobile_agent.providers import (
     ModelProviderSettings,
     OpenAICompatiblePlanner,
     build_planner_from_settings,
+    coerce_model_provider_payload,
     load_model_provider_settings,
+    model_provider_config_view,
     model_provider_status,
+    read_model_provider_file,
+    save_model_provider_settings,
 )
 
 
@@ -166,6 +170,149 @@ class ModelProviderConfigTests(unittest.TestCase):
                 self.assertNotIn("test-secret-value", str(raised.exception.to_dict()))
 
 
+class ModelProviderSettingsFileTests(unittest.TestCase):
+    """ITER-0054：设置页用的磁盘配置读写（不应用环境覆盖、密钥不落盘）。"""
+
+    def test_read_model_provider_file_ignores_environment_overrides(self) -> None:
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "model-provider.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "provider": "openai_compatible",
+                        "base_url": "https://file.example/v1",
+                        "model": "file-model",
+                        "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_FILE",
+                        "timeout_seconds": 20,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            settings = read_model_provider_file(config_path)
+
+        self.assertEqual("file-model", settings.model)
+        self.assertEqual("env:MOBILE_AGENT_MODEL_SECRET_FILE", settings.api_key_ref)
+
+    def test_read_model_provider_file_returns_defaults_when_missing(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = read_model_provider_file(Path(directory) / "missing.json")
+
+        self.assertEqual(ModelProviderSettings(), settings)
+
+    def test_model_provider_config_view_reports_file_and_env_override(self) -> None:
+        config_path = Path("/tmp/example/model-provider.json")
+        view = model_provider_config_view(
+            enabled_settings(), config_path, environ={}
+        )
+
+        self.assertEqual(
+            {
+                "enabled": True,
+                "provider": "openai_compatible",
+                "base_url": "https://model.example/v1",
+                "model": "test-model",
+                "api_key_ref": "model-key",
+                "timeout_seconds": 12,
+                "config_file": str(config_path),
+                "env_override": False,
+            },
+            view,
+        )
+
+        overridden = model_provider_config_view(
+            enabled_settings(),
+            config_path,
+            environ={"MOBILE_AGENT_MODEL_NAME": "env-model"},
+        )
+        self.assertTrue(overridden["env_override"])
+        self.assertEqual("test-model", overridden["model"])
+
+    def test_coerce_model_provider_payload_rejects_unknown_fields(self) -> None:
+        with self.assertRaises(MobileAgentError) as raised:
+            coerce_model_provider_payload({"enabled": False, "api_key": "sk-plain"})
+
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+        self.assertNotIn("sk-plain", str(raised.exception.to_dict()))
+
+    def test_coerce_model_provider_payload_requires_enabled_field(self) -> None:
+        with self.assertRaises(MobileAgentError) as raised:
+            coerce_model_provider_payload({"provider": "openai_compatible"})
+
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+
+    def test_save_model_provider_settings_persists_with_owner_only_permissions(self) -> None:
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "model-provider.json"
+            config_path.write_text('{"enabled": false}\n', encoding="utf-8")
+
+            save_model_provider_settings(config_path, file_settings())
+
+            raw = config_path.read_text(encoding="utf-8")
+            mode = config_path.stat().st_mode & 0o777
+            temporary = config_path.with_suffix(".json.tmp")
+
+        self.assertEqual(0o600, mode)
+        self.assertFalse(temporary.exists())
+        self.assertEqual(
+            {
+                "enabled": True,
+                "provider": "openai_compatible",
+                "base_url": "https://file.example/v1",
+                "model": "file-model",
+                "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_DESKTOP",
+                "timeout_seconds": 20,
+            },
+            json.loads(raw),
+        )
+        # 密钥值永不落盘，文件中只允许出现 env: 引用。
+        self.assertNotIn("sk-live-secret", raw)
+
+    def test_save_model_provider_settings_rejects_non_reference_api_key(self) -> None:
+        invalid_refs = ["sk-live-secret", "env:OPENAI_API_KEY", "keychain:model"]
+        for reference in invalid_refs:
+            with self.subTest(reference=reference):
+                with TemporaryDirectory() as directory:
+                    settings = ModelProviderSettings(
+                        enabled=False, api_key_ref=reference
+                    )
+                    with self.assertRaises(MobileAgentError) as raised:
+                        save_model_provider_settings(
+                            Path(directory) / "model-provider.json", settings
+                        )
+                self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+                self.assertNotIn("sk-live-secret", str(raised.exception.to_dict()))
+
+    def test_save_model_provider_settings_rejects_invalid_enabled_settings(self) -> None:
+        invalid_settings = [
+            file_settings(enabled=True, provider="rule_based"),
+            file_settings(base_url="ftp://x"),
+            file_settings(model=" "),
+            file_settings(api_key_ref=""),
+            file_settings(timeout_seconds=0),
+            file_settings(timeout_seconds=121),
+        ]
+        for settings in invalid_settings:
+            with self.subTest(settings=settings):
+                with TemporaryDirectory() as directory:
+                    with self.assertRaises(MobileAgentError) as raised:
+                        save_model_provider_settings(
+                            Path(directory) / "model-provider.json", settings
+                        )
+                self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+
+    def test_save_model_provider_settings_allows_disabled_partial_settings(self) -> None:
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "model-provider.json"
+
+            save_model_provider_settings(
+                config_path, ModelProviderSettings(enabled=False)
+            )
+
+            self.assertFalse(json.loads(config_path.read_text())["enabled"])
+
+
 class FakeSecretResolver:
     def __init__(self, secrets: dict[str, str]) -> None:
         self._secrets = secrets
@@ -198,6 +345,19 @@ class FakeTransport:
     ) -> dict[str, Any]:
         self.last_headers = dict(headers)
         return self._response
+
+
+def file_settings(**overrides: Any) -> ModelProviderSettings:
+    values: dict[str, Any] = {
+        "enabled": True,
+        "provider": "openai_compatible",
+        "base_url": "https://file.example/v1",
+        "model": "file-model",
+        "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_DESKTOP",
+        "timeout_seconds": 20,
+    }
+    values.update(overrides)
+    return ModelProviderSettings(**values)
 
 
 def enabled_settings() -> ModelProviderSettings:

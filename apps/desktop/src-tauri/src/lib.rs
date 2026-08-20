@@ -33,6 +33,36 @@ fn runtime_api_post(
     state.sidecar.api_post(&path, &body)
 }
 
+#[tauri::command]
+fn model_secret_store(secret: String) -> Result<(), String> {
+    sidecar::model_secret_store(&secret)
+}
+
+#[tauri::command]
+fn model_secret_clear() -> Result<(), String> {
+    sidecar::model_secret_clear()
+}
+
+#[tauri::command]
+fn model_secret_is_stored() -> bool {
+    sidecar::model_secret_is_stored()
+}
+
+#[tauri::command]
+fn restart_runtime(state: State<'_, AppState>) -> Result<(), String> {
+    state.sidecar.restart()
+}
+
+#[tauri::command]
+fn data_dir_path() -> Result<String, String> {
+    sidecar::data_dir().map(|path| path.display().to_string())
+}
+
+#[tauri::command]
+fn reveal_data_dir() -> Result<String, String> {
+    sidecar::reveal_data_dir().map(|path| path.display().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let sidecar = Sidecar::start();
@@ -53,7 +83,13 @@ pub fn run() {
             runtime_bridge_status,
             runtime_api_get,
             runtime_api_get_bytes,
-            runtime_api_post
+            runtime_api_post,
+            model_secret_store,
+            model_secret_clear,
+            model_secret_is_stored,
+            restart_runtime,
+            data_dir_path,
+            reveal_data_dir
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

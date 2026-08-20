@@ -233,6 +233,16 @@ Runner 与十类任务处理器零改动。暂停期间不派发设备动作、�
 暂停/恢复控制、接管横幅与报告内接管区间。Runtime 重启时 `paused` 以 `TASK_INTERRUPTED`
 失败，不自动续跑（可靠性模型 §4、§9、§10）。
 
+ITER-0054 起，桌面应用提供模型 Provider 开箱配置。Runtime 增加
+`GET/POST /v1/model-provider/config`：GET 返回磁盘配置的非敏感视图（含 config_file 路径与
+env_override 标记），POST 只接受 `env:MOBILE_AGENT_MODEL_SECRET_*` 形式的密钥引用、校验后
+原子写入 `<data-dir>/model-provider.json`（tmp + os.replace，0600），密钥值永不经过该端点。
+配置生效语义为重启 Runtime：桌面 sidecar 把密钥保存在 macOS Keychain（固定
+`/usr/bin/security` argv，无新 crate），启动与 `restart_runtime` 时将密钥注入子进程
+`MOBILE_AGENT_MODEL_SECRET_DESKTOP` 环境变量。sidecar POST 白名单相应放行配置保存路径；
+设置页提供 Provider 表单、密钥存/清、保存并重启（进行中任务需确认中断）与数据目录
+Finder 入口。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

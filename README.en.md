@@ -13,7 +13,17 @@ A local-first, cross-platform mobile-device Skills platform for AI agents.
 
 ## Current Progress
 
-The project has completed ITER-0053 Manual Takeover (Pause & Resume): a running agent
+The project has completed ITER-0054 Desktop Settings & Model Provider Onboarding:
+the settings page accepts Base URL, model name and timeout directly; the API key is
+stored only in the system Keychain (the Runtime config file persists just the
+`env:MOBILE_AGENT_MODEL_SECRET_DESKTOP` reference — the secret never touches disk or
+any HTTP endpoint), and "Save & Restart" restarts the local Runtime to apply the
+configuration, warning first when a task is in flight. The data directory opens in
+Finder with one click. The Runtime gains `GET/POST /v1/model-provider/config`
+(validated, atomic 0600 writes), while the desktop sidecar owns Keychain access,
+child-environment secret injection, and `restart_runtime`.
+
+Earlier, ITER-0053 Manual Takeover (Pause & Resume) shipped: a running agent
 task can be paused at a round safe boundary (`POST /v1/task-executions/{task_id}/pause`)
 so the user can take over the device directly, then resumed (`/resume`) so the agent
 re-observes the current screen and keeps planning. While paused, no device actions are

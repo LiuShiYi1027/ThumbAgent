@@ -112,6 +112,55 @@ export async function getTaskRun(taskId: string): Promise<TaskRun> {
   return payload.task
 }
 
+/** Non-secret on-disk model provider configuration shown on the settings page. */
+export interface ModelProviderConfig {
+  enabled: boolean
+  provider: string
+  base_url: string
+  model: string
+  api_key_ref: string
+  timeout_seconds: number
+  config_file: string
+  env_override: boolean
+}
+
+interface ModelProviderConfigResponse {
+  config: ModelProviderConfig
+}
+
+export async function getModelProviderConfig(): Promise<ModelProviderConfig> {
+  const payload = await runtimeApiGet<ModelProviderConfigResponse>(
+    '/v1/model-provider/config',
+  )
+  return payload.config
+}
+
+interface SaveModelProviderConfigResponse {
+  saved: boolean
+  restart_required: boolean
+  config: ModelProviderConfig
+}
+
+/** Env reference the desktop always writes; the value itself stays in the Keychain. */
+export const DESKTOP_SECRET_REF = 'env:MOBILE_AGENT_MODEL_SECRET_DESKTOP'
+
+/**
+ * Persist model provider settings. The Runtime validates and rejects unknown
+ * fields; applying the saved settings requires a Runtime restart afterwards.
+ */
+export async function saveModelProviderConfig(
+  config: Pick<
+    ModelProviderConfig,
+    'enabled' | 'provider' | 'base_url' | 'model' | 'timeout_seconds'
+  >,
+): Promise<ModelProviderConfig> {
+  const payload = await runtimeApiPost<SaveModelProviderConfigResponse>(
+    '/v1/model-provider/config',
+    { ...config, api_key_ref: DESKTOP_SECRET_REF },
+  )
+  return payload.config
+}
+
 const ARTIFACT_ID_PATTERN = /^artifact_[a-f0-9]{32}$/
 
 /**

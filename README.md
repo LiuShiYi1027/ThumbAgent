@@ -10,7 +10,14 @@
 
 ## 当前进展
 
-项目已完成 ITER-0053 Manual Takeover (Pause & Resume)：执行中的 Agent 任务可以在轮次
+项目已完成 ITER-0054 桌面设置页与模型 Provider 开箱配置：设置页直接填写
+Base URL、模型名称与超时，API 密钥只保存在系统钥匙串（Runtime 配置文件只落
+`env:MOBILE_AGENT_MODEL_SECRET_DESKTOP` 引用，密钥永不落盘、不经过 HTTP 端点），
+「保存并重启」一键重启本地 Runtime 使配置生效，进行中任务会提示中断风险；数据目录
+可一键在 Finder 打开。Runtime 新增 `GET/POST /v1/model-provider/config`（校验、原子写
+0600），桌面 sidecar 负责 Keychain 读写、启动注入与 `restart_runtime`。
+
+此前完成 ITER-0053 Manual Takeover (Pause & Resume)：执行中的 Agent 任务可以在轮次
 安全边界暂停（`POST /v1/task-executions/{task_id}/pause`），用户直接在设备上人工接管，
 随后恢复（`/resume`）让 Agent 基于最新画面重新观察并继续规划。暂停期间不派发设备动作、
 继续持有设备租约；deadline 继续计时，到期或收到取消时自动恢复并按超时/取消收尾。
