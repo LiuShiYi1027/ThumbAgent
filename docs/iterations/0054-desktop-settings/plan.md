@@ -1,7 +1,7 @@
 # ITER-0054 Desktop Settings & Model Provider Onboarding
 
-> 文档状态：Done
-> 迭代状态：Done
+> 文档状态：Completed
+> 迭代状态：Completed
 > 更新日期：2026-08-20
 
 ## 产品结果
