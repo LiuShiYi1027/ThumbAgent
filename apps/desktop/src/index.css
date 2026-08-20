@@ -1,49 +1,52 @@
-/* ThumbAgent desktop design system (ITER-0055).
-   Single light theme; tokens are grouped so a dark theme can be added later
-   by swapping the :root block only. */
+/* ThumbAgent desktop design system — Mono editorial theme (ITER-0056).
+   Cream paper, near-black ink borders, hard offset shadows, heavy grotesque
+   type. Semantic colors stay distinguishable but are drawn as ink-outlined
+   stamps on tinted paper. */
 
 :root {
-  /* canvas & surfaces */
-  --bg: #f2f4f9;
-  --panel: #ffffff;
-  --panel-sunken: #f8fafc;
-  --border: #e2e6ee;
-  --border-strong: #cfd5e1;
+  /* paper & ink */
+  --bg: #f3eee1;
+  --panel: #fffdf7;
+  --panel-sunken: #f8f3e6;
+  --ink: #1a1915;
+  --border: #1a1915;
+  --border-strong: #1a1915;
+  --border-soft: rgba(26, 25, 21, 0.28);
 
   /* text */
-  --text: #111827;
-  --text-secondary: #4b5563;
-  --text-faint: #8a94a6;
+  --text: #1a1915;
+  --text-secondary: #565247;
+  --text-faint: #8b8574;
 
-  /* brand */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: #eef2ff;
-  --accent-ring: rgba(79, 70, 229, 0.16);
+  /* brand: ink accent + one red pin */
+  --accent: #1a1915;
+  --accent-hover: #000000;
+  --accent-soft: #ede7d6;
+  --accent-ring: rgba(26, 25, 21, 0.22);
+  --pin-red: #e02d2d;
 
-  /* semantic */
-  --ok: #15803d;
-  --ok-bg: #dcfce7;
-  --warn: #a16207;
-  --warn-bg: #fef9c3;
-  --error: #dc2626;
-  --error-bg: #fee2e2;
-  --busy: #7c3aed;
-  --busy-bg: #f3e8ff;
-  --muted-bg: #eceff5;
+  /* semantic stamps (desaturated, ink-outlined) */
+  --ok: #1d7a44;
+  --ok-bg: #ddefdc;
+  --warn: #946500;
+  --warn-bg: #f8ecc2;
+  --error: #c92a22;
+  --error-bg: #fadcd5;
+  --busy: #6b4fc0;
+  --busy-bg: #eae3f8;
+  --muted-bg: #ece7d8;
 
-  /* elevation */
-  --shadow-card:
-    0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(16, 24, 40, 0.04);
-  --shadow-pop:
-    0 12px 32px rgba(16, 24, 40, 0.14), 0 4px 10px rgba(16, 24, 40, 0.08);
-  --shadow-phone:
-    0 18px 44px rgba(15, 23, 42, 0.28), 0 4px 12px rgba(15, 23, 42, 0.16);
+  /* hard offset shadows */
+  --shadow-card: 4px 4px 0 rgba(26, 25, 21, 0.9);
+  --shadow-button: 3px 3px 0 rgba(26, 25, 21, 0.35);
+  --shadow-button-plain: 3px 3px 0 rgba(26, 25, 21, 0.18);
+  --shadow-pop: 7px 7px 0 rgba(26, 25, 21, 0.9);
+  --shadow-phone: 9px 9px 0 rgba(26, 25, 21, 0.85);
 
   /* shape & motion */
   --radius-panel: 12px;
   --radius-control: 8px;
-  --ease: 140ms ease;
+  --ease: 120ms ease;
 }
 
 * {
@@ -58,9 +61,7 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(1200px 480px at 80% -10%, rgba(79, 70, 229, 0.07), transparent 60%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI",
@@ -83,10 +84,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px;
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: saturate(1.4) blur(12px);
-  -webkit-backdrop-filter: saturate(1.4) blur(12px);
-  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  border-bottom: 1.5px solid var(--ink);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -99,22 +98,34 @@ body {
 }
 
 .app-logo {
-  width: 32px;
-  height: 32px;
-  padding: 6px;
-  color: #ffffff;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #4338ca 100%);
-  border-radius: 9px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 2px 6px rgba(79, 70, 229, 0.45);
+  position: relative;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  color: #fffdf7;
+  background: var(--ink);
+  border-radius: 50%;
+  box-shadow: 2.5px 2.5px 0 rgba(26, 25, 21, 0.3);
+}
+
+/* the single red pin on the logo stamp */
+.app-logo::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pin-red);
+  border: 1.5px solid var(--panel);
 }
 
 .app-brand h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -137,28 +148,27 @@ body {
   justify-content: center;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-control);
   background: var(--panel);
-  color: var(--text-secondary);
+  color: var(--text);
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  box-shadow: var(--shadow-button-plain);
   transition:
-    background var(--ease),
-    color var(--ease),
-    border-color var(--ease),
-    box-shadow var(--ease);
+    transform var(--ease),
+    box-shadow var(--ease),
+    background var(--ease);
 }
 
 .icon-button:hover:not(:disabled) {
-  background: var(--panel-sunken);
-  border-color: var(--border-strong);
-  color: var(--text);
-  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.08);
+  background: var(--accent-soft);
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 rgba(26, 25, 21, 0.22);
 }
 
 .icon-button:active:not(:disabled) {
-  transform: translateY(0.5px);
+  transform: translate(1.5px, 1.5px);
+  box-shadow: 0 0 0 rgba(26, 25, 21, 0);
 }
 
 .icon-button:disabled {
@@ -182,7 +192,7 @@ body {
   padding: 22px 24px 36px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   max-width: 1080px;
   width: 100%;
   margin: 0 auto;
@@ -192,7 +202,7 @@ body {
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-panel);
   padding: 16px 18px;
   box-shadow: var(--shadow-card);
@@ -201,7 +211,7 @@ body {
 .panel h2 {
   margin: 0 0 12px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 750;
   letter-spacing: 0.02em;
   text-wrap: balance;
 }
@@ -218,16 +228,20 @@ body {
   margin: 0;
 }
 
+/* stamped-tag feel, used sparingly on panel headers */
+.panel-title-row .badge {
+  transform: rotate(-2deg);
+}
+
 .panel-error {
-  border-color: rgba(220, 38, 38, 0.35);
-  background: linear-gradient(0deg, rgba(254, 226, 226, 0.35), rgba(254, 226, 226, 0.35)),
-    var(--panel);
+  background: var(--error-bg);
 }
 
 .error-detail {
   margin: 0;
   color: var(--error);
   font-size: 12.5px;
+  font-weight: 550;
   white-space: pre-wrap;
 }
 
@@ -242,18 +256,20 @@ body {
   color: var(--text-secondary);
 }
 
-/* ---------- badges ---------- */
+/* ---------- badges (ink-outlined stamps) ---------- */
 
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  border: 1px solid transparent;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: 1.5px solid var(--ink);
+  background: var(--panel);
+  color: var(--text);
 }
 
 .badge-icon {
@@ -264,32 +280,27 @@ body {
 .badge-ok {
   color: var(--ok);
   background: var(--ok-bg);
-  border-color: rgba(21, 128, 61, 0.18);
 }
 
 .badge-warn {
   color: var(--warn);
   background: var(--warn-bg);
-  border-color: rgba(161, 98, 7, 0.2);
 }
 
 .badge-error {
   color: var(--error);
   background: var(--error-bg);
-  border-color: rgba(220, 38, 38, 0.2);
 }
 
 .badge-busy {
   color: var(--busy);
   background: var(--busy-bg);
-  border-color: rgba(124, 58, 237, 0.2);
 }
 
 .badge-muted,
 .badge-loading {
   color: var(--text-secondary);
   background: var(--muted-bg);
-  border-color: var(--border);
 }
 
 /* ---------- readiness ---------- */
@@ -299,7 +310,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--ink);
   border-radius: 10px;
   background: var(--panel-sunken);
 }
@@ -307,11 +318,11 @@ body {
 .gateway-icon {
   width: 18px;
   height: 18px;
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .gateway-name {
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .gateway-sub {
@@ -330,17 +341,17 @@ body {
 
 .count-ok {
   color: var(--ok);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .count-busy {
   color: var(--busy);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .count-warn {
   color: var(--warn);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .issue-list {
@@ -359,7 +370,8 @@ body {
   padding: 9px 12px;
   border-radius: 8px;
   background: var(--warn-bg);
-  border-left: 3px solid rgba(161, 98, 7, 0.45);
+  border: 1.5px solid var(--ink);
+  border-left-width: 4px;
 }
 
 .issue-code {
@@ -368,11 +380,12 @@ body {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 5px;
-  background: rgba(0, 0, 0, 0.07);
+  background: rgba(26, 25, 21, 0.1);
+  border: 1px solid var(--border-soft);
 }
 
 .issue-message {
-  font-weight: 550;
+  font-weight: 600;
 }
 
 .issue-action {
@@ -390,17 +403,17 @@ body {
 .device-table th {
   text-align: left;
   font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
+  font-weight: 750;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-faint);
   padding: 6px 12px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2px solid var(--ink);
 }
 
 .device-table td {
   padding: 11px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
   vertical-align: top;
 }
 
@@ -417,7 +430,7 @@ body {
 }
 
 .device-name {
-  font-weight: 650;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
@@ -436,8 +449,9 @@ body {
 
 .capability-count {
   cursor: help;
-  color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 /* ---------- forms ---------- */
@@ -456,25 +470,25 @@ body {
 
 .composer-label {
   font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
+  font-weight: 750;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-faint);
 }
 
 .composer-select,
 .composer-textarea {
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-control);
   padding: 8px 11px;
   font: inherit;
   font-size: 13px;
   color: var(--text);
-  background: var(--panel-sunken);
+  background: var(--panel);
   transition:
-    border-color var(--ease),
     box-shadow var(--ease),
-    background var(--ease);
+    background var(--ease),
+    transform var(--ease);
 }
 
 .composer-textarea {
@@ -485,13 +499,12 @@ body {
 
 .composer-select:hover,
 .composer-textarea:hover {
-  border-color: #b8c0cf;
+  background: var(--panel-sunken);
 }
 
 .composer-select:focus-visible,
 .composer-textarea:focus-visible {
   outline: none;
-  border-color: var(--accent);
   background: var(--panel);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
@@ -516,65 +529,60 @@ body {
   color: var(--text-faint);
 }
 
-/* ---------- buttons ---------- */
+/* ---------- buttons (hard-shadow press) ---------- */
 
 .primary-button,
 .plain-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  border: 1.5px solid var(--ink);
   border-radius: var(--radius-control);
   padding: 8px 15px;
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   touch-action: manipulation;
   transition:
-    background var(--ease),
-    color var(--ease),
-    border-color var(--ease),
+    transform var(--ease),
     box-shadow var(--ease),
-    transform var(--ease);
+    background var(--ease),
+    color var(--ease);
 }
 
 .primary-button {
-  border: 1px solid var(--accent);
-  background: linear-gradient(180deg, #5850ec 0%, var(--accent) 100%);
-  color: #ffffff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 1px 3px rgba(79, 70, 229, 0.4);
+  background: var(--ink);
+  color: #fffdf7;
+  box-shadow: var(--shadow-button);
 }
 
 .primary-button:hover:not(:disabled) {
-  background: linear-gradient(180deg, #4f46e5 0%, var(--accent-hover) 100%);
-  border-color: var(--accent-hover);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.15),
-    0 3px 8px rgba(79, 70, 229, 0.45);
+  background: var(--accent-hover);
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 rgba(26, 25, 21, 0.4);
 }
 
 .primary-button:active:not(:disabled) {
-  transform: translateY(0.5px);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 rgba(26, 25, 21, 0);
 }
 
 .plain-button {
-  border: 1px solid var(--border-strong);
   background: var(--panel);
-  color: var(--text-secondary);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  color: var(--text);
+  box-shadow: var(--shadow-button-plain);
 }
 
 .plain-button:hover:not(:disabled) {
-  background: var(--panel-sunken);
-  color: var(--text);
-  border-color: #b8c0cf;
+  background: var(--accent-soft);
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 rgba(26, 25, 21, 0.22);
 }
 
 .plain-button:active:not(:disabled) {
-  transform: translateY(0.5px);
+  transform: translate(1.5px, 1.5px);
+  box-shadow: 0 0 0 rgba(26, 25, 21, 0);
 }
 
 .primary-button:disabled,
@@ -589,9 +597,9 @@ body {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(250, 246, 239, 0.72);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -609,6 +617,7 @@ body {
   width: 470px;
   max-width: calc(100vw - 48px);
   background: var(--panel);
+  border: 1.5px solid var(--ink);
   border-radius: 14px;
   padding: 20px 22px;
   box-shadow: var(--shadow-pop);
@@ -624,8 +633,9 @@ body {
 
 .dialog h2 {
   margin: 0 0 14px;
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 .dialog-facts {
@@ -642,7 +652,7 @@ body {
 
 .dialog-facts dd {
   margin: 0;
-  font-weight: 550;
+  font-weight: 600;
 }
 
 .dialog-device-id {
@@ -660,7 +670,7 @@ body {
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--warn-bg);
-  border: 1px solid rgba(161, 98, 7, 0.22);
+  border: 1.5px solid var(--ink);
   color: var(--warn);
 }
 
@@ -682,7 +692,7 @@ body {
 .execution-goal {
   margin: 0 0 8px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -711,30 +721,29 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 7px 0 7px 20px;
+  padding: 7px 0 7px 21px;
 }
 
-/* timeline rail & node */
+/* square timeline nodes on an ink rail */
 .event-timeline li::before {
   content: "";
   position: absolute;
-  left: 5px;
-  top: 14px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--border-strong);
-  box-shadow: 0 0 0 2.5px var(--panel);
+  left: 4px;
+  top: 13px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--ink);
 }
 
 .event-timeline li::after {
   content: "";
   position: absolute;
-  left: 8.5px;
+  left: 7.5px;
   top: 24px;
   bottom: -4px;
   width: 1.5px;
-  background: var(--border);
+  background: var(--border-soft);
 }
 
 .event-timeline li:last-child::after {
@@ -759,7 +768,7 @@ body {
 
 .step-list li {
   padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .step-list li:last-child {
@@ -774,7 +783,7 @@ body {
 }
 
 .step-title {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .step-detail {
@@ -790,7 +799,7 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11.5px;
   background: var(--muted-bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: 5px;
   padding: 1px 6px;
   margin: 0 4px;
@@ -820,7 +829,7 @@ body {
   font-size: 13px;
   color: var(--warn);
   background: var(--warn-bg);
-  border: 1px solid rgba(161, 98, 7, 0.25);
+  border: 1.5px solid var(--ink);
   border-radius: 10px;
 }
 
@@ -850,13 +859,14 @@ body {
 }
 
 .screen-live-hint {
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
   color: var(--busy);
   background: var(--busy-bg);
-  border: 1px solid rgba(124, 58, 237, 0.2);
-  border-radius: 999px;
-  padding: 3px 10px;
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  padding: 3px 9px;
 }
 
 /* phone frame around the live screenshot */
@@ -864,9 +874,9 @@ body {
   display: block;
   width: 100%;
   height: auto;
-  border: 9px solid #0f172a;
+  border: 9px solid var(--ink);
   border-radius: 26px;
-  background: #0f172a;
+  background: var(--ink);
   box-shadow: var(--shadow-phone);
 }
 
@@ -879,8 +889,8 @@ body {
   text-align: center;
   color: var(--text-faint);
   font-size: 13px;
-  border: 1.5px dashed var(--border-strong);
-  border-radius: 18px;
+  border: 1.5px dashed var(--ink);
+  border-radius: 14px;
   background: var(--panel-sunken);
 }
 
@@ -903,7 +913,7 @@ body {
 .settings-toggle input[type='checkbox'] {
   width: 16px;
   height: 16px;
-  accent-color: var(--accent);
+  accent-color: var(--ink);
   cursor: pointer;
 }
 
@@ -911,7 +921,7 @@ body {
   text-transform: none;
   letter-spacing: 0.01em;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--text);
 }
 
@@ -922,14 +932,14 @@ body {
 }
 
 .app-main::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.35);
+  background: rgba(26, 25, 21, 0.3);
   border-radius: 6px;
   border: 2.5px solid transparent;
   background-clip: content-box;
 }
 
 .app-main::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.55);
+  background: rgba(26, 25, 21, 0.5);
   background-clip: content-box;
   border: 2.5px solid transparent;
 }

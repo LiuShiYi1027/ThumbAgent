@@ -60,6 +60,7 @@
 | [ITER-0053](./0053-manual-takeover/plan.md) | Manual Takeover (Pause & Resume) | Completed | 执行中安全边界暂停 Agent、人工接管设备后恢复续跑，事件流记录接管区间 |
 | [ITER-0054](./0054-desktop-settings/plan.md) | Desktop Settings & Model Provider Onboarding | Completed | 桌面设置页：模型 Provider 与 API Key 开箱配置（Keychain 注入），保存并重启生效 |
 | [ITER-0055](./0055-desktop-ui-redesign/plan.md) | Desktop UI Visual Redesign | Completed | 桌面工作台整体视觉重设计：设计 tokens、卡片海拔、手机框设备画面、统一控件语言 |
+| [ITER-0056](./0056-desktop-mono-theme/plan.md) | Desktop Mono Brand Theme | Completed | 桌面 mono 编辑风品牌主题：奶油纸底、墨框硬阴影、印章徽章与按压按钮（方向稿 3c 落地） |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。
