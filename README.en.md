@@ -28,6 +28,8 @@ Natural-language goal
 Everything stays local: no cloud accounts, no telemetry, secrets live only in
 the system keychain.
 
+![ThumbAgent Desktop Workbench](./docs/assets/desktop-home.png)
+
 ## Quick Start
 
 ### Option 1: Download the app (recommended)
