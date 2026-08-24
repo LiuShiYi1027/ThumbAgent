@@ -51,6 +51,7 @@ SCHEMA_NAMES = (
     "ui-match",
     "ui-node",
     "ui-selector",
+    "unicode-input-result",
 )
 
 HEADER = (

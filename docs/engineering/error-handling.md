@@ -87,6 +87,10 @@ NAVIGATION_ACTION_UNKNOWN
 NAVIGATION_NOT_VERIFIED
 NOTIFICATIONS_READ_FAILED
 NOTIFICATIONS_READ_EMPTY
+IME_HELPER_NOT_INSTALLED
+IME_SWITCH_FAILED
+TEXT_INPUT_NOT_VERIFIED
+IME_RESTORE_FAILED
 MODEL_UNAVAILABLE
 MODEL_OUTPUT_INVALID
 NO_PROGRESS
@@ -216,6 +220,13 @@ APK 安装 Prepare 使用 `APK_INVALID`、`APK_PACKAGE_MISMATCH`、`APP_ALREADY_
 `dumpsys notification` 无结构化输出或命令失败返回 `NOTIFICATIONS_READ_FAILED`；设备当前零条
 通知返回 `NOTIFICATIONS_READ_EMPTY`（已知失败，不是空成功）。通知标题统一截断 32 字符、数量
 上限 50，原始 dumpsys 文本不得进入日志或 Artifact。
+
+Unicode 文本输入 Helper（`input.unicode_text`）依赖预装的 Helper IME（ADR-0019）。Helper IME 未安装
+或未启用返回 `IME_HELPER_NOT_INSTALLED`；`ime set` 切换失败返回 `IME_SWITCH_FAILED`。输入完成后必须
+经 UI Tree 读回做 NFC 归一化精确比对，不一致返回 `TEXT_INPUT_NOT_VERIFIED`，outcome 记为 unknown，
+不自动重试。无论成功与否都必须恢复原 IME；恢复失败返回 `IME_RESTORE_FAILED` 并将设备标记为需要
+人工处理（用户键盘可能仍停在 Helper IME）。文本原文不进入结果、日志或 Artifact，仅记录长度与
+SHA-256；敏感数字形态（4-8 位验证码、11+ 位手机号）在 Tool 层直接拒绝，不进入 Adapter。
 
 ## 8. 日志与诊断
 

@@ -1,7 +1,7 @@
 # ADR-0019: Unicode 文本输入的受控 IME Helper
 
-- Status: Proposed
-- Date: 2026-08-24
+- Status: Accepted
+- Date: 2026-08-24（2026-08-24 经项目负责人确认方向）
 - Deciders: Mobile Agent Team
 
 ## Context

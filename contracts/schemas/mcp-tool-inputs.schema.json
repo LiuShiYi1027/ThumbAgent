@@ -165,6 +165,25 @@
         }
       }
     },
+    "unicode_text_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "selector", "text", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "selector": { "$ref": "ui-selector.schema.json" },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Unicode text to type into the located editable field. Verification-code and phone-number shapes are always rejected before any device action."
+        },
+        "confirmed": {
+          "const": true,
+          "description": "The MCP host must explain that the default input method is temporarily switched to the controlled helper and restored afterwards, then obtain explicit user confirmation."
+        }
+      }
+    },
     "app_stop": {
       "type": "object",
       "additionalProperties": false,
