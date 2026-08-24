@@ -65,6 +65,21 @@ class UnavailableDeviceAdapter:
     async def input_text(self, device_id: str, text: str) -> None:
         self._raise()
 
+    async def current_input_method(self, device_id: str) -> str:
+        self._raise()
+
+    async def installed_input_methods(self, device_id: str) -> tuple[str, ...]:
+        self._raise()
+
+    async def enabled_input_methods(self, device_id: str) -> tuple[str, ...]:
+        self._raise()
+
+    async def enable_input_method(self, device_id: str, ime_id: str) -> None:
+        self._raise()
+
+    async def set_input_method(self, device_id: str, ime_id: str) -> None:
+        self._raise()
+
     async def collect_logs(
         self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
     ) -> bytes:

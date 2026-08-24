@@ -206,6 +206,26 @@ class SessionTrackingDeviceAdapter:
         await self._validate_binding(device_id)
         await self._adapter.input_text(device_id, text)
 
+    async def current_input_method(self, device_id: str) -> str:
+        await self._validate_binding(device_id)
+        return await self._adapter.current_input_method(device_id)
+
+    async def installed_input_methods(self, device_id: str) -> tuple[str, ...]:
+        await self._validate_binding(device_id)
+        return await self._adapter.installed_input_methods(device_id)
+
+    async def enabled_input_methods(self, device_id: str) -> tuple[str, ...]:
+        await self._validate_binding(device_id)
+        return await self._adapter.enabled_input_methods(device_id)
+
+    async def enable_input_method(self, device_id: str, ime_id: str) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.enable_input_method(device_id, ime_id)
+
+    async def set_input_method(self, device_id: str, ime_id: str) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.set_input_method(device_id, ime_id)
+
     async def collect_logs(
         self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
     ) -> bytes:

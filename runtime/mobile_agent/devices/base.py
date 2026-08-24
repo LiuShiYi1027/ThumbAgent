@@ -50,6 +50,26 @@ class DeviceAdapter(Protocol):
 
     async def input_text(self, device_id: str, text: str) -> None: ...
 
+    async def current_input_method(self, device_id: str) -> str:
+        """Return the current default IME component id."""
+        ...
+
+    async def installed_input_methods(self, device_id: str) -> tuple[str, ...]:
+        """Return all installed IME component ids, including disabled ones."""
+        ...
+
+    async def enabled_input_methods(self, device_id: str) -> tuple[str, ...]:
+        """Return currently enabled IME component ids."""
+        ...
+
+    async def enable_input_method(self, device_id: str, ime_id: str) -> None:
+        """Enable one installed IME using fixed platform arguments."""
+        ...
+
+    async def set_input_method(self, device_id: str, ime_id: str) -> None:
+        """Switch the default IME; also used to restore the previous one."""
+        ...
+
     async def collect_logs(
         self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
     ) -> bytes:

@@ -10,6 +10,10 @@ __pycache__/
 htmlcov/
 build/
 dist/
+# ADR-0019：helper 登记产物（评审过的 APK 与 SHA-256）必须入仓。
+!helpers/unicode-ime/dist/
+!helpers/unicode-ime/dist/**
+helpers/unicode-ime/dist/*.idsig
 node_modules/
 apps/desktop/src-tauri/target/
 *.egg-info/

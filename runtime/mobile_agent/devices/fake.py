@@ -74,6 +74,12 @@ class FakeDeviceAdapter:
         self.actions: list[tuple[object, ...]] = []
         self.custom_ui_xml: bytes | None = None
         self.install_target_app_id = "com.example.installed"
+        self.current_ime = "com.example.ime/.DefaultIme"
+        self.installed_imes: tuple[str, ...] = (
+            "com.example.ime/.DefaultIme",
+            "com.example.ime/.PinyinIme",
+        )
+        self.enabled_imes: list[str] = ["com.example.ime/.DefaultIme"]
         self._installed_apps = {"com.android.settings", "com.example.fake"}
         self._running_apps = {"com.example.fake"}
         self._stopped_apps: set[str] = set()
@@ -105,6 +111,7 @@ class FakeDeviceAdapter:
                     "device.diagnostics.bundle@1",
                     "app.navigate@1",
                     "notifications.read@1",
+                    "input.unicode@1",
                 ),
             )
         ]
@@ -210,6 +217,27 @@ class FakeDeviceAdapter:
 
     async def input_text(self, device_id: str, text: str) -> None:
         self.actions.append(("input.text", device_id, text))
+
+    async def current_input_method(self, device_id: str) -> str:
+        self.actions.append(("input.ime.current", device_id))
+        return self.current_ime
+
+    async def installed_input_methods(self, device_id: str) -> tuple[str, ...]:
+        self.actions.append(("input.ime.installed", device_id))
+        return self.installed_imes
+
+    async def enabled_input_methods(self, device_id: str) -> tuple[str, ...]:
+        self.actions.append(("input.ime.enabled", device_id))
+        return tuple(self.enabled_imes)
+
+    async def enable_input_method(self, device_id: str, ime_id: str) -> None:
+        self.actions.append(("input.ime.enable", device_id, ime_id))
+        if ime_id not in self.enabled_imes:
+            self.enabled_imes.append(ime_id)
+
+    async def set_input_method(self, device_id: str, ime_id: str) -> None:
+        self.actions.append(("input.ime.set", device_id, ime_id))
+        self.current_ime = ime_id
 
     async def collect_logs(
         self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel

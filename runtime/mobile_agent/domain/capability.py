@@ -214,6 +214,24 @@ class CapabilityCatalog:
                     "通知正文与原始平台输出不进入公共响应",
                 ),
             ),
+            CapabilityDefinition(
+                "input.unicode@1",
+                RiskLevel.MEDIUM,
+                Idempotency.UNSAFE,
+                CapabilityVerification.REQUIRED,
+                (
+                    "设备在线",
+                    "目标可编辑",
+                    "Helper IME 已安装并经 app.install 授权",
+                    "用户明确确认",
+                ),
+                (
+                    "验证码、手机号等敏感数字形态在派发前一律拒绝",
+                    "每次调用强制恢复原输入法，恢复失败显著上报",
+                    "输入后经 UI Tree 读回做 NFC 归一化精确比对，不一致不重试",
+                    "文本原文不进入结果、日志或 Artifact，仅记录长度与摘要",
+                ),
+            ),
         )
         self._definitions = {
             definition.capability: definition for definition in definitions

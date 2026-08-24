@@ -59,6 +59,7 @@ locked unauthorized usb:1-1
                 "device.diagnostics.bundle@1",
                 "app.navigate@1",
                 "notifications.read@1",
+                "input.unicode@1",
             ),
             devices[0].capabilities,
         )

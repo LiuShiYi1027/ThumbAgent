@@ -118,6 +118,7 @@ class AndroidDeviceAdapter:
                 "device.diagnostics.bundle@1",
                 "app.navigate@1",
                 "notifications.read@1",
+                "input.unicode@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(
@@ -432,6 +433,98 @@ class AndroidDeviceAdapter:
         serial = self._serial_from_device_id(device_id)
         result = await self._runner.run("-s", serial, "shell", "input", "text", text)
         self._require_success(result.returncode, "设备文本输入失败", result.stderr_text)
+
+    async def current_input_method(self, device_id: str) -> str:
+        """Return the current default IME component id for one online device."""
+
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s", serial, "shell", "settings", "get", "secure", "default_input_method"
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="IME_SWITCH_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="无法读取设备当前输入法",
+                retryable=True,
+            )
+        ime_id = result.stdout_text.strip()
+        if not ime_id or ime_id == "null":
+            raise MobileAgentError(
+                code="IME_SWITCH_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备未报告当前默认输入法",
+                retryable=True,
+            )
+        return ime_id
+
+    async def installed_input_methods(self, device_id: str) -> tuple[str, ...]:
+        """Return all installed IME component ids, including disabled ones."""
+
+        return await self._list_input_methods(device_id, all_methods=True)
+
+    async def enabled_input_methods(self, device_id: str) -> tuple[str, ...]:
+        """Return currently enabled IME component ids."""
+
+        return await self._list_input_methods(device_id, all_methods=False)
+
+    async def _list_input_methods(self, device_id: str, all_methods: bool) -> tuple[str, ...]:
+        serial = self._serial_from_device_id(device_id)
+        argv = ["-s", serial, "shell", "ime", "list"]
+        if all_methods:
+            argv.append("-a")
+        argv.append("-s")
+        result = await self._runner.run(*argv)
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="IME_SWITCH_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="无法枚举设备输入法",
+                retryable=True,
+            )
+        return tuple(
+            line.strip() for line in result.stdout_text.splitlines() if line.strip()
+        )
+
+    async def enable_input_method(self, device_id: str, ime_id: str) -> None:
+        """Enable one installed IME so it can become the default."""
+
+        serial = self._serial_from_device_id(device_id)
+        validated = self._validate_ime_id(ime_id)
+        result = await self._runner.run("-s", serial, "shell", "ime", "enable", validated)
+        self._require_ime_success(result.returncode, "无法启用目标输入法", result.stderr_text)
+
+    async def set_input_method(self, device_id: str, ime_id: str) -> None:
+        """Switch the default IME; also used to restore the previous one."""
+
+        serial = self._serial_from_device_id(device_id)
+        validated = self._validate_ime_id(ime_id)
+        result = await self._runner.run("-s", serial, "shell", "ime", "set", validated)
+        self._require_ime_success(result.returncode, "无法切换设备输入法", result.stderr_text)
+
+    @staticmethod
+    def _validate_ime_id(ime_id: str) -> str:
+        """Accept only a component-style IME id; reject everything else."""
+
+        if not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+/[.A-Za-z0-9_$]+", ime_id):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="无效的输入法组件标识",
+            )
+        return ime_id
+
+    @staticmethod
+    def _require_ime_success(returncode: int, message: str, stderr: str = "") -> None:
+        if returncode != 0:
+            # MagicOS 等 ROM 可能拦截 ime set；统一映射为已知失败，由上层降级。
+            raise MobileAgentError(
+                code="IME_SWITCH_FAILED",
+                category=ErrorCategory.DEVICE,
+                message=message,
+                retryable=True,
+                suggested_action="确认 Helper IME 已安装且未被系统策略拦截；失败时降级为人工输入",
+            )
 
     async def collect_logs(
         self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
