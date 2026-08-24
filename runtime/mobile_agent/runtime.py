@@ -83,6 +83,7 @@ from mobile_agent.skills.app_lifecycle import (
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
 from mobile_agent.skills.app_navigation import AppNavigateSkill
 from mobile_agent.skills.notification_read import DeviceNotificationsReadSkill
+from mobile_agent.skills.unicode_input import UnicodeTextInputSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
 from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
 from mobile_agent.skills.local_data import LocalDataCleanupSkill
@@ -106,6 +107,7 @@ from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
 from mobile_agent.tools.notification_capture import DeviceNotificationsCaptureTool
+from mobile_agent.tools.unicode_input import UnicodeTextInputTool
 from mobile_agent.tools.performance_capture import DevicePerformanceCaptureTool
 from mobile_agent.tools.app_inventory import AppInventoryTool
 from mobile_agent.tools.apk_install import ApkInstallTool
@@ -243,6 +245,10 @@ class RuntimeService:
         self._notifications_read = DeviceNotificationsReadSkill(
             self._notifications_tool
         )
+        self._unicode_input_tool = UnicodeTextInputTool(
+            self._adapter, artifacts, self._tool_registry, self._policy
+        )
+        self._unicode_text_input = UnicodeTextInputSkill(self._unicode_input_tool)
         self._tasks = TaskRunner(self._settings_scroll_navigate)
         self._agent_runner = AgentRunner(
             self._adapter,
@@ -1186,6 +1192,28 @@ class RuntimeService:
             return (
                 await self._notifications_read.invoke(
                     device_id, max_notifications, confirmed
+                )
+            ).to_dict()
+
+    async def unicode_text_input(
+        self,
+        device_id: str,
+        selector: dict[str, Any],
+        text: str,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Input verified Unicode text into one editable field under Session and Lease."""
+
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id,
+            f"skill_{uuid.uuid4().hex}",
+            60.0,
+            session_id,
+        ), self._adapter.bind_session(device_id, session_id):
+            return (
+                await self._unicode_text_input.invoke(
+                    device_id, selector, text, confirmed
                 )
             ).to_dict()
 

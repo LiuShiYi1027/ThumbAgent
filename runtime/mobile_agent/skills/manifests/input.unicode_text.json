@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "id": "input.unicode_text",
+  "version": "1.0.0",
+  "name": "Input verified Unicode text into an editable field",
+  "description": "Input CJK and other Unicode text into one editable field via the controlled Helper IME: record the current IME, switch, input Modified UTF-7 encoded text, verify by UI Tree read-back (NFC exact match) and always restore the previous IME. Sensitive digit shapes are rejected before any device action.",
+  "kind": "deterministic",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["device_id", "selector", "text", "confirmed"],
+    "properties": {
+      "device_id": { "type": "string", "minLength": 1 },
+      "selector": { "$ref": "../../../../contracts/schemas/ui-selector.schema.json" },
+      "text": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "confirmed": { "type": "boolean" }
+    }
+  },
+  "output_schema": {
+    "$ref": "../../../../contracts/schemas/unicode-input-result.schema.json"
+  },
+  "required_capabilities": ["input.unicode@1"],
+  "tool_allowlist": ["input.unicode_text"],
+  "risk": "medium",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "read_back_verified"
+}

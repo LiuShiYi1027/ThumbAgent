@@ -37,6 +37,93 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _is_editable_node(node: UiNode) -> bool:
+    return node.class_name.endswith(".EditText") or node.class_name == "EditText"
+
+
+def _is_sensitive_input_target(node: UiNode) -> bool:
+    haystack = " ".join(
+        (node.text, node.resource_id, node.content_description, node.class_name)
+    ).lower()
+    sensitive_terms = (
+        "password",
+        "passwd",
+        "pwd",
+        "验证码",
+        "verification",
+        "otp",
+        "code",
+        "pin",
+        "支付",
+        "pay",
+        "card",
+        "phone",
+        "手机号",
+        "账号",
+        "account",
+        "secret",
+        "token",
+        "key",
+    )
+    return any(term in haystack for term in sensitive_terms)
+
+
+def locate_editable_target(
+    locator: UiLocator,
+    nodes: list[UiNode],
+    selector: UiSelector,
+    screen_width: int,
+    screen_height: int,
+) -> UiMatch:
+    """Locate exactly one editable, non-sensitive, interactable target node.
+
+    input.text 与 input.unicode_text 共用本定位与策略检查，保证两条输入
+    通道的目标约束一致。
+    """
+
+    matches = locator.find_all(nodes, selector)
+    if not matches:
+        raise MobileAgentError(
+            code="TARGET_NOT_FOUND",
+            category=ErrorCategory.DEVICE,
+            message="未找到目标 UI 输入元素",
+        )
+    if len(matches) > 1:
+        raise MobileAgentError(
+            code="TARGET_AMBIGUOUS",
+            category=ErrorCategory.DEVICE,
+            message="目标 UI 输入元素匹配不唯一",
+            details={"match_count": len(matches)},
+        )
+    node = matches[0]
+    if not _is_editable_node(node):
+        raise MobileAgentError(
+            code="TARGET_NOT_EDITABLE",
+            category=ErrorCategory.DEVICE,
+            message="目标 UI 元素不是可编辑输入框",
+        )
+    if _is_sensitive_input_target(node):
+        raise MobileAgentError(
+            code="ACTION_REJECTED_BY_POLICY",
+            category=ErrorCategory.POLICY,
+            message="当前策略禁止向敏感输入框输入文本",
+        )
+    if not node.enabled or not node.visible:
+        raise MobileAgentError(
+            code="TARGET_NOT_INTERACTABLE",
+            category=ErrorCategory.DEVICE,
+            message="目标 UI 输入元素当前不可交互",
+        )
+    if not node.bounds.within(screen_width, screen_height):
+        raise MobileAgentError(
+            code="TARGET_OUT_OF_BOUNDS",
+            category=ErrorCategory.DEVICE,
+            message="目标 UI 输入元素超出屏幕边界",
+        )
+    tap_x, tap_y = node.bounds.center
+    return UiMatch(selector, node, node, tap_x, tap_y)
+
+
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
     tool_id: str
@@ -109,6 +196,7 @@ class ToolRegistry:
                 "notifications.read@1",
                 direct_invocation=False,
             ),
+            definition("input.unicode_text", "input.unicode@1", direct_invocation=False),
             ToolDefinition(
                 "local.data.cleanup",
                 "runtime.local.data.cleanup@1",
@@ -163,6 +251,7 @@ class ToolRuntime:
                 "app.list": "app.list",
                 "app.inspect": "app.inspect",
                 "device.notifications.capture": "device.notifications.read",
+                "input.unicode_text": "input.unicode_text",
             }.get(tool_id, "对应的目标级 Skill")
             raise MobileAgentError(
                 code="TOOL_REQUIRES_SKILL",
@@ -470,78 +559,7 @@ class ToolRuntime:
     def _locate_editable(
         self, nodes: list[UiNode], selector: UiSelector, screen_width: int, screen_height: int
     ) -> UiMatch:
-        matches = self._locator.find_all(nodes, selector)
-        if not matches:
-            raise MobileAgentError(
-                code="TARGET_NOT_FOUND",
-                category=ErrorCategory.DEVICE,
-                message="未找到目标 UI 输入元素",
-            )
-        if len(matches) > 1:
-            raise MobileAgentError(
-                code="TARGET_AMBIGUOUS",
-                category=ErrorCategory.DEVICE,
-                message="目标 UI 输入元素匹配不唯一",
-                details={"match_count": len(matches)},
-            )
-        node = matches[0]
-        if not self._is_editable_node(node):
-            raise MobileAgentError(
-                code="TARGET_NOT_EDITABLE",
-                category=ErrorCategory.DEVICE,
-                message="目标 UI 元素不是可编辑输入框",
-            )
-        if self._is_sensitive_input_target(node):
-            raise MobileAgentError(
-                code="ACTION_REJECTED_BY_POLICY",
-                category=ErrorCategory.POLICY,
-                message="当前策略禁止向敏感输入框输入文本",
-            )
-        if not node.enabled or not node.visible:
-            raise MobileAgentError(
-                code="TARGET_NOT_INTERACTABLE",
-                category=ErrorCategory.DEVICE,
-                message="目标 UI 输入元素当前不可交互",
-            )
-        if not node.bounds.within(screen_width, screen_height):
-            raise MobileAgentError(
-                code="TARGET_OUT_OF_BOUNDS",
-                category=ErrorCategory.DEVICE,
-                message="目标 UI 输入元素超出屏幕边界",
-            )
-        tap_x, tap_y = node.bounds.center
-        return UiMatch(selector, node, node, tap_x, tap_y)
-
-    @staticmethod
-    def _is_editable_node(node: UiNode) -> bool:
-        return node.class_name.endswith(".EditText") or node.class_name == "EditText"
-
-    @staticmethod
-    def _is_sensitive_input_target(node: UiNode) -> bool:
-        haystack = " ".join(
-            (node.text, node.resource_id, node.content_description, node.class_name)
-        ).lower()
-        sensitive_terms = (
-            "password",
-            "passwd",
-            "pwd",
-            "验证码",
-            "verification",
-            "otp",
-            "code",
-            "pin",
-            "支付",
-            "pay",
-            "card",
-            "phone",
-            "手机号",
-            "账号",
-            "account",
-            "secret",
-            "token",
-            "key",
-        )
-        return any(term in haystack for term in sensitive_terms)
+        return locate_editable_target(self._locator, nodes, selector, screen_width, screen_height)
 
     @classmethod
     def _validate_text_input(cls, text: str) -> None:
