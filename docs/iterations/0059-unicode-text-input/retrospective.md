@@ -1,7 +1,7 @@
 # ITER-0059 Retrospective
 
 > 文档状态：Draft
-> 迭代状态：Planned
+> 迭代状态：Active
 > 更新日期：2026-08-24
 
 ## 实际交付

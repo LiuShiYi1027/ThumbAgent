@@ -1,7 +1,7 @@
 # ITER-0059 Unicode Text Input Helper
 
 > 文档状态：Active
-> 迭代状态：Planned
+> 迭代状态：Active
 > 创建日期：2026-08-24
 > 关联：[能力路线图](../../product/capability-roadmap.md)（A 档首选） · [技术设计 §11.4](../../architecture/technical-design-v1.md) · [ADR-0018](../../adr/0018-programmatic-navigation-shortcuts.md)
 

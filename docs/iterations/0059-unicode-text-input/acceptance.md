@@ -1,7 +1,7 @@
 # ITER-0059 Acceptance
 
 > 文档状态：Active
-> 迭代状态：Planned
+> 迭代状态：Active
 > 更新日期：2026-08-24
 
 ## 功能验收
