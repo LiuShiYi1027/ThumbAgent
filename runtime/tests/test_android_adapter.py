@@ -9,6 +9,7 @@ from mobile_agent.devices.adapters.android import AdbRunner, AndroidDeviceAdapte
 from mobile_agent.domain.device import ConnectionState, Platform
 from mobile_agent.domain.errors import MobileAgentError
 from mobile_agent.domain.device_log import DeviceLogLevel
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.evidence.artifacts import ArtifactStore
 from runtime.tests.fakes import FakeProcessRunner, result
 
@@ -56,6 +57,8 @@ locked unauthorized usb:1-1
                 "app.stop@1",
                 "app.data.clear@1",
                 "device.diagnostics.bundle@1",
+                "app.navigate@1",
+                "notifications.read@1",
             ),
             devices[0].capabilities,
         )
@@ -199,6 +202,95 @@ locked unauthorized usb:1-1
             await adapter.launch_app("adb:serial-1", "bad package; command")
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
         self.assertEqual([], process.calls)
+
+    async def test_navigate_warms_up_settings_and_retries_once_on_cold_start(self) -> None:
+        """MagicOS 等 ROM 冷启动 Settings Action 报 error 102；先用 monkey 预热再重试一次。"""
+        navigate = (
+            "-s",
+            "serial-1",
+            "shell",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            "android.settings.WIFI_SETTINGS",
+            "-f",
+            "0x14000000",
+        )
+        warmup = (
+            "-s",
+            "serial-1",
+            "shell",
+            "monkey",
+            "-p",
+            "com.android.settings",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        )
+        process = FakeProcessRunner(
+            {
+                navigate: [
+                    result(
+                        navigate,
+                        stderr="Error: Activity not started, unknown error code 102",
+                        code=1,
+                    ),
+                    result(navigate, "Status: ok\n"),
+                ],
+                warmup: result(warmup, "Events injected: 1\n"),
+            }
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        await adapter.navigate_to("adb:serial-1", NavigationTarget.SETTINGS_WIFI)
+
+        self.assertEqual(
+            [navigate, warmup, navigate], [call[1] for call in process.calls]
+        )
+
+    async def test_navigate_raises_action_failed_when_warmup_retry_also_fails(self) -> None:
+        navigate = (
+            "-s",
+            "serial-1",
+            "shell",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            "android.settings.WIFI_SETTINGS",
+            "-f",
+            "0x14000000",
+        )
+        warmup = (
+            "-s",
+            "serial-1",
+            "shell",
+            "monkey",
+            "-p",
+            "com.android.settings",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        )
+        process = FakeProcessRunner(
+            {
+                navigate: [
+                    result(navigate, stderr="Error: unknown error code 102", code=1),
+                    result(navigate, stderr="Error: unknown error code 102", code=1),
+                ],
+                warmup: result(warmup, "Events injected: 1\n"),
+            }
+        )
+        adapter = AndroidDeviceAdapter(AdbRunner(Path("/safe/adb"), process))
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await adapter.navigate_to("adb:serial-1", NavigationTarget.SETTINGS_WIFI)
+
+        self.assertEqual("ACTION_FAILED", raised.exception.code)
+        self.assertEqual(
+            [navigate, warmup, navigate], [call[1] for call in process.calls]
+        )
 
     async def test_log_capture_uses_fixed_bounded_logcat_arguments(self) -> None:
         logcat = (

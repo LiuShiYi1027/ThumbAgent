@@ -74,7 +74,8 @@ class GoalCompilerTests(unittest.TestCase):
         planner = CapturingFinishPlanner()
         with tempfile.TemporaryDirectory() as directory:
             runtime = RuntimeService(
-                adapter, ArtifactStore(Path(directory)), planner=planner
+                adapter, ArtifactStore(Path(directory)), planner=planner,
+                navigation_shortcuts_enabled=False,
             )
             status, payload = runtime.run_agent_task_sync(
                 "fake:android-001",

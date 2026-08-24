@@ -81,6 +81,8 @@ from mobile_agent.skills.app_lifecycle import (
     AppStopSkill,
 )
 from mobile_agent.skills.device_logs import DeviceLogsCollectSkill
+from mobile_agent.skills.app_navigation import AppNavigateSkill
+from mobile_agent.skills.notification_read import DeviceNotificationsReadSkill
 from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkill
 from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
 from mobile_agent.skills.local_data import LocalDataCleanupSkill
@@ -103,6 +105,7 @@ from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
 from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
+from mobile_agent.tools.notification_capture import DeviceNotificationsCaptureTool
 from mobile_agent.tools.performance_capture import DevicePerformanceCaptureTool
 from mobile_agent.tools.app_inventory import AppInventoryTool
 from mobile_agent.tools.apk_install import ApkInstallTool
@@ -140,6 +143,7 @@ class RuntimeService:
         local_data_cleanup_approval_store: LocalDataCleanupApprovalStore | None = None,
         artifact_retention_days: int = 7,
         wall_clock: Callable[[], float] = time.time,
+        navigation_shortcuts_enabled: bool = True,
     ) -> None:
         self._adapter = (
             adapter
@@ -232,6 +236,13 @@ class RuntimeService:
         )
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
+        self._app_navigate = AppNavigateSkill(self._tools)
+        self._notifications_tool = DeviceNotificationsCaptureTool(
+            self._adapter, artifacts, self._tool_registry, self._policy
+        )
+        self._notifications_read = DeviceNotificationsReadSkill(
+            self._notifications_tool
+        )
         self._tasks = TaskRunner(self._settings_scroll_navigate)
         self._agent_runner = AgentRunner(
             self._adapter,
@@ -239,6 +250,7 @@ class RuntimeService:
             planner or RuleBasedPlanner(),
             self._tools,
             self._settings_scroll_navigate,
+            navigation_shortcuts_enabled,
         )
         self._task_store = task_store or InMemoryTaskStore()
         self._agent_evaluator = AgentEvaluator()
@@ -1141,6 +1153,39 @@ class RuntimeService:
             return (
                 await self._settings_navigate.invoke(
                     device_id, target_selector, expected_selector, confirmed
+                )
+            ).to_dict()
+
+    async def navigate_app(self, device_id: str, target: str) -> dict[str, Any]:
+        """Navigate to one registered system page under Session and Lease."""
+
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id,
+            f"skill_{uuid.uuid4().hex}",
+            60.0,
+            session_id,
+        ), self._adapter.bind_session(device_id, session_id):
+            return (await self._app_navigate.invoke(device_id, target)).to_dict()
+
+    async def read_device_notifications(
+        self,
+        device_id: str,
+        max_notifications: int = 20,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Read one bounded notification snapshot under Session and Lease."""
+
+        session_id = await self._adapter.require_online_session(device_id)
+        with self._device_leases.hold(
+            device_id,
+            f"skill_{uuid.uuid4().hex}",
+            60.0,
+            session_id,
+        ), self._adapter.bind_session(device_id, session_id):
+            return (
+                await self._notifications_read.invoke(
+                    device_id, max_notifications, confirmed
                 )
             ).to_dict()
 
@@ -2075,6 +2120,35 @@ class RuntimeService:
         except MobileAgentError as error:
             return self._error_response(error)
 
+    def navigate_app_sync(
+        self, device_id: str, target: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for allowlisted system navigation."""
+
+        try:
+            result = asyncio.run(self.navigate_app(device_id, target))
+            return HTTPStatus.OK, {"result": result}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def read_device_notifications_sync(
+        self,
+        device_id: str,
+        max_notifications: int = 20,
+        confirmed: bool = False,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for the notifications read Skill."""
+
+        try:
+            result = asyncio.run(
+                self.read_device_notifications(
+                    device_id, max_notifications, confirmed
+                )
+            )
+            return HTTPStatus.OK, {"result": result}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
     def navigate_settings_sync(
         self,
         device_id: str,
@@ -2410,7 +2484,7 @@ class RuntimeService:
             status = HTTPStatus.NOT_FOUND
         elif error.code in {
             "INVALID_ARGUMENT", "APK_INVALID", "APK_PACKAGE_MISMATCH",
-            "APP_ALREADY_INSTALLED",
+            "APP_ALREADY_INSTALLED", "NAVIGATION_ACTION_UNKNOWN",
         }:
             status = HTTPStatus.BAD_REQUEST
         elif error.code in {

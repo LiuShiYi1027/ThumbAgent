@@ -15,6 +15,7 @@ class ArtifactKind(str, Enum):
     UI_TREE = "ui_tree"
     DEVICE_LOG = "device_log"
     DEVICE_PERFORMANCE = "device_performance"
+    DEVICE_NOTIFICATIONS = "device_notifications"
     DIAGNOSTIC_BUNDLE = "diagnostic_bundle"
 
 

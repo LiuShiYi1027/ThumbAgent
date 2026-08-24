@@ -17,6 +17,7 @@ from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
@@ -164,6 +165,16 @@ class SessionTrackingDeviceAdapter:
     async def launch_app(self, device_id: str, app_id: str) -> None:
         await self._validate_binding(device_id)
         await self._adapter.launch_app(device_id, app_id)
+
+    async def navigate_to(self, device_id: str, target: NavigationTarget) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.navigate_to(device_id, target)
+
+    async def read_notifications(
+        self, device_id: str
+    ) -> list[tuple[str, str | None, int | None]]:
+        await self._validate_binding(device_id)
+        return await self._adapter.read_notifications(device_id)
 
     async def press_back(self, device_id: str) -> None:
         await self._validate_binding(device_id)

@@ -23,7 +23,10 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.runtime = RuntimeService(
-            FakeDeviceAdapter(), ArtifactStore(Path(self.directory.name))
+            FakeDeviceAdapter(),
+            ArtifactStore(Path(self.directory.name)),
+            # 报告渲染用例断言 agent.round 步骤文本，关闭捷径保持循环路径。
+            navigation_shortcuts_enabled=False,
         )
 
     async def test_renders_confirmed_goal_spec(self) -> None:

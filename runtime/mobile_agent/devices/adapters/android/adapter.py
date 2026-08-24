@@ -16,6 +16,9 @@ from mobile_agent.devices.adapters.android.app_parser import (
     parse_package_stopped,
     valid_app_id,
 )
+from mobile_agent.devices.adapters.android.notification_parser import (
+    parse_notification_records,
+)
 from mobile_agent.devices.adapters.android.parser import (
     AdbDeviceRecord,
     extract_ui_xml,
@@ -31,6 +34,7 @@ from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import (
     DeviceState,
     ForegroundApp,
@@ -44,6 +48,26 @@ from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# The only Android actions app.navigate can reach. Callers never supply these
+# strings; they are fixed per NavigationTarget enum and carry no extras.
+_NAVIGATION_ACTIONS: dict[NavigationTarget, str] = {
+    NavigationTarget.SETTINGS_HOME: "android.settings.SETTINGS",
+    NavigationTarget.SETTINGS_WIFI: "android.settings.WIFI_SETTINGS",
+    NavigationTarget.SETTINGS_BLUETOOTH: "android.settings.BLUETOOTH_SETTINGS",
+    NavigationTarget.SETTINGS_WIRELESS: "android.settings.WIRELESS_SETTINGS",
+    NavigationTarget.SETTINGS_DISPLAY: "android.settings.DISPLAY_SETTINGS",
+    NavigationTarget.SETTINGS_SOUND: "android.settings.SOUND_SETTINGS",
+    NavigationTarget.SETTINGS_STORAGE: "android.settings.INTERNAL_STORAGE_SETTINGS",
+    NavigationTarget.SETTINGS_APPS: "android.settings.MANAGE_APPLICATIONS_SETTINGS",
+    NavigationTarget.SETTINGS_SECURITY: "android.settings.SECURITY_SETTINGS",
+    NavigationTarget.SETTINGS_LOCATION: "android.settings.LOCATION_SOURCE_SETTINGS",
+    NavigationTarget.SETTINGS_DATE: "android.settings.DATE_SETTINGS",
+    NavigationTarget.SETTINGS_LANGUAGE: "android.settings.LOCALE_SETTINGS",
+    NavigationTarget.SETTINGS_ACCESSIBILITY: "android.settings.ACCESSIBILITY_SETTINGS",
+    NavigationTarget.SETTINGS_ABOUT: "android.settings.DEVICE_INFO_SETTINGS",
+}
 
 
 class AndroidDeviceAdapter:
@@ -92,6 +116,8 @@ class AndroidDeviceAdapter:
                 "app.stop@1",
                 "app.data.clear@1",
                 "device.diagnostics.bundle@1",
+                "app.navigate@1",
+                "notifications.read@1",
             )
             os_version = await self._read_os_version(record.serial)
         return Device(
@@ -277,6 +303,99 @@ class AndroidDeviceAdapter:
                 "1",
             )
         self._require_success(result.returncode, "无法启动应用", result.stderr_text)
+
+    async def navigate_to(self, device_id: str, target: NavigationTarget) -> None:
+        """Open one registered system settings page using a fixed action."""
+
+        if not isinstance(target, NavigationTarget):
+            raise MobileAgentError(
+                code="INVALID_ARGUMENT",
+                category=ErrorCategory.VALIDATION,
+                message="导航目标必须是登记的 NavigationTarget 枚举",
+            )
+        action = _NAVIGATION_ACTIONS.get(target)
+        if action is None:
+            raise MobileAgentError(
+                code="CAPABILITY_UNAVAILABLE",
+                category=ErrorCategory.CAPABILITY,
+                message="当前平台不支持该导航目标",
+                details={"target": target.value},
+            )
+        serial = self._serial_from_device_id(device_id)
+        argv = (
+            "-s",
+            serial,
+            "shell",
+            "am",
+            "start",
+            "-W",
+            "-a",
+            action,
+            "-f",
+            "0x14000000",
+        )
+        result = await self._runner.run(*argv)
+        if result.returncode != 0:
+            # MagicOS 等 ROM 拒绝 shell 冷启动 Settings Action（error 102），
+            # 但允许 monkey LAUNCHER 预热进程；预热后有界重试一次原动作。
+            # 这不是盲重试：预热是确定性的状态变更，动作 argv 不变。
+            await self._warm_up_settings(serial)
+            result = await self._runner.run(*argv)
+        self._require_success(result.returncode, "无法打开目标系统页面", result.stderr_text)
+
+    async def _warm_up_settings(self, serial: str) -> None:
+        """Bring the Settings process alive via the launcher-category entry."""
+
+        result = await self._runner.run(
+            "-s",
+            serial,
+            "shell",
+            "monkey",
+            "-p",
+            "com.android.settings",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        )
+        self._require_success(result.returncode, "无法预热系统设置应用", result.stderr_text)
+
+    async def read_notifications(
+        self, device_id: str
+    ) -> list[tuple[str, str | None, int | None]]:
+        """Read one notification snapshot, parse it and discard the raw dump.
+
+        Bounding and privacy minimization for public output happen in the
+        owning Tool; the Adapter already drops every field except package,
+        platform-exposed title and post timestamp.
+        """
+
+        serial = self._serial_from_device_id(device_id)
+        result = await self._runner.run(
+            "-s", serial, "shell", "dumpsys", "notification"
+        )
+        if result.returncode != 0:
+            raise MobileAgentError(
+                code="NOTIFICATIONS_READ_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备通知读取失败",
+                retryable=True,
+                suggested_action="确认设备在线、调试授权有效后重试",
+            )
+        records = parse_notification_records(result.stdout_text)
+        if records is None:
+            raise MobileAgentError(
+                code="NOTIFICATIONS_READ_FAILED",
+                category=ErrorCategory.DEVICE,
+                message="设备通知输出格式无法识别",
+                suggested_action="记录设备型号与系统版本并更新解析样本",
+            )
+        if not records:
+            raise MobileAgentError(
+                code="NOTIFICATIONS_READ_EMPTY",
+                category=ErrorCategory.DEVICE,
+                message="设备当前没有活动通知",
+            )
+        return records
 
     async def press_back(self, device_id: str) -> None:
         await self._key_event(device_id, "4")

@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0.0",
+  "id": "app.navigate",
+  "version": "1.0.0",
+  "name": "Navigate to a registered system page",
+  "description": "Open one allowlisted Android system settings destination by enum id and verify the foreground page. Raw actions, components, URIs and extras are never accepted.",
+  "kind": "deterministic",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["device_id", "target"],
+    "properties": {
+      "device_id": { "type": "string", "minLength": 1 },
+      "target": {
+        "enum": [
+          "settings.home",
+          "settings.wifi",
+          "settings.bluetooth",
+          "settings.wireless",
+          "settings.display",
+          "settings.sound",
+          "settings.storage",
+          "settings.apps",
+          "settings.security",
+          "settings.location",
+          "settings.date",
+          "settings.language",
+          "settings.accessibility",
+          "settings.about"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "$ref": "../../../../contracts/schemas/app-navigation-result.schema.json"
+  },
+  "required_capabilities": ["app.navigate@1"],
+  "tool_allowlist": ["app.navigate"],
+  "risk": "low",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "foreground_page_matches"
+}

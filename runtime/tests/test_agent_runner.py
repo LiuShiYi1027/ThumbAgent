@@ -20,7 +20,7 @@ from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.artifact import ArtifactWriter
-from mobile_agent.domain.device import Device
+from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.observation import Observation
@@ -45,6 +45,7 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         runtime = RuntimeService(
             FakeDeviceAdapter(),
             ArtifactStore(Path(self.directory.name)),
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runtime.run_agent_task(
@@ -79,6 +80,74 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task["task_id"], stored["task_id"])
         self.assertEqual("agent.run", events[0]["payload"]["task_type"])
 
+    async def test_navigation_shortcut_completes_settings_goal_without_planner(self) -> None:
+        """导航类目标默认走 Runtime 捷径：一次 app.navigate 完成，不经 Planner。"""
+        runtime = RuntimeService(
+            FakeDeviceAdapter(),
+            ArtifactStore(Path(self.directory.name)),
+        )
+
+        task = await runtime.run_agent_task(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+        )
+
+        self.assertEqual("succeeded", task["status"])
+        self.assertEqual("runtime_shortcut", task["completion_source"])
+        self.assertEqual(1, len(task["steps"]))
+        step = task["steps"][0]
+        self.assertEqual("agent_round", step["kind"])
+        self.assertEqual("agent.shortcut", step["name"])
+        self.assertEqual("app.navigate", step["result"]["skill_id"])
+        self.assertEqual("runtime_shortcut", task["evidence_summary"]["planner_id"])
+        self.assertEqual("settings.display", task["evidence_summary"]["shortcut"])
+        self.assertEqual(
+            "com.android.settings",
+            task["evidence_summary"]["final_foreground_app"]["app_id"],
+        )
+
+    async def test_navigation_shortcut_falls_back_when_capability_missing(self) -> None:
+        """设备缺少 app.navigate 能力时降级回 Planner 循环，而不是直接失败。"""
+        adapter = FakeDeviceAdapter(
+            devices=[
+                Device(
+                    device_id="fake:android-001",
+                    platform=Platform.ANDROID,
+                    name="Fake Android Device",
+                    model="fake_android",
+                    os_version="15",
+                    connection=ConnectionState.ONLINE,
+                    capabilities=(
+                        "device.inspect@1",
+                        "screen.observe@1",
+                        "app.launch@1",
+                        "navigation.back@1",
+                        "navigation.home@1",
+                        "input.tap@1",
+                        "input.swipe@1",
+                    ),
+                )
+            ]
+        )
+        runtime = RuntimeService(
+            adapter,
+            ArtifactStore(Path(self.directory.name)),
+        )
+
+        task = await runtime.run_agent_task(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+        )
+
+        self.assertEqual("succeeded", task["status"])
+        self.assertEqual("rule_based.preview", task["evidence_summary"]["planner_id"])
+        self.assertEqual(3, len(task["steps"]))
+        self.assertFalse(
+            any(action[0] == "app.navigate" for action in adapter.actions)
+        )
+
     async def test_agent_run_returns_failed_task_for_unsupported_goal(self) -> None:
         runtime = RuntimeService(
             FakeDeviceAdapter(),
@@ -87,7 +156,7 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         task = await runtime.run_agent_task(
             "fake:android-001",
-            "打开 Wi-Fi 设置",
+            "帮我点一杯咖啡",
             confirmed=True,
         )
 
@@ -106,6 +175,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             UnsafePlanner(),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -129,6 +200,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             MockLLMPlanner(valid_llm_payload()),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -156,6 +229,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             MockLLMPlanner({"decision_type": "run_skill", "skill_id": "settings.scroll_navigate"}),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -186,6 +261,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -213,6 +290,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             MockLLMPlanner(payload),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -355,6 +434,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run("fake:android-001", "open display settings", confirmed=True)
@@ -394,6 +475,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run("fake:android-001", "open display settings", confirmed=True)
@@ -463,6 +546,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -523,6 +608,7 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             adapter,
             ArtifactStore(Path(self.directory.name)),
             planner=planner,
+            navigation_shortcuts_enabled=False,
         )
         acceptance = {
             "foreground_app_id": "com.android.settings",
@@ -575,6 +661,7 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
                     "reason": "The model believes the goal is complete.",
                 }
             ),
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runtime.run_agent_task(
@@ -616,6 +703,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
         task = await runner.run(
@@ -662,6 +751,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             MockLLMPlanner(valid_llm_payload()),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
         observation = await adapter.observe("fake:android-001", artifacts)
 
@@ -783,6 +874,8 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             RuleBasedPlanner(),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
         )
 
     async def test_observe_retry_succeeds_after_transient_ui_tree_failure(self) -> None:

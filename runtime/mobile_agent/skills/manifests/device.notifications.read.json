@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "id": "device.notifications.read",
+  "version": "1.0.0",
+  "name": "Read bounded device notifications",
+  "description": "Read a bounded, privacy-minimized notification snapshot (package, truncated title, timestamp), persist it as a local Artifact and return a reference without notification body content.",
+  "kind": "deterministic",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["device_id", "confirmed"],
+    "properties": {
+      "device_id": { "type": "string", "minLength": 1 },
+      "max_notifications": { "type": "integer", "minimum": 1, "maximum": 50 },
+      "confirmed": { "type": "boolean" }
+    }
+  },
+  "output_schema": {
+    "$ref": "../../../../contracts/schemas/device-notifications-result.schema.json"
+  },
+  "required_capabilities": ["notifications.read@1"],
+  "tool_allowlist": ["device.notifications.capture"],
+  "risk": "medium",
+  "timeout_seconds": 30,
+  "max_steps": 1,
+  "verification": "bounded_minimized_artifact"
+}

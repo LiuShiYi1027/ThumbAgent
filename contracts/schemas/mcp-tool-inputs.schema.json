@@ -125,6 +125,46 @@
         "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800, "default": 60 }
       }
     },
+    "app_navigate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "target"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "target": {
+          "enum": [
+            "settings.home",
+            "settings.wifi",
+            "settings.bluetooth",
+            "settings.wireless",
+            "settings.display",
+            "settings.sound",
+            "settings.storage",
+            "settings.apps",
+            "settings.security",
+            "settings.location",
+            "settings.date",
+            "settings.language",
+            "settings.accessibility",
+            "settings.about"
+          ],
+          "description": "Registered system navigation target. Raw actions, components, URIs and extras are never accepted."
+        }
+      }
+    },
+    "notifications_read": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "confirmed"],
+      "properties": {
+        "device_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "max_notifications": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 },
+        "confirmed": {
+          "const": true,
+          "description": "The MCP host must explain that a bounded notification snapshot (package, truncated title, timestamp) will be read locally, then obtain explicit user confirmation."
+        }
+      }
+    },
     "app_stop": {
       "type": "object",
       "additionalProperties": false,

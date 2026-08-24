@@ -46,7 +46,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual({"tools": {"listChanged": False}}, initialize["result"]["capabilities"])
         self.assertEqual(-32002, between["error"]["code"])
         self.assertIsNone(notification)
-        self.assertEqual(26, len(after["result"]["tools"]))
+        self.assertEqual(28, len(after["result"]["tools"]))
 
     def test_negotiates_supported_older_version_and_falls_back_for_unknown(self) -> None:
         older = McpServer(self.client).handle(
@@ -86,7 +86,7 @@ class McpServerTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(26, len(response["result"]["tools"]))
+        self.assertEqual(28, len(response["result"]["tools"]))
 
     def test_lists_only_goal_level_tools_with_annotations(self) -> None:
         _ready(self.server)

@@ -13,6 +13,7 @@ from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import (
     DeviceState,
     ForegroundApp,
@@ -102,6 +103,8 @@ class FakeDeviceAdapter:
                     "app.stop@1",
                     "app.data.clear@1",
                     "device.diagnostics.bundle@1",
+                    "app.navigate@1",
+                    "notifications.read@1",
                 ),
             )
         ]
@@ -151,6 +154,37 @@ class FakeDeviceAdapter:
         self.actions.append(("app.launch", device_id, app_id))
         self._running_apps.add(app_id)
         self._stopped_apps.discard(app_id)
+
+    _FAKE_NAVIGATION_ACTIVITIES: dict[NavigationTarget, str] = {
+        NavigationTarget.SETTINGS_HOME: ".Settings",
+        NavigationTarget.SETTINGS_WIFI: ".Settings$WifiSettingsActivity",
+        NavigationTarget.SETTINGS_BLUETOOTH: ".Settings$BluetoothSettingsActivity",
+        NavigationTarget.SETTINGS_WIRELESS: ".Settings$WirelessSettings",
+        NavigationTarget.SETTINGS_DISPLAY: ".Settings$DisplaySettingsActivity",
+        NavigationTarget.SETTINGS_SOUND: ".Settings$SoundSettingsActivity",
+        NavigationTarget.SETTINGS_STORAGE: ".Settings$StorageSettingsActivity",
+        NavigationTarget.SETTINGS_APPS: ".Settings$ManageApplicationsActivity",
+        NavigationTarget.SETTINGS_SECURITY: ".Settings$SecuritySettingsActivity",
+        NavigationTarget.SETTINGS_LOCATION: ".Settings$LocationSettingsActivity",
+        NavigationTarget.SETTINGS_DATE: ".Settings$DateTimeSettingsActivity",
+        NavigationTarget.SETTINGS_LANGUAGE: ".Settings$LocalePickerActivity",
+        NavigationTarget.SETTINGS_ACCESSIBILITY: ".Settings$AccessibilitySettingsActivity",
+        NavigationTarget.SETTINGS_ABOUT: ".Settings$DeviceInfoSettingsActivity",
+    }
+
+    async def navigate_to(self, device_id: str, target: NavigationTarget) -> None:
+        self.actions.append(("app.navigate", device_id, target.value))
+        self.foreground_app = "com.android.settings"
+        self.foreground_activity = self._FAKE_NAVIGATION_ACTIVITIES[target]
+
+    async def read_notifications(
+        self, device_id: str
+    ) -> list[tuple[str, str | None, int | None]]:
+        self.actions.append(("device.notifications.capture", device_id))
+        return [
+            ("com.android.systemui", "USB debugging connected", 1752300000000),
+            ("com.example.fake", None, None),
+        ]
 
     async def press_back(self, device_id: str) -> None:
         self.actions.append(("navigation.back", device_id))

@@ -159,7 +159,11 @@ class DeviceLeaseDeadlineTests(unittest.TestCase):
 
     def test_deadline_after_verified_action_keeps_step_evidence_and_stops(self) -> None:
         adapter = FakeDeviceAdapter()
-        runtime = RuntimeService(adapter, ArtifactStore(self.root / "artifacts"))
+        runtime = RuntimeService(
+            adapter,
+            ArtifactStore(self.root / "artifacts"),
+            navigation_shortcuts_enabled=False,
+        )
         checks = iter((False, False, False, True))
 
         task = asyncio.run(
@@ -203,6 +207,7 @@ class DeviceLeaseDeadlineTests(unittest.TestCase):
             ArtifactStore(self.root / "artifacts"),
             device_lease_manager=manager,
             monotonic_clock=lambda: clock[0],
+            navigation_shortcuts_enabled=False,
         )
 
         status, payload = runtime.run_agent_task_sync(
@@ -229,6 +234,7 @@ class DeviceLeaseDeadlineTests(unittest.TestCase):
             ArtifactStore(self.root / "artifacts"),
             task_execution_store=store,
             device_lease_manager=manager,
+            navigation_shortcuts_enabled=False,
         )
         _, payload = runtime.submit_agent_task_sync(
             "fake:android-001",

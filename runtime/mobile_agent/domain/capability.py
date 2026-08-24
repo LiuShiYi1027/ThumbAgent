@@ -192,6 +192,28 @@ class CapabilityCatalog:
                     "诊断包最大 24 MiB，不上传或内联证据内容",
                 ),
             ),
+            CapabilityDefinition(
+                "app.navigate@1",
+                RiskLevel.LOW,
+                Idempotency.CONDITIONAL,
+                CapabilityVerification.REQUIRED,
+                ("设备在线",),
+                (
+                    "仅支持已登记的系统页面枚举，不接受任意 Action、URI 或参数",
+                    "执行后必须验证前台页面，验证不符即失败，不自动重试",
+                ),
+            ),
+            CapabilityDefinition(
+                "notifications.read@1",
+                RiskLevel.MEDIUM,
+                Idempotency.SAFE,
+                CapabilityVerification.SUPPORTED,
+                ("设备在线且已授权调试", "用户明确确认"),
+                (
+                    "仅返回包名、截断标题与时间戳的有界快照，单次最多 50 条",
+                    "通知正文与原始平台输出不进入公共响应",
+                ),
+            ),
         )
         self._definitions = {
             definition.capability: definition for definition in definitions

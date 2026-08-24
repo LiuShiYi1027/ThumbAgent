@@ -219,6 +219,12 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         device_performance_match = re.fullmatch(
             r"/v1/skills/device\.performance\.snapshot/invoke", self.path
         )
+        app_navigate_match = re.fullmatch(
+            r"/v1/skills/app\.navigate/invoke", self.path
+        )
+        notifications_read_match = re.fullmatch(
+            r"/v1/skills/device\.notifications\.read/invoke", self.path
+        )
         navigation_match = re.fullmatch(r"/v1/skills/settings\.navigate/invoke", self.path)
         scroll_navigation_match = re.fullmatch(
             r"/v1/skills/settings\.scroll_navigate/invoke", self.path
@@ -616,6 +622,33 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("device performance fields")
                 status, payload = self._runtime().capture_device_performance_sync(
                     device_id
+                )
+            elif app_navigate_match:
+                if not set(body).issubset({"device_id", "target"}):
+                    raise ValueError("app navigate fields")
+                target = body.get("target")
+                if not isinstance(target, str):
+                    raise ValueError("target")
+                status, payload = self._runtime().navigate_app_sync(
+                    device_id, target
+                )
+            elif notifications_read_match:
+                if not set(body).issubset(
+                    {"device_id", "max_notifications", "confirmed"}
+                ):
+                    raise ValueError("notifications read fields")
+                max_notifications = body.get("max_notifications", 20)
+                confirmed = body.get("confirmed", False)
+                if (
+                    not isinstance(max_notifications, int)
+                    or isinstance(max_notifications, bool)
+                    or max_notifications < 1
+                    or max_notifications > 50
+                    or not isinstance(confirmed, bool)
+                ):
+                    raise ValueError("notifications read arguments")
+                status, payload = self._runtime().read_device_notifications_sync(
+                    device_id, max_notifications, confirmed
                 )
             elif async_device_performance_match:
                 if not set(body).issubset({"device_id", "deadline_seconds"}):

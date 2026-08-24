@@ -7,7 +7,7 @@
 export interface Artifact {
   schema_version: "1.0.0";
   artifact_id: string;
-  kind: "screenshot" | "ui_tree" | "device_log" | "device_performance" | "diagnostic_bundle";
+  kind: "screenshot" | "ui_tree" | "device_log" | "device_performance" | "device_notifications" | "diagnostic_bundle";
   content_type: "image/png" | "application/xml" | "text/plain" | "application/json" | "application/zip";
   relative_path: string;
   size_bytes: number;

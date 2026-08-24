@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/device-notifications-result/v1.json",
+  "title": "Device Notifications Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_call_id",
+    "skill_id",
+    "skill_version",
+    "device_id",
+    "success",
+    "status",
+    "verification",
+    "source",
+    "requested_max_notifications",
+    "notifications",
+    "total_matched",
+    "truncated",
+    "evidence_refs",
+    "artifact",
+    "started_at",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "device.notifications.read" },
+    "skill_version": { "const": "1.0.0" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "success": { "const": true },
+    "status": { "const": "succeeded" },
+    "verification": { "const": "verified" },
+    "source": { "const": "android_notification_service" },
+    "requested_max_notifications": { "type": "integer", "minimum": 1, "maximum": 50 },
+    "notifications": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["package", "title", "posted_at"],
+        "properties": {
+          "package": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "title": { "type": ["string", "null"], "maxLength": 32 },
+          "posted_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    },
+    "total_matched": { "type": "integer", "minimum": 1 },
+    "truncated": { "type": "boolean" },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" }
+    },
+    "artifact": { "$ref": "artifact.schema.json" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  }
+}

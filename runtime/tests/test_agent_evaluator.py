@@ -20,7 +20,10 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.runtime = RuntimeService(
-            FakeDeviceAdapter(), ArtifactStore(Path(self.directory.name))
+            FakeDeviceAdapter(),
+            ArtifactStore(Path(self.directory.name)),
+            # 评估器用例依赖 Observe-Plan-Act 循环产出的任务结构，关闭捷径。
+            navigation_shortcuts_enabled=False,
         )
 
     async def test_live_task_passes_independent_goal_acceptance(self) -> None:

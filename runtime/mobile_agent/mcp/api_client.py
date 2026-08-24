@@ -191,6 +191,27 @@ class RuntimeApiClient:
             idempotent_submission=True,
         )
 
+    def navigate_to_system_page(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/skills/app.navigate/invoke",
+            {
+                "device_id": arguments["device_id"],
+                "target": arguments["target"],
+            },
+        )
+
+    def read_notifications(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/skills/device.notifications.read/invoke",
+            {
+                "device_id": arguments["device_id"],
+                "max_notifications": arguments.get("max_notifications", 20),
+                "confirmed": arguments["confirmed"],
+            },
+        )
+
     def compare_performance(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/performance-comparisons", arguments)
 

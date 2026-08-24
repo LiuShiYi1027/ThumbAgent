@@ -286,6 +286,12 @@ class McpServer:
             ),
             "mobile_cancel_task": lambda: self._client.cancel_task(arguments["task_id"]),
             "mobile_collect_device_logs": lambda: self._client.collect_logs(arguments),
+            "mobile_navigate_to_system_page": lambda: (
+                self._client.navigate_to_system_page(arguments)
+            ),
+            "mobile_read_device_notifications": lambda: (
+                self._client.read_notifications(arguments)
+            ),
             "mobile_capture_device_performance": lambda: self._client.capture_performance(
                 arguments
             ),

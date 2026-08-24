@@ -24,6 +24,8 @@ from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.task import TaskRun, TaskStatus, TaskStep
 from mobile_agent.evaluation import AgentGoalAcceptance
 from mobile_agent.evidence.artifacts import ArtifactStore
+from mobile_agent.agent.shortcuts import match_navigation_shortcut
+from mobile_agent.skills.app_navigation import AppNavigateSkill
 from mobile_agent.skills.settings_navigate import SettingsScrollNavigateSkill
 from mobile_agent.tools.runtime import ToolRuntime
 from mobile_agent.ui.locator import UiLocator
@@ -42,6 +44,7 @@ class AgentRunner:
     _ALLOWED_TOOLS = frozenset(
         {
             "app.launch",
+            "app.navigate",
             "input.tap_element",
             "input.swipe",
             "navigation.back",
@@ -62,12 +65,16 @@ class AgentRunner:
         planner: Planner,
         tools: ToolRuntime,
         settings_scroll_navigate: SettingsScrollNavigateSkill,
+        navigation_shortcuts_enabled: bool = True,
     ) -> None:
         self._adapter = adapter
         self._artifacts = artifacts
         self._planner = planner
         self._tools = tools
         self._settings_scroll_navigate = settings_scroll_navigate
+        # 系统设置直达捷径默认开启；测试 Planner 决策循环时显式关闭，
+        # 避免导航类目标在进入循环前被 Runtime 捷径接管。
+        self._navigation_shortcuts_enabled = navigation_shortcuts_enabled
         self._parser = UiHierarchyParser()
         self._locator = UiLocator()
 
@@ -120,6 +127,72 @@ class AgentRunner:
         last_completed_summary: AgentObservationSummary | None = None
         last_completed_decision: AgentDecision | None = None
         try:
+            shortcut = (
+                match_navigation_shortcut(planner_goal)
+                if self._navigation_shortcuts_enabled
+                else None
+            )
+            if shortcut is not None:
+                # 捷径同样是设备动作，必须先过取消/截止检查，不能绕过守卫。
+                self._raise_if_stopped(cancellation_requested, deadline_exceeded)
+                shortcut_step_started_at = _now()
+                shortcut_step_id = f"step_{uuid.uuid4().hex}"
+                try:
+                    navigation = await AppNavigateSkill(self._tools).invoke(
+                        device_id, shortcut.value
+                    )
+                except MobileAgentError as error:
+                    if error.code != "CAPABILITY_UNAVAILABLE":
+                        raise
+                    navigation = None
+                if navigation is not None:
+                    verified_node = None
+                    if acceptance is not None:
+                        verification_observation = await self._adapter.observe(
+                            device_id, self._artifacts
+                        )
+                        verified = self._verify_goal_acceptance(
+                            verification_observation, acceptance
+                        )
+                        verified_node = verified.to_dict() if verified else None
+                    completed_at = _now()
+                    shortcut_step = TaskStep(
+                        step_id=shortcut_step_id,
+                        sequence=1,
+                        kind="agent_round",
+                        name="agent.shortcut",
+                        status=TaskStatus.SUCCEEDED,
+                        started_at=shortcut_step_started_at,
+                        completed_at=completed_at,
+                        result=navigation.to_dict(),
+                        error=None,
+                    )
+                    if on_step is not None:
+                        on_step(shortcut_step)
+                    return TaskRun(
+                        task_id=task_id,
+                        task_type="agent.run",
+                        device_id=device_id,
+                        goal=goal,
+                        status=TaskStatus.SUCCEEDED,
+                        started_at=task_started_at,
+                        completed_at=completed_at,
+                        steps=(shortcut_step,),
+                        evidence_summary={
+                            "rounds": 0,
+                            "planner_id": "runtime_shortcut",
+                            "shortcut": shortcut.value,
+                            "final_foreground_app": {
+                                "app_id": navigation.foreground_app_id,
+                                "activity": navigation.foreground_activity,
+                            },
+                            "verified_node": verified_node,
+                        },
+                        goal_spec=goal_spec,
+                        goal_acceptance=acceptance_payload,
+                        completion_source="runtime_shortcut",
+                        deadline_seconds=deadline_seconds,
+                    )
             for round_index in range(1, max_rounds + 1):
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
                 step_started_at = _now()

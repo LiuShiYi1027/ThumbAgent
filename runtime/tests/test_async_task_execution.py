@@ -59,6 +59,7 @@ class AsyncTaskExecutionTests(unittest.TestCase):
             FakeDeviceAdapter(),
             ArtifactStore(self.root / "artifacts"),
             task_execution_store=store,
+            navigation_shortcuts_enabled=False,
         )
 
         status, payload = runtime.submit_agent_task_sync(
@@ -95,6 +96,7 @@ class AsyncTaskExecutionTests(unittest.TestCase):
             FakeDeviceAdapter(),
             artifacts,
             task_execution_store=store,
+            navigation_shortcuts_enabled=False,
         )
 
         status, payload = runtime.submit_agent_task_sync(

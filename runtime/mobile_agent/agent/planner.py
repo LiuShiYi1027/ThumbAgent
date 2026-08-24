@@ -9,7 +9,10 @@ from enum import Enum
 from typing import Any, Protocol
 
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.ui.model import UiSelector
+
+_NAVIGATION_TARGET_IDS = frozenset(target.value for target in NavigationTarget)
 
 
 class AgentDecisionType(str, Enum):
@@ -318,6 +321,14 @@ def validate_agent_tool_arguments(tool_id: str, arguments: dict[str, Any]) -> No
             r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+", app_id
         ):
             raise _tool_arguments_invalid(tool_id, arguments, "app_id 必须是有效应用标识")
+        return
+    if tool_id == "app.navigate":
+        _require_argument_keys(tool_id, arguments, {"target"}, {"target"})
+        target = arguments.get("target")
+        if not isinstance(target, str) or target not in _NAVIGATION_TARGET_IDS:
+            raise _tool_arguments_invalid(
+                tool_id, arguments, "target 必须是已登记的导航枚举 ID"
+            )
         return
     if tool_id == "input.tap_element":
         _require_argument_keys(tool_id, arguments, {"selector"}, {"selector"})

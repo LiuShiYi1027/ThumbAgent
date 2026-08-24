@@ -17,7 +17,7 @@
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "artifact_id": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" },
-    "kind": { "enum": ["screenshot", "ui_tree", "device_log", "device_performance", "diagnostic_bundle"] },
+    "kind": { "enum": ["screenshot", "ui_tree", "device_log", "device_performance", "device_notifications", "diagnostic_bundle"] },
     "content_type": { "enum": ["image/png", "application/xml", "text/plain", "application/json", "application/zip"] },
     "relative_path": { "type": "string", "minLength": 1 },
     "size_bytes": { "type": "integer", "minimum": 1 },

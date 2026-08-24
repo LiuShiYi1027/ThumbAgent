@@ -10,6 +10,7 @@ from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import Device
 from mobile_agent.domain.device_log import DeviceLogLevel
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
@@ -26,6 +27,16 @@ class DeviceAdapter(Protocol):
         ...
 
     async def launch_app(self, device_id: str, app_id: str) -> None: ...
+
+    async def navigate_to(self, device_id: str, target: NavigationTarget) -> None:
+        """Open one registered system navigation target using fixed arguments."""
+        ...
+
+    async def read_notifications(
+        self, device_id: str
+    ) -> list[tuple[str, str | None, int | None]]:
+        """Return one parsed notification snapshot as (package, title, posted_epoch_ms)."""
+        ...
 
     async def press_back(self, device_id: str) -> None: ...
 

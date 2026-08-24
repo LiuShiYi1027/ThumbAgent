@@ -21,6 +21,11 @@ from mobile_agent.domain.action import (
 from mobile_agent.domain.capability import CapabilityCatalog
 from mobile_agent.domain.device import ConnectionState
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import (
+    NAVIGATION_TARGETS,
+    navigation_target_matches,
+    parse_navigation_target,
+)
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.ui.locator import UiLocator
@@ -68,6 +73,7 @@ class ToolRegistry:
 
         definitions = (
             definition("app.launch", "app.launch@1"),
+            definition("app.navigate", "app.navigate@1"),
             definition("navigation.back", "navigation.back@1"),
             definition("navigation.home", "navigation.home@1"),
             definition("input.tap", "input.tap@1"),
@@ -96,6 +102,11 @@ class ToolRegistry:
             definition(
                 "device.diagnostics.bundle",
                 "device.diagnostics.bundle@1",
+                direct_invocation=False,
+            ),
+            definition(
+                "device.notifications.capture",
+                "notifications.read@1",
                 direct_invocation=False,
             ),
             ToolDefinition(
@@ -151,6 +162,7 @@ class ToolRuntime:
                 "device.performance.capture": "device.performance.snapshot",
                 "app.list": "app.list",
                 "app.inspect": "app.inspect",
+                "device.notifications.capture": "device.notifications.read",
             }.get(tool_id, "对应的目标级 Skill")
             raise MobileAgentError(
                 code="TOOL_REQUIRES_SKILL",
@@ -186,7 +198,7 @@ class ToolRuntime:
         before = await self._adapter.observe(device_id, self._artifacts)
         ui_match = await self._dispatch(tool_id, device_id, arguments, before)
         after = await self._adapter.observe(device_id, self._artifacts)
-        verification = self._verify(tool_id, arguments, after.foreground_app.app_id)
+        verification = self._verify(tool_id, arguments, after)
         status = (
             ActionStatus.SUCCEEDED
             if verification is not VerificationStatus.NOT_VERIFIED
@@ -213,6 +225,10 @@ class ToolRuntime:
             if not isinstance(app_id, str) or not app_id:
                 self._invalid_argument("app_id")
             await self._adapter.launch_app(device_id, app_id)
+            return None
+        if tool_id == "app.navigate":
+            target = parse_navigation_target(arguments.get("target"))
+            await self._adapter.navigate_to(device_id, target)
             return None
         if tool_id == "navigation.back":
             await self._adapter.press_back(device_id)
@@ -395,11 +411,22 @@ class ToolRuntime:
         )
 
     @staticmethod
-    def _verify(tool_id: str, arguments: dict[str, Any], foreground_app: str) -> VerificationStatus:
+    def _verify(tool_id: str, arguments: dict[str, Any], after: Any) -> VerificationStatus:
         if tool_id == "app.launch":
             return (
                 VerificationStatus.VERIFIED
-                if foreground_app == arguments.get("app_id")
+                if after.foreground_app.app_id == arguments.get("app_id")
+                else VerificationStatus.NOT_VERIFIED
+            )
+        if tool_id == "app.navigate":
+            spec = NAVIGATION_TARGETS[parse_navigation_target(arguments.get("target"))]
+            return (
+                VerificationStatus.VERIFIED
+                if navigation_target_matches(
+                    spec,
+                    after.foreground_app.app_id,
+                    after.foreground_app.activity,
+                )
                 else VerificationStatus.NOT_VERIFIED
             )
         return VerificationStatus.INCONCLUSIVE

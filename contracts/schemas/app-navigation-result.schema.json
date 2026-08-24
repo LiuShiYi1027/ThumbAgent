@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/app-navigation-result/v1.json",
+  "title": "App Navigation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_call_id",
+    "skill_id",
+    "skill_version",
+    "device_id",
+    "success",
+    "status",
+    "verification",
+    "target",
+    "label",
+    "foreground_app",
+    "evidence_refs",
+    "started_at",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "skill_call_id": { "type": "string", "pattern": "^skillcall_[a-f0-9]{32}$" },
+    "skill_id": { "const": "app.navigate" },
+    "skill_version": { "const": "1.0.0" },
+    "device_id": { "type": "string", "minLength": 1 },
+    "success": { "const": true },
+    "status": { "const": "succeeded" },
+    "verification": { "const": "verified" },
+    "target": {
+      "enum": [
+        "settings.home",
+        "settings.wifi",
+        "settings.bluetooth",
+        "settings.wireless",
+        "settings.display",
+        "settings.sound",
+        "settings.storage",
+        "settings.apps",
+        "settings.security",
+        "settings.location",
+        "settings.date",
+        "settings.language",
+        "settings.accessibility",
+        "settings.about"
+      ]
+    },
+    "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "foreground_app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_id", "activity"],
+      "properties": {
+        "app_id": { "type": "string", "minLength": 1 },
+        "activity": { "type": "string" }
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" }
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" }
+  }
+}

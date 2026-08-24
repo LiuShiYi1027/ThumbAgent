@@ -229,6 +229,22 @@ TOOLS = (
         False,
     ),
     McpToolDefinition(
+        "mobile_navigate_to_system_page",
+        "Navigate to system page",
+        "Open one registered Android system settings destination by enum id and verify the foreground page. Only allowlisted targets are accepted; raw actions, components, URIs and extras are never forwarded.",
+        "app_navigate",
+        False,
+        True,
+    ),
+    McpToolDefinition(
+        "mobile_read_device_notifications",
+        "Read device notifications",
+        "Read one bounded, privacy-minimized notification snapshot (package, truncated title, timestamp). The MCP host must explain the read scope and obtain explicit user confirmation before confirmed=true. Never returns notification body text.",
+        "notifications_read",
+        True,
+        True,
+    ),
+    McpToolDefinition(
         "mobile_capture_device_performance",
         "Capture device performance",
         "Submit a privacy-minimized aggregate CPU, memory, battery and load snapshot. Returns task_id and never raw dumpsys output.",

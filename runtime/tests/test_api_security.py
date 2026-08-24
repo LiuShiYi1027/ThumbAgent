@@ -357,7 +357,7 @@ class ApiSecurityTests(unittest.TestCase):
             "fake:android-001",
             payload["inspection"]["availability"]["device"]["device_id"],
         )
-        self.assertEqual(17, len(payload["inspection"]["capabilities"]))
+        self.assertEqual(19, len(payload["inspection"]["capabilities"]))
 
     def test_get_app_inventory_is_bounded_and_supports_prefix(self) -> None:
         with TemporaryDirectory() as directory:
@@ -654,7 +654,9 @@ class ApiSecurityTests(unittest.TestCase):
     def test_post_agent_run_accepts_runtime_owned_acceptance(self) -> None:
         with TemporaryDirectory() as directory:
             runtime = RuntimeService(
-                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+                FakeDeviceAdapter(),
+                ArtifactStore(Path(directory)),
+                navigation_shortcuts_enabled=False,
             )
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/tasks/agent.run"

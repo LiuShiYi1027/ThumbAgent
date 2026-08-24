@@ -15,7 +15,7 @@
     "goal_spec": { "$ref": "agent-goal-spec.schema.json" },
     "goal_acceptance": { "$ref": "agent-goal-acceptance.schema.json" },
     "completion_source": {
-      "enum": ["planner_finish", "runtime_acceptance", "skill_result"]
+      "enum": ["planner_finish", "runtime_acceptance", "skill_result", "runtime_shortcut"]
     },
     "status": { "enum": ["succeeded", "failed", "cancelled", "timed_out"] },
     "deadline_seconds": { "type": "number", "minimum": 1, "maximum": 1800 },
@@ -32,7 +32,7 @@
           "step_id": { "type": "string", "pattern": "^step_[a-f0-9]{32}$" },
           "sequence": { "type": "integer", "minimum": 1 },
           "kind": { "enum": ["skill", "agent_round", "diagnostic"] },
-          "name": { "enum": ["settings.scroll_navigate", "agent.round", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup"] },
+          "name": { "enum": ["settings.scroll_navigate", "agent.round", "agent.shortcut", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup"] },
           "status": { "enum": ["succeeded", "failed"] },
           "started_at": { "type": "string", "format": "date-time" },
           "completed_at": { "type": "string", "format": "date-time" },
@@ -40,6 +40,7 @@
             "oneOf": [
               { "$ref": "navigation-result.schema.json" },
               { "$ref": "agent-step-result.schema.json" },
+              { "$ref": "app-navigation-result.schema.json" },
               { "$ref": "device-log-capture-result.schema.json" },
               { "$ref": "device-performance-snapshot-result.schema.json" },
               { "$ref": "diagnostic-bundle-result.schema.json" },

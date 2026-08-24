@@ -11,6 +11,7 @@ from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.device import Device
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.performance import DevicePerformanceSnapshot
 
@@ -31,6 +32,14 @@ class UnavailableDeviceAdapter:
         self._raise()
 
     async def launch_app(self, device_id: str, app_id: str) -> None:
+        self._raise()
+
+    async def navigate_to(self, device_id: str, target: NavigationTarget) -> None:
+        self._raise()
+
+    async def read_notifications(
+        self, device_id: str
+    ) -> list[tuple[str, str | None, int | None]]:
         self._raise()
 
     async def press_back(self, device_id: str) -> None:
