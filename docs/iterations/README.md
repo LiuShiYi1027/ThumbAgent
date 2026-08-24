@@ -1,7 +1,7 @@
 # 迭代索引
 
 > 状态：Active
-> 更新日期：2026-08-02
+> 更新日期：2026-08-24
 
 | 迭代 | 名称 | 状态 | 目标 |
 | --- | --- | --- | --- |
@@ -62,6 +62,7 @@
 | [ITER-0055](./0055-desktop-ui-redesign/plan.md) | Desktop UI Visual Redesign | Completed | 桌面工作台整体视觉重设计：设计 tokens、卡片海拔、手机框设备画面、统一控件语言 |
 | [ITER-0056](./0056-desktop-mono-theme/plan.md) | Desktop Mono Brand Theme | Completed | 桌面 mono 编辑风品牌主题：奶油纸底、墨框硬阴影、印章徽章与按压按钮（方向稿 3c 落地） |
 | [ITER-0057](./0057-distribution-pipeline/plan.md) | Distribution Pipeline | Completed | macOS 分发流水线：Developer ID 签名（hardened runtime + 最小 entitlements）、公证脚本、tag 触发的 Release 自动发布与操作手册 |
+| [ITER-0058](./0058-programmatic-navigation/plan.md) | Programmatic Navigation & Notification Read | Completed | 混合动作空间第一波：枚举制系统设置直达与有界脱敏通知读取 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。
