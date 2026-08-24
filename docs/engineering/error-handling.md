@@ -83,6 +83,10 @@ APP_STOP_NOT_VERIFIED
 APP_DATA_CLEAR_FAILED
 APP_DATA_CLEAR_NOT_VERIFIED
 APP_STATE_INSPECTION_FAILED
+NAVIGATION_ACTION_UNKNOWN
+NAVIGATION_NOT_VERIFIED
+NOTIFICATIONS_READ_FAILED
+NOTIFICATIONS_READ_EMPTY
 MODEL_UNAVAILABLE
 MODEL_OUTPUT_INVALID
 NO_PROGRESS
@@ -205,6 +209,13 @@ APK 安装 Prepare 使用 `APK_INVALID`、`APK_PACKAGE_MISMATCH`、`APP_ALREADY_
 过期、被其他请求使用或确认后版本变化使用 `APPROVAL_INVALID`。ADB 明确拒绝卸载使用
 `APP_UNINSTALL_FAILED`，命令完成但包仍存在使用 `APP_UNINSTALL_NOT_VERIFIED`。卸载等待超时使用
 `ACTION_OUTCOME_UNKNOWN`，必须先只读检查安装状态，禁止自动重试。
+
+系统设置直达导航只接受 `NavigationTarget` 枚举白名单内的目标，未知目标在进入 Adapter 前返回
+`NAVIGATION_ACTION_UNKNOWN`。导航命令执行后必须重新观察并用目标页面 Activity token 验证，
+验证失败返回 `NAVIGATION_NOT_VERIFIED`，outcome 记为 unknown，不自动重试。通知读取为只读操作：
+`dumpsys notification` 无结构化输出或命令失败返回 `NOTIFICATIONS_READ_FAILED`；设备当前零条
+通知返回 `NOTIFICATIONS_READ_EMPTY`（已知失败，不是空成功）。通知标题统一截断 32 字符、数量
+上限 50，原始 dumpsys 文本不得进入日志或 Artifact。
 
 ## 8. 日志与诊断
 

@@ -57,3 +57,4 @@ NNNN-short-kebab-case-title.md
 - [ADR-0015：MCP stdio 作为本地 Runtime API 的 Interface Adapter](./0015-mcp-stdio-local-api-adapter.md)
 - [ADR-0016：High 风险动作使用两阶段、单次、范围绑定的授权](./0016-scoped-high-risk-approval.md)
 - [ADR-0017：应用卸载独立确认数据删除影响](./0017-scoped-app-removal.md)
+- [ADR-0018：程序化系统设置导航与 Runtime 导航捷径](./0018-programmatic-navigation-shortcuts.md)

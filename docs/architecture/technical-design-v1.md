@@ -243,6 +243,19 @@ env_override 标记），POST 只接受 `env:MOBILE_AGENT_MODEL_SECRET_*` 形式
 设置页提供 Provider 表单、密钥存/清、保存并重启（进行中任务需确认中断）与数据目录
 Finder 入口。
 
+ITER-0058 起，Agent Runner 在主循环前执行确定性导航捷径：目标文本命中注册系统设置页面
+关键词时，直接调用 `app.navigate` Skill 一步完成，不再消耗模型轮次；结果记
+`completion_source=runtime_shortcut` 与 `agent.shortcut` 步骤，仍进入 TaskRun 与事件流。
+捷径执行前必须通过取消与截止时间检查；设备缺少 `app.navigate@1` 能力时降级回
+Observe-Plan-Act 循环；`navigation_shortcuts_enabled=false` 可整体关闭。`app.navigate`
+只接受 `NavigationTarget` 枚举白名单（14 个系统设置页面），Adapter 内固定
+`am start -W -a <action>` 参数数组、禁止 extras，执行后以目标页面 Activity token 后置验证。
+同期新增 `device.notifications.read`：Medium 风险、需明确确认的只读能力，经
+`dumpsys notification` 解析为脱敏结构化记录（标题截断 32 字符、上限 50 条）并写入
+`device_notifications` Artifact。REST 增加 `/v1/skills/app.navigate/invoke` 与
+`/v1/skills/device.notifications.read/invoke`，MCP 增加对应两个 Tool。详见
+[ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md)。
+
 ITER-0028 起，Agent Runner 将未产生设备副作用的目标定位失败和 `finish` 验证失败记为可恢复 failed round，并将错误码和有界候选详情交给下一轮 Planner。`finish` 可同时验证前台 app/activity 与唯一 UI Selector；相同无进展决策仍会被阻止。语义点击在派发前排除屏幕顶部系统区和底部手势区的启发式安全边距。Provider 边界保留 timeout、HTTP status、connection 和 invalid JSON 的脱敏分类，且只对 retryable 模型请求最多重试一次；Selector 校验只保留字段名、未知键等结构诊断，不记录字段值。详见 [ADR-0006](../adr/0006-recoverable-agent-verification.md)。
 
 ITER-0029 起，调用方可以通过 `AgentGoalAcceptance` 为 `agent.run` 提供独立成功条件。模型仍

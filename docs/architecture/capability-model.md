@@ -140,6 +140,8 @@ app.uninstall@1
 app.state.inspect@1
 app.stop@1
 app.data.clear@1
+app.navigate@1
+notifications.read@1
 ```
 
 ITER-0001 只需实现 `device.inspect@1` 及设备发现所需内部能力，其余在后续迭代启用。
@@ -184,6 +186,13 @@ ITER-0047 增加 `device.diagnostics.bundle@1`。它是 Medium 风险、safe 幂
 ITER-0048 的 `local.data.cleanup` 是 Runtime 本地数据能力，不是设备 Capability，因此不进入
 Device advertised capabilities 或 Device Inspection。其风险和幂等性仍由 Tool Registry 固定为
 High / unsafe，且只能由范围绑定 Approval 放行；任何 Device Adapter 都不能声明或绕过该能力。
+
+ITER-0058 增加两项能力。`app.navigate@1` 是 Low 风险、条件幂等的设备写能力，只接受
+`NavigationTarget` 枚举白名单内的系统设置页面；枚举到 `android.settings.*` action 的映射固定
+在 Adapter 内，固定参数数组、禁止 extras 与任意 URI，执行后必须用目标页面 Activity token 做
+后置验证（ADR-0018）。`notifications.read@1` 是 Medium 风险、safe 幂等的只读能力，需用户明确
+确认；只返回脱敏后的包名、截断标题与发布时间，数量上限 50，原始 dumpsys 输出不进入消费者、
+Artifact 或日志。
 
 ## 10. 测试要求
 
