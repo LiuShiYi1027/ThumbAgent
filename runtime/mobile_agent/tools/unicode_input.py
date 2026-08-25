@@ -30,6 +30,25 @@ from mobile_agent.ui.locator import UiLocator
 from mobile_agent.ui.model import UiMatch, UiSelector
 from mobile_agent.ui.parser import UiHierarchyParser
 
+# 聚焦后到注入前的 settle：覆盖 Helper IME 冷启动与输入连接建立延迟。
+_INPUT_SETTLE_SECONDS = 0.5
+# 注入整体丢失后的单次重试间隔。
+_INPUT_RETRY_SETTLE_SECONDS = 1.0
+
+
+def _nothing_landed(failure: MobileAgentError, before_text: str) -> bool:
+    """读回摘要仍等于输入前原文摘要 = 注入整体丢失（区别于字段被篡改）。
+
+    错误 details 按隐私先例只带 SHA-256，不带文本原文，因此用摘要比对判定。
+    """
+    actual = (failure.details or {}).get("actual_sha256")
+    if not isinstance(actual, str):
+        return False
+    before_digest = hashlib.sha256(
+        normalize_for_verification(before_text).encode("utf-8")
+    ).hexdigest()
+    return actual == before_digest
+
 
 @dataclass(frozen=True, slots=True)
 class UnicodeTextInput:
@@ -127,8 +146,26 @@ class UnicodeTextInputTool:
         evidence: list[str] = [before.ui_tree.artifact.artifact_id]
         try:
             await self._adapter.tap(device_id, match.tap_x, match.tap_y)
+            # 真机实测：Helper IME 冷启动 / 输入连接建立有延迟，聚焦后立即注入
+            # 字符会被静默丢弃（无任何报错），读回才发现。先做一个固定短 settle。
+            await asyncio.sleep(_INPUT_SETTLE_SECONDS)
             await self._adapter.input_text(device_id, encode_modified_utf7(text))
-            await self._verify_readback(device_id, selector, before_text + text, evidence)
+            try:
+                await self._verify_readback(
+                    device_id, selector, before_text + text, evidence
+                )
+            except MobileAgentError as failure:
+                if (
+                    failure.code != "TEXT_INPUT_NOT_VERIFIED"
+                    or not _nothing_landed(failure, before_text)
+                ):
+                    raise
+                # 读回仍是原文 = 注入整体丢失（而非被篡改），settle 后有界重试一次。
+                await asyncio.sleep(_INPUT_RETRY_SETTLE_SECONDS)
+                await self._adapter.input_text(device_id, encode_modified_utf7(text))
+                await self._verify_readback(
+                    device_id, selector, before_text + text, evidence
+                )
         finally:
             await self._restore_input_method(device_id, previous_ime_id)
 

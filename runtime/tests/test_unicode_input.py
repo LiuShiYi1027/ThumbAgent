@@ -12,7 +12,9 @@ from mobile_agent.domain.errors import MobileAgentError
 from mobile_agent.domain.unicode_input import (
     HELPER_IME_ID,
     HELPER_PACKAGE,
+    decode_modified_utf7,
     encode_modified_utf7,
+    is_helper_ime,
     text_digest,
 )
 from mobile_agent.evidence.artifacts import ArtifactStore
@@ -91,6 +93,32 @@ class TamperingAdapter(FakeDeviceAdapter):
     async def input_text(self, device_id: str, text: str) -> None:
         await super().input_text(device_id, text)
         self.field_text += "X"
+
+
+class DropFirstInputAdapter(FakeDeviceAdapter):
+    """Simulate the cold-start race: the first injection is silently dropped
+    (Helper IME input connection not yet bound), later injections land."""
+
+    def __init__(self, devices=None) -> None:
+        super().__init__(devices)
+        self._dropped = False
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        self.actions.append(("input.text", device_id, text))
+        if not self._dropped:
+            self._dropped = True
+            return  # 字符整体丢失：字段保持原文
+        if is_helper_ime(self.current_ime):
+            self.field_text += decode_modified_utf7(text)
+        else:
+            self.field_text += text
+
+
+class DropAllInputAdapter(FakeDeviceAdapter):
+    """Simulate a device where injections never land (retry must stay bounded)."""
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        self.actions.append(("input.text", device_id, text))
 
 
 class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
@@ -252,6 +280,45 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         set_actions = [a for a in adapter.actions if a[0] == "input.ime.set"]
         self.assertEqual(("input.ime.set", DEVICE_ID, DEFAULT_IME), set_actions[-1])
         self.assertEqual(DEFAULT_IME, adapter.current_ime)
+
+    async def test_tampered_field_is_not_retried(self) -> None:
+        """篡改（读回 ≠ 原文也 ≠ 期望）不得触发重试，否则会造成重复输入。"""
+        adapter = _configure_ready(TamperingAdapter())
+        runtime = self._runtime(adapter)
+
+        with self.assertRaises(MobileAgentError):
+            await runtime.unicode_text_input(DEVICE_ID, SELECTOR, "你好世界", confirmed=True)
+
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(1, len(typed))
+
+    async def test_dropped_first_injection_is_retried_once(self) -> None:
+        """真机回归：Helper IME 冷启动导致首次注入整体丢失时，settle 后重试一次成功。"""
+        adapter = _configure_ready(DropFirstInputAdapter())
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "iPhone 17", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("iPhone 17", adapter.field_text)
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(2, len(typed))
+
+    async def test_persistent_drop_fails_after_bounded_retry(self) -> None:
+        """注入持续丢失时重试保持有界：恰好两次注入后失败并恢复 IME。"""
+        adapter = _configure_ready(DropAllInputAdapter())
+        runtime = self._runtime(adapter)
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await runtime.unicode_text_input(DEVICE_ID, SELECTOR, "你好", confirmed=True)
+
+        self.assertEqual("TEXT_INPUT_NOT_VERIFIED", raised.exception.code)
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(2, len(typed))
+        set_actions = [a for a in adapter.actions if a[0] == "input.ime.set"]
+        self.assertEqual(("input.ime.set", DEVICE_ID, DEFAULT_IME), set_actions[-1])
 
     async def test_restore_failure_is_reported_prominently(self) -> None:
         adapter = _configure_ready(RestoreFailingAdapter())
