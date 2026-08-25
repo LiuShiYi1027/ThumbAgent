@@ -36,7 +36,7 @@
 
 ## 真机 E2E（2026-08-25，MagicOS BKQ-AN10 / A6TG025A13002156）
 
-执行 `scripts/e2e_iter0059.py`，六场景全部 PASS：
+执行 `scripts/e2e/e2e_iter0059.py`，六场景全部 PASS：
 
 1. Helper APK 登记摘要校验：PASS（设备端 SHA-256 与登记值
    `6db9fd86…0ccd` 一致）。

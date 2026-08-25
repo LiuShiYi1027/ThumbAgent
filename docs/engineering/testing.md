@@ -60,6 +60,8 @@
 - XML、截图、dumpsys 等解析使用去敏样本 fixture。
 - 不在普通测试中调用开发者机器上的 `adb`。
 - 真机测试使用显式 marker，例如 `device_e2e`。
+- 真机 E2E 套件集中在 `scripts/e2e/`，场景清单、前置与恢复约束见
+  `scripts/e2e/README.md`；该目录不进默认快速测试集。
 - 真机测试结束后恢复可恢复状态，禁止清除用户数据。
 
 ## 6. Agent 评测

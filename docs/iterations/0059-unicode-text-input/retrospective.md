@@ -22,7 +22,7 @@
   输入步骤。
 - 错误码：IME_HELPER_NOT_INSTALLED / IME_SWITCH_FAILED / TEXT_INPUT_NOT_VERIFIED /
   IME_RESTORE_FAILED。
-- `scripts/e2e_iter0059.py`：六场景真机 E2E 脚本（显式标记，不进默认测试集）。
+- `scripts/e2e/e2e_iter0059.py`：六场景真机 E2E 脚本（显式标记，不进默认测试集）。
 
 ## 验证结果
 
