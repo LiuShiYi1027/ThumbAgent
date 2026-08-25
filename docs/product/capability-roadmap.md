@@ -2,7 +2,7 @@
 
 > 文档状态：Draft
 > 更新日期：2026-08-25
-> 关联：[产品定位](./positioning.md) · [Capability 模型](../architecture/capability-model.md) · [ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md) · [ITER-0058 复盘](../iterations/0058-programmatic-navigation/retrospective.md)
+> 关联：[产品定位](./positioning.md) · [Capability 模型](../architecture/capability-model.md) · [客户端测试场景覆盖盘点](./testing-scenario-coverage.md) · [ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md) · [ITER-0058 复盘](../iterations/0058-programmatic-navigation/retrospective.md)
 
 ## 1. 目的
 
@@ -76,6 +76,8 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 ### 4.4 复合 Skill 与平台扩展候选
 
 以下候选不是新设备动作，而是既有能力的组合方式与扩展形态，单独治理。
+「Skill 扩展与管理」的需求侧量化依据见[客户端测试场景覆盖盘点](./testing-scenario-coverage.md)
+（约 65% 客户端测试场景可由声明式 Skill 层覆盖）。
 
 | 候选 | 类型 | 真实场景 | 治理缺口 | 前置条件 |
 | --- | --- | --- | --- | --- |
