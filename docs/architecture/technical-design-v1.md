@@ -680,12 +680,25 @@ ADB Runner 是唯一允许启动 `adb` 子进程的模块，负责：
 
 ### 11.4 文本输入限制
 
-ADB 文本输入对空格、特殊字符和非拉丁字符支持不一致。V1：
+ADB `input text` 只可靠支持有限 ASCII；Unicode 输入经 ITER-0059 引入的受控
+IME helper 通道解决（ADR-0019）。V1 语义：
 
-- 普通 ASCII 走 ADB 输入。
-- 非 ASCII 或复杂文本检测后标记能力不足，提示人工输入。
-- 不静默修改用户文本。
-- 后续通过受控输入法 helper 增强。
+- 普通 ASCII（`[A-Za-z0-9._-]{1,64}`）走既有 `input.text@1` 快路径。
+- CJK、空格、Emoji 等非 ASCII 文本走 `input.unicode@1`：主机侧编码为
+  Modified UTF-7（纯 ASCII）后仍经 `input text` 管道送入，自构建的最小
+  Helper IME（源码、APK 与 SHA-256 摘要入仓登记）在设备端解码上屏；每次调用
+  短时切换 IME 并强制恢复原 IME，无广播接收器等常开注入面。
+- 读回验证遵循 **追加语义**：`commitText` 向字段追加而非覆盖，验证期望 =
+  输入前字段文本 + 目标文本，NFC 归一化后精确比对；不一致返回
+  `TEXT_INPUT_NOT_VERIFIED`，不自动重试、不静默修改用户文本。
+- 远端 shell 约束：adb 会将 argv 拼接为远端 sh 命令行，`&` 等字符必须经
+  单引号引用（Adapter `_remote_shell_quote`），任何新增走 `input` 命令的
+  通道必须复用同一引用逻辑。
+- 验证码、手机号等敏感数字形态在 Tool 层先于任何设备动作拒绝；helper
+  不得成为敏感输入的绕过通道。
+- helper 未安装返回 `IME_HELPER_NOT_INSTALLED`，引导经 `app.install@1`
+  两阶段授权安装；厂商 ROM 对安装后包扫描存在短暂竞态，helper 解析允许
+  一次有界重试，超出即报错而非无限等待。
 
 ## 12. API 设计
 

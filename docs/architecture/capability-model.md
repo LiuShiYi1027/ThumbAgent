@@ -142,6 +142,7 @@ app.stop@1
 app.data.clear@1
 app.navigate@1
 notifications.read@1
+input.unicode@1
 ```
 
 ITER-0001 只需实现 `device.inspect@1` 及设备发现所需内部能力，其余在后续迭代启用。
@@ -193,6 +194,16 @@ ITER-0058 增加两项能力。`app.navigate@1` 是 Low 风险、条件幂等的
 后置验证（ADR-0018）。`notifications.read@1` 是 Medium 风险、safe 幂等的只读能力，需用户明确
 确认；只返回脱敏后的包名、截断标题与发布时间，数量上限 50，原始 dumpsys 输出不进入消费者、
 Artifact 或日志。
+
+ITER-0059 增加 `input.unicode@1`。它是 Medium 风险、unsafe 幂等的设备写能力，需明确确认；
+通过自构建的最小 Helper IME（源码、APK 与 SHA-256 摘要入仓登记，安装走 `app.install@1`
+两阶段授权）支持 CJK/Unicode 文本输入：主机侧将文本编码为 Modified UTF-7（纯 ASCII），经
+既有固定 argv `input text` 管道送入，helper 解码上屏，无广播注入面。每次调用在 Session 与
+Lease 内完成 记录原 IME → enable/set helper → 编码输入 → UI Tree 读回验证（追加语义：期望 =
+输入前字段文本 + 目标文本，NFC 精确比对）→ 强制恢复原 IME；恢复失败返回
+`IME_RESTORE_FAILED`。验证码、手机号等敏感数字形态在 Tool 层先于任何设备动作拒绝；纯
+ASCII 文本仍走 `input.text@1` 快路径，不触发 IME 切换（ADR-0019）。文本原文不进入结果与
+日志，只记录长度与 NFC 形态的 SHA-256 摘要。
 
 ## 10. 测试要求
 

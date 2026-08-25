@@ -64,6 +64,17 @@ IME helper。调研确认了两条可行技术路线：
 
 ## Follow-up
 
-- 真机 E2E 在 MagicOS 验证 `ime set` 是否被拦截、读回验证与恢复路径。
+- ~~真机 E2E 在 MagicOS 验证 `ime set` 是否被拦截、读回验证与恢复路径。~~
+  **2026-08-25 已闭环**（MagicOS BKQ-AN10，六场景全 PASS）：
+  - `ime set` **未被拦截**，helper 切换与原 IME（搜狗）恢复均成功；安装后存在
+    短暂的包扫描竞态（`ime enable` 立即执行报 "Unknown input method"），由
+    helper 解析的一次有界重试吸收，未改变信任模型。
+  - 读回验证发现 `commitText` 为追加语义，验证期望修正为 输入前字段文本 +
+    目标文本（NFC 精确比对），已带回归测试。
+  - adb argv 经远端 sh 拼接导致 UTF-7 编码中的 `&` 截断命令（exit 127）；
+    `input text` 远端参数统一单引号引用，约束记录在 §11.4。
+  - MagicOS 设置搜索框为 `AutoCompleteTextView`（EditText 子类），可编辑控件
+    识别已扩展。
 - 观察厂商 ROM 对 helper IME 的兼容反馈，评估是否需要在更多 ROM 采样。
-- helper 源码仓库布局与构建脚本在 TASK-0059-02 落地。
+- helper 源码仓库布局与构建脚本已在 TASK-0059-02 落地
+  （`helpers/unicode-ime/`，免 Gradle 可复现构建）。
