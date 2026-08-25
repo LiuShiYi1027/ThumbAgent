@@ -72,6 +72,7 @@ class UiHierarchyParser:
             text=text("text"),
             resource_id=text("resource-id"),
             content_description=text("content-desc"),
+            hint=text("hint"),
             class_name=text("class"),
             package=text("package"),
             clickable=attributes.get("clickable") == "true",

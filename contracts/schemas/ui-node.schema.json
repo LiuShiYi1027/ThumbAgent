@@ -13,6 +13,7 @@
     "text": { "type": "string", "maxLength": 1024 },
     "resource_id": { "type": "string", "maxLength": 1024 },
     "content_description": { "type": "string", "maxLength": 1024 },
+    "hint": { "type": "string", "maxLength": 1024 },
     "class_name": { "type": "string", "maxLength": 1024 },
     "package": { "type": "string", "maxLength": 1024 },
     "clickable": { "type": "boolean" },

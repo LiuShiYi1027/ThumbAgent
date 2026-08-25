@@ -33,6 +33,37 @@ class UiParserLocatorTests(unittest.TestCase):
         self.assertEqual((45, 45), display.bounds.center)
         self.assertFalse(display.clickable)
 
+    def test_hint_attribute_and_effective_text(self) -> None:
+        """真机行为：空输入框的 text 等于 hint；effective_text 此时应视为空。"""
+        xml = (
+            b'<hierarchy>'
+            b'<node text="\xe6\x90\x9c\xe7\xb4\xa2\xe8\xae\xbe\xe7\xbd\xae\xe9\xa1\xb9" '
+            b'hint="\xe6\x90\x9c\xe7\xb4\xa2\xe8\xae\xbe\xe7\xbd\xae\xe9\xa1\xb9" '
+            b'resource-id="search" class="EditText" package="android" clickable="true" '
+            b'enabled="true" visible-to-user="true" bounds="[0,0][100,50]"/>'
+            b'<node text="iPhone 17" hint="\xe6\x90\x9c\xe7\xb4\xa2" '
+            b'resource-id="filled" class="EditText" package="android" clickable="true" '
+            b'enabled="true" visible-to-user="true" bounds="[0,50][100,100]"/>'
+            b'<node text="Plain" resource-id="plain" class="TextView" package="android" '
+            b'clickable="false" enabled="true" visible-to-user="true" '
+            b'bounds="[0,100][100,150]"/>'
+            b'</hierarchy>'
+        )
+        nodes = self.parser.parse(xml)
+
+        empty_field = next(n for n in nodes if n.resource_id == "search")
+        self.assertEqual("搜索设置项", empty_field.hint)
+        self.assertEqual("搜索设置项", empty_field.text)
+        self.assertEqual("", empty_field.effective_text)
+
+        filled = next(n for n in nodes if n.resource_id == "filled")
+        self.assertEqual("iPhone 17", filled.effective_text)
+
+        plain = next(n for n in nodes if n.resource_id == "plain")
+        self.assertEqual("", plain.hint)
+        self.assertEqual("Plain", plain.effective_text)
+        self.assertEqual("Plain", plain.to_dict()["text"])
+
     def test_exact_contains_resource_and_ancestor_path(self) -> None:
         exact = UiSelector.from_dict(
             {"strategy": "text", "value": "Display", "resolve_clickable_ancestor": True}

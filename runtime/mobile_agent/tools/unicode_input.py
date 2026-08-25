@@ -119,7 +119,8 @@ class UnicodeTextInputTool:
             self._locator, nodes, selector, before.screen.width, before.screen.height
         )
         # commitText 是追加语义：验证期望 = 输入前字段文本 + 目标文本（NFC 精确比对）。
-        before_text = match.target_node.text
+        # 空字段的 text 是 hint 占位，必须用 effective_text 剔除（真机实测假阴性）。
+        before_text = match.target_node.effective_text
 
         previous_ime_id = await self._adapter.current_input_method(device_id)
         await self._activate_helper(device_id, helper_ime_id)
@@ -190,7 +191,9 @@ class UnicodeTextInputTool:
         matches = self._locator.find_all(nodes, selector)
         expected = normalize_for_verification(expected_text)
         actual = (
-            normalize_for_verification(matches[0].text) if len(matches) == 1 else None
+            normalize_for_verification(matches[0].effective_text)
+            if len(matches) == 1
+            else None
         )
         if actual != expected:
             raise MobileAgentError(

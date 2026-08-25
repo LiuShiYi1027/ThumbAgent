@@ -12,6 +12,7 @@ export interface UiNode {
   text: string;
   resource_id: string;
   content_description: string;
+  hint?: string;
   class_name: string;
   package: string;
   clickable: boolean;

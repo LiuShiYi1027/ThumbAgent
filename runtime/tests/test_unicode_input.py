@@ -165,6 +165,46 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertEqual("前缀你好", adapter.field_text)
 
+    async def test_empty_field_with_hint_is_treated_as_empty(self) -> None:
+        """真机回归：空输入框的 uiautomator text 等于 hint（如“搜索设置项”），
+        追加语义验证不得把 hint 当原文，否则读回必然假阴性。"""
+        adapter = _ready_adapter()
+        adapter.field_hint = "搜索设置项"
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "你好", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("你好", adapter.field_text)
+
+    async def test_hinted_field_with_real_text_appends_normally(self) -> None:
+        """字段有 hint 且已有真实内容时，hint 不生效，仍按真实原文追加验证。"""
+        adapter = _ready_adapter("前缀")
+        adapter.field_hint = "搜索设置项"
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "你好", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("前缀你好", adapter.field_text)
+
+    async def test_spaced_and_isolated_chars_on_hinted_field(self) -> None:
+        """真机回归：空格与孤立单字符（短 UTF-7 载荷块场景）在带 hint 的空字段上可验证。"""
+        adapter = _ready_adapter()
+        adapter.field_hint = "搜索"
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "A你 B", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("A你 B", adapter.field_text)
+
     async def test_already_enabled_helper_skips_enable(self) -> None:
         adapter = _ready_adapter()
         adapter.enabled_imes = [DEFAULT_IME, HELPER_FULL]

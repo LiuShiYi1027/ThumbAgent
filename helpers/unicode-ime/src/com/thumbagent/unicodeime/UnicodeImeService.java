@@ -31,12 +31,6 @@ import android.text.method.MetaKeyKeyListener;
 import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
 
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
-
 /**
  * Minimal input method that decodes Modified UTF-7 (RFC 3501) text delivered
  * through {@code input text} and commits the decoded Unicode text.
@@ -48,17 +42,21 @@ import java.nio.charset.CharsetDecoder;
  */
 public class UnicodeImeService extends InputMethodService {
 
-    @SuppressWarnings("InjectedReferences")
-    private static final Charset UTF7_MODIFIED = Charset.forName("x-IMAP-mailbox-name");
-    private static final Charset ASCII = Charset.forName("US-ASCII");
-
-    private final CharsetDecoder utf7Decoder = UTF7_MODIFIED.newDecoder();
-
     /** Shift character that starts a Modified BASE64 block in Modified UTF-7. */
     private static final char M_UTF7_SHIFT = '&';
 
     /** Character that ends a Modified BASE64 block and shifts back to ASCII. */
     private static final char M_UTF7_UNSHIFT = '-';
+
+    /**
+     * Modified base64 alphabet (',' instead of '/', no padding), identical to
+     * the host-side encoder. The decoder is hand-rolled because the platform
+     * charset "x-IMAP-mailbox-name" is not portable: ART rejects base64
+     * payloads shorter than 4 chars (MalformedInputException), which breaks
+     * spaces and lone non-ASCII characters (real-device finding, 2026-08-25).
+     */
+    private static final String M_BASE64_ALPHABET =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
 
     private boolean isShifted = false;
     private long metaState = 0;
@@ -154,16 +152,62 @@ public class UnicodeImeService extends InputMethodService {
         }
     }
 
+    /**
+     * Decode one wire string of the form "ascii&block;-ascii..." produced by
+     * the host encoder. Undecodable input is returned as-is; the host-side
+     * read-back verification (TEXT_INPUT_NOT_VERIFIED) catches the mismatch.
+     */
     private String decodeUtf7(String encStr) {
-        ByteBuffer encoded = ByteBuffer.wrap(encStr.getBytes(ASCII));
-        try {
-            CharBuffer buf = utf7Decoder.decode(encoded);
-            return buf.toString();
-        } catch (CharacterCodingException e) {
-            // Undecodable input is committed as-is; the host-side read-back
-            // verification (TEXT_INPUT_NOT_VERIFIED) catches the mismatch.
-            return encStr;
+        StringBuilder out = new StringBuilder();
+        int index = 0;
+        while (index < encStr.length()) {
+            char c = encStr.charAt(index);
+            if (c != M_UTF7_SHIFT) {
+                out.append(c);
+                index += 1;
+                continue;
+            }
+            int end = encStr.indexOf(M_UTF7_UNSHIFT, index);
+            if (end < 0) {
+                return encStr;
+            }
+            String block = encStr.substring(index + 1, end);
+            if (block.isEmpty()) {
+                out.append(M_UTF7_SHIFT);  // "&-" is the literal shift character
+            } else {
+                String decoded = decodeBlock(block);
+                if (decoded == null) {
+                    return encStr;
+                }
+                out.append(decoded);
+            }
+            index = end + 1;
         }
+        return out.toString();
+    }
+
+    /**
+     * Decode one modified-base64 payload to UTF-16BE units, MSB first,
+     * tolerating short payloads (trailing spare bits are dropped). Returns
+     * null on characters outside the alphabet.
+     */
+    private static String decodeBlock(String block) {
+        StringBuilder out = new StringBuilder();
+        int accumulator = 0;
+        int bits = 0;
+        for (int i = 0; i < block.length(); i++) {
+            int digit = M_BASE64_ALPHABET.indexOf(block.charAt(i));
+            if (digit < 0) {
+                return null;
+            }
+            accumulator = (accumulator << 6) | digit;
+            bits += 6;
+            if (bits >= 16) {
+                bits -= 16;
+                out.append((char) ((accumulator >> bits) & 0xFFFF));
+            }
+        }
+        return out.toString();
     }
 
     private static boolean isAsciiPrintable(int c) {

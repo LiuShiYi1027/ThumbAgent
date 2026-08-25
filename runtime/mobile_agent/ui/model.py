@@ -61,7 +61,19 @@ class UiNode:
     enabled: bool
     visible: bool
     bounds: Bounds
+    hint: str = ""
     schema_version: str = "1.0.0"
+
+    @property
+    def effective_text(self) -> str:
+        """字段真实内容：uiautomator 在空字段上把 hint 填入 text，需剔除。
+
+        真机实测（MagicOS，2026-08-25）：空输入框的 text 等于 hint，输入后
+        text 才是真实内容；读回验证若把 hint 当原文会产生假阴性。
+        """
+        if self.hint and self.text == self.hint:
+            return ""
+        return self.text
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +84,7 @@ class UiNode:
             "text": self.text,
             "resource_id": self.resource_id,
             "content_description": self.content_description,
+            "hint": self.hint,
             "class_name": self.class_name,
             "package": self.package,
             "clickable": self.clickable,

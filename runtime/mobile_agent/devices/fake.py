@@ -39,6 +39,7 @@ def _fake_ui_xml(
     activity: str,
     field_text: str = "",
     field_class: str = "android.widget.EditText",
+    field_hint: str = "",
 ) -> bytes:
     if app_id == "com.android.settings" and activity == ".MainActivity":
         body = (
@@ -63,10 +64,13 @@ def _fake_ui_xml(
             'visible-to-user="true" bounds="[0,0][2,3]"/>'
         )
     if app_id == "com.example.form":
-        # field_text/field_class 由调用方注入，用于模拟追加输入后的读回；
+        # field_text/field_class/field_hint 由调用方注入，用于模拟追加输入后的读回；
         # 测试内容不含 XML 特殊字符，直接内联进属性值。
+        # 真实 uiautomator 行为：输入框为空时 text 属性等于 hint，故此处同样输出。
+        shown_text = field_text if field_text else field_hint
         body = (
-            f'<node text="{field_text}" resource-id="search_box" class="{field_class}" '
+            f'<node text="{shown_text}" hint="{field_hint}" resource-id="search_box" '
+            f'class="{field_class}" '
             'package="com.example.form" clickable="true" enabled="true" '
             'visible-to-user="true" bounds="[0,0][2,1]"/>'
         )
@@ -90,6 +94,7 @@ class FakeDeviceAdapter:
         self.enabled_imes: list[str] = ["com.example.ime/.DefaultIme"]
         self.field_text = ""
         self.field_class = "android.widget.EditText"
+        self.field_hint = ""
         self._installed_apps = {"com.android.settings", "com.example.fake"}
         self._running_apps = {"com.example.fake"}
         self._stopped_apps: set[str] = set()
@@ -152,6 +157,7 @@ class FakeDeviceAdapter:
                 self.foreground_activity,
                 self.field_text,
                 self.field_class,
+                self.field_hint,
             ),
             ".xml",
         )

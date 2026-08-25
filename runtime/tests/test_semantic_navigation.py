@@ -259,3 +259,13 @@ class SemanticNavigationTests(unittest.IsolatedAsyncioTestCase):
         ):
             schema = json.loads((ROOT / "contracts/schemas" / name).read_text(encoding="utf-8"))
             self.assertIn("$id", schema)
+
+    def test_ui_node_hint_is_optional_additive_field(self) -> None:
+        """hint 是后向兼容的可选字段：不进 required，旧节点（无 hint）仍合法。"""
+        schema = json.loads(
+            (ROOT / "contracts/schemas/ui-node.schema.json").read_text(encoding="utf-8")
+        )
+
+        self.assertIn("hint", schema["properties"])
+        self.assertNotIn("hint", schema["required"])
+        self.assertEqual("string", schema["properties"]["hint"]["type"])

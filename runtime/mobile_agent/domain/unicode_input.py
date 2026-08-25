@@ -20,7 +20,7 @@ from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 # 保持一致；任何变化都必须重新评审并同步两侧。
 HELPER_PACKAGE = "com.thumbagent.unicodeime"
 HELPER_IME_ID = f"{HELPER_PACKAGE}/.UnicodeImeService"
-HELPER_APK_SHA256 = "6db9fd86d815d4027e011617ca6c466a3e5008e2db16c6d8a26cc33234eb0ccd"
+HELPER_APK_SHA256 = "46c45d70ae95ec353e5974fe9eaac1b9f2252f7721a553e42472fe808e9cabfe"
 
 MAX_TEXT_LENGTH = 256
 
