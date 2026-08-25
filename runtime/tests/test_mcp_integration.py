@@ -409,12 +409,10 @@ class McpRuntimeIntegrationTests(unittest.TestCase):
         """MCP → REST → Skill 全链路：Helper IME 切换、读回验证与原 IME 恢复。"""
         with tempfile.TemporaryDirectory() as directory:
             adapter = FakeDeviceAdapter()
-            adapter.custom_ui_xml = (
-                '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
-                '<node text="你好世界" resource-id="search_box" class="android.widget.EditText" '
-                'package="com.example.form" clickable="true" enabled="true" '
-                'visible-to-user="true" bounds="[0,0][2,1]"/></hierarchy>'
-            ).encode()
+            # 动态 fake 路径：读回文本随 input.text 追加更新（追加语义验证）。
+            adapter.foreground_app = "com.example.form"
+            adapter.foreground_activity = ".MainActivity"
+            adapter.field_text = ""
             adapter.installed_imes = (
                 "com.example.ime/.DefaultIme",
                 "com.thumbagent.unicodeime/com.thumbagent.unicodeime.UnicodeImeService",

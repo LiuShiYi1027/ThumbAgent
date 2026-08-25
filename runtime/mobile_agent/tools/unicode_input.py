@@ -2,11 +2,13 @@
 
 编排顺序固定：校验与策略拦截（先于任何设备动作）→ 定位可编辑目标 →
 记录当前 IME → 启用/切换 Helper IME → 聚焦并输入 Modified UTF-7 编码文本 →
-UI Tree 读回验证（NFC 精确比对）→ 恢复原 IME（强制，失败即 IME_RESTORE_FAILED）。
+UI Tree 读回验证（追加语义：字段原文 + 目标文本，NFC 精确比对）→
+恢复原 IME（强制，失败即 IME_RESTORE_FAILED）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from typing import Any
@@ -116,6 +118,8 @@ class UnicodeTextInputTool:
         match = locate_editable_target(
             self._locator, nodes, selector, before.screen.width, before.screen.height
         )
+        # commitText 是追加语义：验证期望 = 输入前字段文本 + 目标文本（NFC 精确比对）。
+        before_text = match.target_node.text
 
         previous_ime_id = await self._adapter.current_input_method(device_id)
         await self._activate_helper(device_id, helper_ime_id)
@@ -123,7 +127,7 @@ class UnicodeTextInputTool:
         try:
             await self._adapter.tap(device_id, match.tap_x, match.tap_y)
             await self._adapter.input_text(device_id, encode_modified_utf7(text))
-            await self._verify_readback(device_id, selector, text, evidence)
+            await self._verify_readback(device_id, selector, before_text + text, evidence)
         finally:
             await self._restore_input_method(device_id, previous_ime_id)
 
@@ -137,10 +141,15 @@ class UnicodeTextInputTool:
         )
 
     async def _resolve_helper(self, device_id: str) -> str:
-        installed = await self._adapter.installed_input_methods(device_id)
-        for ime_id in installed:
-            if is_helper_ime(ime_id):
-                return ime_id
+        # MagicOS 实测：安装完成后包扫描有短暂竞态，ime list 立即可见但
+        # ime enable 可能滞后；未找到时按固定间隔有界重试一次再判定。
+        for attempt in range(2):
+            installed = await self._adapter.installed_input_methods(device_id)
+            for ime_id in installed:
+                if is_helper_ime(ime_id):
+                    return ime_id
+            if attempt == 0:
+                await asyncio.sleep(1.0)
         raise MobileAgentError(
             code="IME_HELPER_NOT_INSTALLED",
             category=ErrorCategory.DEVICE,
@@ -169,7 +178,7 @@ class UnicodeTextInputTool:
         self,
         device_id: str,
         selector: UiSelector,
-        text: str,
+        expected_text: str,
         evidence: list[str],
     ) -> None:
         after = await self._adapter.observe(device_id, self._artifacts)
@@ -179,7 +188,7 @@ class UnicodeTextInputTool:
             self._artifacts.resolve(after.ui_tree.artifact.relative_path).read_bytes()
         )
         matches = self._locator.find_all(nodes, selector)
-        expected = normalize_for_verification(text)
+        expected = normalize_for_verification(expected_text)
         actual = (
             normalize_for_verification(matches[0].text) if len(matches) == 1 else None
         )

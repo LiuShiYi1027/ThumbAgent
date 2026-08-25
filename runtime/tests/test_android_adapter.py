@@ -162,7 +162,7 @@ locked unauthorized usb:1-1
         back = ("-s", "serial-1", "shell", "input", "keyevent", "4")
         home = ("-s", "serial-1", "shell", "input", "keyevent", "3")
         tap = ("-s", "serial-1", "shell", "input", "touchscreen", "tap", "10", "20")
-        text = ("-s", "serial-1", "shell", "input", "text", "hello_1")
+        text = ("-s", "serial-1", "shell", "input", "text", "'hello_1'")
         swipe = (
             "-s",
             "serial-1",

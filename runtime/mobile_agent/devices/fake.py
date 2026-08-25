@@ -23,6 +23,7 @@ from mobile_agent.domain.observation import (
     UiTreeObservation,
 )
 from mobile_agent.domain.performance import DevicePerformanceSnapshot
+from mobile_agent.domain.unicode_input import decode_modified_utf7, is_helper_ime
 
 
 def _now() -> str:
@@ -33,7 +34,12 @@ def _fake_png(width: int = 2, height: int = 3) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", width, height) + b"fake"
 
 
-def _fake_ui_xml(app_id: str, activity: str) -> bytes:
+def _fake_ui_xml(
+    app_id: str,
+    activity: str,
+    field_text: str = "",
+    field_class: str = "android.widget.EditText",
+) -> bytes:
     if app_id == "com.android.settings" and activity == ".MainActivity":
         body = (
             '<node text="" resource-id="settings_list" class="android.view.View" '
@@ -57,8 +63,10 @@ def _fake_ui_xml(app_id: str, activity: str) -> bytes:
             'visible-to-user="true" bounds="[0,0][2,3]"/>'
         )
     if app_id == "com.example.form":
+        # field_text/field_class 由调用方注入，用于模拟追加输入后的读回；
+        # 测试内容不含 XML 特殊字符，直接内联进属性值。
         body = (
-            '<node text="" resource-id="search_box" class="android.widget.EditText" '
+            f'<node text="{field_text}" resource-id="search_box" class="{field_class}" '
             'package="com.example.form" clickable="true" enabled="true" '
             'visible-to-user="true" bounds="[0,0][2,1]"/>'
         )
@@ -80,6 +88,8 @@ class FakeDeviceAdapter:
             "com.example.ime/.PinyinIme",
         )
         self.enabled_imes: list[str] = ["com.example.ime/.DefaultIme"]
+        self.field_text = ""
+        self.field_class = "android.widget.EditText"
         self._installed_apps = {"com.android.settings", "com.example.fake"}
         self._running_apps = {"com.example.fake"}
         self._stopped_apps: set[str] = set()
@@ -137,7 +147,12 @@ class FakeDeviceAdapter:
             "application/xml",
             self.custom_ui_xml
             if self.custom_ui_xml is not None
-            else _fake_ui_xml(self.foreground_app, self.foreground_activity),
+            else _fake_ui_xml(
+                self.foreground_app,
+                self.foreground_activity,
+                self.field_text,
+                self.field_class,
+            ),
             ".xml",
         )
         app_time = _now()
@@ -217,6 +232,11 @@ class FakeDeviceAdapter:
 
     async def input_text(self, device_id: str, text: str) -> None:
         self.actions.append(("input.text", device_id, text))
+        # 模拟设备端追加语义：Helper IME 收到的是 Modified UTF-7，需解码后上屏。
+        if is_helper_ime(self.current_ime):
+            self.field_text += decode_modified_utf7(text)
+        else:
+            self.field_text += text
 
     async def current_input_method(self, device_id: str) -> str:
         self.actions.append(("input.ime.current", device_id))

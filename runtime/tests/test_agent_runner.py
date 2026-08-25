@@ -311,12 +311,10 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_executes_unicode_input_skill_via_planner(self) -> None:
         """中文输入目标经模型循环调用 input.unicode_text 完成并恢复原 IME。"""
         adapter = FakeDeviceAdapter()
-        adapter.custom_ui_xml = (
-            '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
-            '<node text="你好世界" resource-id="search_box" class="android.widget.EditText" '
-            'package="com.example.form" clickable="true" enabled="true" '
-            'visible-to-user="true" bounds="[0,0][2,1]"/></hierarchy>'
-        ).encode()
+        # 动态 fake 路径：读回文本随 input.text 追加更新（追加语义验证）。
+        adapter.foreground_app = "com.example.form"
+        adapter.foreground_activity = ".MainActivity"
+        adapter.field_text = ""
         adapter.installed_imes = (
             "com.example.ime/.DefaultIme",
             f"{HELPER_PACKAGE}/{HELPER_PACKAGE}.UnicodeImeService",

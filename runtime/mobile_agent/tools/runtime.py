@@ -38,7 +38,13 @@ def _now() -> str:
 
 
 def _is_editable_node(node: UiNode) -> bool:
-    return node.class_name.endswith(".EditText") or node.class_name == "EditText"
+    # AutoCompleteTextView/MultiAutoCompleteTextView 是 EditText 的平台子类，
+    # 但类名以 TextView 结尾；appcompat 变体以 EditText 结尾。
+    return (
+        node.class_name.endswith(".EditText")
+        or node.class_name == "EditText"
+        or node.class_name.endswith("AutoCompleteTextView")
+    )
 
 
 def _is_sensitive_input_target(node: UiNode) -> bool:

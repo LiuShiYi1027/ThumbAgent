@@ -50,6 +50,17 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _remote_shell_quote(value: str) -> str:
+    """Quote one argv element for adb's remote shell string join.
+
+    adb 把 argv 用空格拼接后交给设备端 sh 解释，Modified UTF-7 的 '&' 移位符
+    会被当作后台操作符（ITER-0059 真机发现）。单引号包裹是确定性的逐字符
+    引用；本地仍是固定可执行文件与参数数组，不涉及 shell=True。
+    """
+
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 # The only Android actions app.navigate can reach. Callers never supply these
 # strings; they are fixed per NavigationTarget enum and carry no extras.
 _NAVIGATION_ACTIONS: dict[NavigationTarget, str] = {
@@ -431,7 +442,9 @@ class AndroidDeviceAdapter:
 
     async def input_text(self, device_id: str, text: str) -> None:
         serial = self._serial_from_device_id(device_id)
-        result = await self._runner.run("-s", serial, "shell", "input", "text", text)
+        result = await self._runner.run(
+            "-s", serial, "shell", "input", "text", _remote_shell_quote(text)
+        )
         self._require_success(result.returncode, "设备文本输入失败", result.stderr_text)
 
     async def current_input_method(self, device_id: str) -> str:

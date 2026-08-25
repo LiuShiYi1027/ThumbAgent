@@ -105,6 +105,35 @@ def encode_modified_utf7(text: str) -> str:
     return "".join(parts)
 
 
+def decode_modified_utf7(encoded: str) -> str:
+    """Decode Modified UTF-7 produced by encode_modified_utf7.
+
+    Runtime 正常路径不需要解码（设备端 Helper IME 负责）；此函数供测试
+    Fake 与诊断脚本模拟设备端行为，实现与编码器严格对称。
+    """
+
+    out: list[str] = []
+    index = 0
+    while index < len(encoded):
+        char = encoded[index]
+        if char != "&":
+            out.append(char)
+            index += 1
+            continue
+        end = encoded.find("-", index)
+        if end < 0:
+            raise ValueError("unterminated modified UTF-7 block")
+        block = encoded[index + 1 : end]
+        if block:
+            standard = block.replace(",", "/")
+            standard += "=" * (-len(standard) % 4)
+            out.append(base64.b64decode(standard).decode("utf-16-be"))
+        else:
+            out.append("&")
+        index = end + 1
+    return "".join(out)
+
+
 def normalize_for_verification(text: str) -> str:
     """NFC 归一化，读回验证的唯一比对形态（ADR-0019 容差决策）。"""
 

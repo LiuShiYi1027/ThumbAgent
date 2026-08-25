@@ -135,5 +135,21 @@ class UnicodeImeAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("IME_SWITCH_FAILED", ctx.exception.code)
 
 
+    async def test_input_text_quotes_utf7_shift_marker_for_remote_shell(self) -> None:
+        # ITER-0059 真机回归：adb 把 argv 拼为远端 sh 命令行，'&' 不加引用
+        # 会被当作后台操作符导致整条注入失败。
+        adapter, process = _adapter(
+            {
+                ("-s", "serial-1", "shell", "input", "text", "'&T2BZfU4WdUw-'"): result(
+                    ("-s", "serial-1", "shell", "input", "text", "'&T2BZfU4WdUw-'")
+                ),
+            }
+        )
+
+        await adapter.input_text("adb:serial-1", "&T2BZfU4WdUw-")
+
+        self.assertEqual(1, len(process.calls))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,13 +34,21 @@ def _form_xml(text: str, resource_id: str = "search_box") -> bytes:
     ).encode()
 
 
-def _ready_adapter(field_text: str) -> FakeDeviceAdapter:
-    adapter = FakeDeviceAdapter()
-    adapter.custom_ui_xml = _form_xml(field_text)
+def _configure_ready(
+    adapter: FakeDeviceAdapter, field_text: str = ""
+) -> FakeDeviceAdapter:
+    """动态 fake 路径：前台为 com.example.form，读回文本随 input_text 追加更新。"""
+    adapter.foreground_app = "com.example.form"
+    adapter.foreground_activity = ".MainActivity"
+    adapter.field_text = field_text
     adapter.installed_imes = (DEFAULT_IME, HELPER_FULL)
     adapter.enabled_imes = [DEFAULT_IME]
     adapter.current_ime = DEFAULT_IME
     return adapter
+
+
+def _ready_adapter(field_text: str = "") -> FakeDeviceAdapter:
+    return _configure_ready(FakeDeviceAdapter(), field_text)
 
 
 class HelperSetFailingAdapter(FakeDeviceAdapter):
@@ -77,6 +85,14 @@ class RestoreFailingAdapter(FakeDeviceAdapter):
         self.current_ime = ime_id
 
 
+class TamperingAdapter(FakeDeviceAdapter):
+    """Simulate the field being mutated between input and read-back."""
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        await super().input_text(device_id, text)
+        self.field_text += "X"
+
+
 class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.directory = TemporaryDirectory()
@@ -87,7 +103,7 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         return RuntimeService(adapter, self.artifacts)
 
     async def test_success_switches_inputs_verifies_and_restores(self) -> None:
-        adapter = _ready_adapter("你好世界")
+        adapter = _ready_adapter()
         runtime = self._runtime(adapter)
 
         result = await runtime.unicode_text_input(
@@ -125,8 +141,32 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(("input.ime.set", DEVICE_ID, DEFAULT_IME), set_actions[-1])
         self.assertEqual(DEFAULT_IME, adapter.current_ime)
 
+    async def test_autocomplete_text_view_is_accepted_as_editable(self) -> None:
+        """AutoCompleteTextView（EditText 平台子类，MagicOS 搜索框实际形态）可输入。"""
+        adapter = _ready_adapter()
+        adapter.field_class = "android.widget.AutoCompleteTextView"
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "你好世界", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+
+    async def test_append_semantics_preserves_existing_field_text(self) -> None:
+        """commitText 是追加语义：字段已有内容时验证期望为 原文 + 目标文本。"""
+        adapter = _ready_adapter("前缀")
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "你好", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("前缀你好", adapter.field_text)
+
     async def test_already_enabled_helper_skips_enable(self) -> None:
-        adapter = _ready_adapter("你好")
+        adapter = _ready_adapter()
         adapter.enabled_imes = [DEFAULT_IME, HELPER_FULL]
         runtime = self._runtime(adapter)
 
@@ -149,11 +189,7 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("input.text", kinds)
 
     async def test_switch_failure_maps_to_ime_switch_failed_without_input(self) -> None:
-        adapter = _ready_adapter("你好")
-        failing = HelperSetFailingAdapter()
-        failing.custom_ui_xml = adapter.custom_ui_xml
-        failing.installed_imes = adapter.installed_imes
-        failing.enabled_imes = list(adapter.enabled_imes)
+        failing = _configure_ready(HelperSetFailingAdapter())
         runtime = self._runtime(failing)
 
         with self.assertRaises(MobileAgentError) as raised:
@@ -164,7 +200,7 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("input.text", kinds)
 
     async def test_readback_mismatch_fails_and_restores(self) -> None:
-        adapter = _ready_adapter("被篡改的内容")
+        adapter = _configure_ready(TamperingAdapter())
         runtime = self._runtime(adapter)
 
         with self.assertRaises(MobileAgentError) as raised:
@@ -178,11 +214,7 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(DEFAULT_IME, adapter.current_ime)
 
     async def test_restore_failure_is_reported_prominently(self) -> None:
-        adapter = RestoreFailingAdapter()
-        adapter.custom_ui_xml = _form_xml("你好")
-        adapter.installed_imes = (DEFAULT_IME, HELPER_FULL)
-        adapter.enabled_imes = [DEFAULT_IME]
-        adapter.current_ime = DEFAULT_IME
+        adapter = _configure_ready(RestoreFailingAdapter())
         runtime = self._runtime(adapter)
 
         with self.assertRaises(MobileAgentError) as raised:
