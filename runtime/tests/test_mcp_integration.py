@@ -405,6 +405,91 @@ class McpRuntimeIntegrationTests(unittest.TestCase):
         self.assertEqual(12.5, report["evidence_summary"]["cpu_total_usage_percent"])
         self.assertNotIn("dumpsys", str(report).lower())
 
+    def test_mcp_inputs_unicode_text_through_local_api(self) -> None:
+        """MCP → REST → Skill 全链路：Helper IME 切换、读回验证与原 IME 恢复。"""
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = FakeDeviceAdapter()
+            adapter.custom_ui_xml = (
+                '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
+                '<node text="你好世界" resource-id="search_box" class="android.widget.EditText" '
+                'package="com.example.form" clickable="true" enabled="true" '
+                'visible-to-user="true" bounds="[0,0][2,1]"/></hierarchy>'
+            ).encode()
+            adapter.installed_imes = (
+                "com.example.ime/.DefaultIme",
+                "com.thumbagent.unicodeime/com.thumbagent.unicodeime.UnicodeImeService",
+            )
+            adapter.enabled_imes = ["com.example.ime/.DefaultIme"]
+            adapter.current_ime = "com.example.ime/.DefaultIme"
+            runtime = RuntimeService(adapter, ArtifactStore(Path(directory) / "artifacts"))
+            server = McpServer(
+                RuntimeApiClient(
+                    "http://127.0.0.1:8765",
+                    "integration-token",
+                    _InProcessHttpTransport(runtime),
+                )
+            )
+            _ready(server)
+
+            listed = server.handle(
+                _request(3, "tools/list", {"cursor": None})
+            )["result"]["tools"]
+            tool = next(t for t in listed if t["name"] == "mobile_input_unicode_text")
+            # 对外广告的 inputSchema 必须自包含（ui-selector 已内联，无文件级 $ref）。
+            selector_schema = tool["inputSchema"]["properties"]["selector"]
+            self.assertNotIn("$ref", json.dumps(tool["inputSchema"]))
+            self.assertEqual("object", selector_schema["type"])
+            self.assertIn("strategy", selector_schema["required"])
+
+            result = server.handle(
+                _request(
+                    4,
+                    "tools/call",
+                    {
+                        "name": "mobile_input_unicode_text",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "selector": {
+                                "strategy": "resource_id",
+                                "value": "search_box",
+                                "match": "exact",
+                            },
+                            "text": "你好世界",
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )["result"]["structuredContent"]["result"]
+
+            rejected = server.handle(
+                _request(
+                    5,
+                    "tools/call",
+                    {
+                        "name": "mobile_input_unicode_text",
+                        "arguments": {
+                            "device_id": "fake:android-001",
+                            "selector": {
+                                "strategy": "resource_id",
+                                "value": "search_box",
+                            },
+                            "text": "123456",
+                            "confirmed": True,
+                        },
+                    },
+                )
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("input.unicode_text", result["skill_id"])
+        self.assertTrue(result["ime"]["restored"])
+        self.assertEqual("com.example.ime/.DefaultIme", result["ime"]["previous_id"])
+        self.assertNotIn("你好世界", str(result))
+        self.assertEqual("com.example.ime/.DefaultIme", adapter.current_ime)
+        # 敏感数字形态在 Runtime 侧拒绝，MCP 透传安全 Error Contract。
+        self.assertTrue(rejected["result"]["isError"])
+        self.assertIn("ACTION_REJECTED_BY_POLICY", str(rejected["result"]))
+
 
 class _InProcessHttpTransport:
     """Exercise the real HTTP handler without opening a test socket."""

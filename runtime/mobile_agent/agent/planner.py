@@ -266,19 +266,34 @@ def parse_llm_decision_payload(payload: object, planner_id: str) -> AgentDecisio
             "Planner 输出缺少有效 arguments",
             {"payload_keys": _sorted_keys(payload), "arguments_type": type(arguments).__name__},
         )
-    if decision_kind is AgentDecisionType.RUN_SKILL and (
-        not isinstance(arguments.get("target_selector"), dict)
-        or not isinstance(arguments.get("expected_selector"), dict)
-    ):
-        raise _model_output_invalid(
-            "Planner 输出缺少有效 Selector 参数",
-            {
-                "payload_keys": _sorted_keys(payload),
-                "argument_keys": _sorted_keys(arguments),
-                "target_selector_type": type(arguments.get("target_selector")).__name__,
-                "expected_selector_type": type(arguments.get("expected_selector")).__name__,
-            },
-        )
+    if decision_kind is AgentDecisionType.RUN_SKILL:
+        if skill_id == "input.unicode_text":
+            # Unicode 输入技能的参数形态与滚动导航不同：selector + text。
+            if not isinstance(arguments.get("selector"), dict) or not isinstance(
+                arguments.get("text"), str
+            ):
+                raise _model_output_invalid(
+                    "Planner 输出缺少有效 selector 或 text 参数",
+                    {
+                        "payload_keys": _sorted_keys(payload),
+                        "argument_keys": _sorted_keys(arguments),
+                        "selector_type": type(arguments.get("selector")).__name__,
+                        "text_type": type(arguments.get("text")).__name__,
+                    },
+                )
+        elif (
+            not isinstance(arguments.get("target_selector"), dict)
+            or not isinstance(arguments.get("expected_selector"), dict)
+        ):
+            raise _model_output_invalid(
+                "Planner 输出缺少有效 Selector 参数",
+                {
+                    "payload_keys": _sorted_keys(payload),
+                    "argument_keys": _sorted_keys(arguments),
+                    "target_selector_type": type(arguments.get("target_selector")).__name__,
+                    "expected_selector_type": type(arguments.get("expected_selector")).__name__,
+                },
+            )
     if decision_kind is AgentDecisionType.RUN_TOOL:
         validate_agent_tool_arguments(tool_id, arguments)
     if decision_kind is AgentDecisionType.FINISH:

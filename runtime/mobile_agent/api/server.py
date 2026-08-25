@@ -225,6 +225,9 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         notifications_read_match = re.fullmatch(
             r"/v1/skills/device\.notifications\.read/invoke", self.path
         )
+        unicode_text_match = re.fullmatch(
+            r"/v1/skills/input\.unicode_text/invoke", self.path
+        )
         navigation_match = re.fullmatch(r"/v1/skills/settings\.navigate/invoke", self.path)
         scroll_navigation_match = re.fullmatch(
             r"/v1/skills/settings\.scroll_navigate/invoke", self.path
@@ -649,6 +652,24 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("notifications read arguments")
                 status, payload = self._runtime().read_device_notifications_sync(
                     device_id, max_notifications, confirmed
+                )
+            elif unicode_text_match:
+                if not set(body).issubset(
+                    {"device_id", "selector", "text", "confirmed"}
+                ):
+                    raise ValueError("unicode text input fields")
+                selector = body.get("selector")
+                text = body.get("text")
+                confirmed = body.get("confirmed", False)
+                if (
+                    not isinstance(selector, dict)
+                    or not isinstance(text, str)
+                    or not 1 <= len(text) <= 256
+                    or not isinstance(confirmed, bool)
+                ):
+                    raise ValueError("unicode text input arguments")
+                status, payload = self._runtime().unicode_text_input_sync(
+                    device_id, selector, text, confirmed
                 )
             elif async_device_performance_match:
                 if not set(body).issubset({"device_id", "deadline_seconds"}):

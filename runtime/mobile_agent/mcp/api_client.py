@@ -212,6 +212,18 @@ class RuntimeApiClient:
             },
         )
 
+    def input_unicode_text(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/skills/input.unicode_text/invoke",
+            {
+                "device_id": arguments["device_id"],
+                "selector": arguments["selector"],
+                "text": arguments["text"],
+                "confirmed": arguments["confirmed"],
+            },
+        )
+
     def compare_performance(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/performance-comparisons", arguments)
 

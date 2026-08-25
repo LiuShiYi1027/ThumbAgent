@@ -257,6 +257,7 @@ class RuntimeService:
             self._tools,
             self._settings_scroll_navigate,
             navigation_shortcuts_enabled,
+            unicode_text_input=self._unicode_text_input,
         )
         self._task_store = task_store or InMemoryTaskStore()
         self._agent_evaluator = AgentEvaluator()
@@ -2172,6 +2173,23 @@ class RuntimeService:
                 self.read_device_notifications(
                     device_id, max_notifications, confirmed
                 )
+            )
+            return HTTPStatus.OK, {"result": result}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def unicode_text_input_sync(
+        self,
+        device_id: str,
+        selector: dict[str, Any],
+        text: str,
+        confirmed: bool = False,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for the Unicode text input Skill."""
+
+        try:
+            result = asyncio.run(
+                self.unicode_text_input(device_id, selector, text, confirmed)
             )
             return HTTPStatus.OK, {"result": result}
         except MobileAgentError as error:

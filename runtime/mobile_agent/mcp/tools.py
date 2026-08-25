@@ -245,6 +245,14 @@ TOOLS = (
         True,
     ),
     McpToolDefinition(
+        "mobile_input_unicode_text",
+        "Input Unicode text",
+        "Input CJK and other Unicode text into one editable field via the controlled Helper IME with read-back verification; the previous IME is always restored. The MCP host must show the target field and obtain explicit user confirmation before confirmed=true. Verification codes, phone numbers and other sensitive digit shapes are rejected. Never returns the input text itself, only length and digest.",
+        "unicode_text_input",
+        False,
+        False,
+    ),
+    McpToolDefinition(
         "mobile_capture_device_performance",
         "Capture device performance",
         "Submit a privacy-minimized aggregate CPU, memory, battery and load snapshot. Returns task_id and never raw dumpsys output.",
@@ -283,11 +291,32 @@ def load_input_schemas() -> dict[str, dict[str, Any]]:
     schemas: dict[str, dict[str, Any]] = {}
     for name, schema in definitions.items():
         if isinstance(name, str) and isinstance(schema, dict):
-            schemas[name] = dict(schema)
+            schemas[name] = _inline_local_refs(dict(schema), root)
     missing = {tool.schema_key for tool in TOOLS} - schemas.keys()
     if missing:
         raise RuntimeError("MCP tool input contract is incomplete")
     return schemas
+
+
+def _inline_local_refs(node: Any, root: Path, seen: frozenset[str] = frozenset()) -> Any:
+    """Inline same-directory file $refs so advertised MCP schemas are self-contained."""
+
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and re.fullmatch(r"[a-z0-9-]+\.schema\.json", ref):
+            if ref in seen:
+                raise RuntimeError(f"cyclic schema reference: {ref}")
+            referenced = json.loads((root / ref).read_text(encoding="utf-8"))
+            inlined = {
+                key: value
+                for key, value in referenced.items()
+                if key not in {"$schema", "$id", "title"}
+            }
+            return _inline_local_refs(inlined, root, seen | {ref})
+        return {key: _inline_local_refs(value, root, seen) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_inline_local_refs(item, root, seen) for item in node]
+    return node
 
 
 def validate_arguments(schema: dict[str, Any], arguments: object) -> list[str]:

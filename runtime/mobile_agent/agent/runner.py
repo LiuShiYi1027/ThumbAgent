@@ -40,7 +40,7 @@ def _now() -> str:
 class AgentRunner:
     """Run a bounded Observe-Plan-Act preview task."""
 
-    _ALLOWED_SKILLS = frozenset({"settings.scroll_navigate"})
+    _ALLOWED_SKILLS = frozenset({"settings.scroll_navigate", "input.unicode_text"})
     _ALLOWED_TOOLS = frozenset(
         {
             "app.launch",
@@ -66,12 +66,14 @@ class AgentRunner:
         tools: ToolRuntime,
         settings_scroll_navigate: SettingsScrollNavigateSkill,
         navigation_shortcuts_enabled: bool = True,
+        unicode_text_input: Any | None = None,
     ) -> None:
         self._adapter = adapter
         self._artifacts = artifacts
         self._planner = planner
         self._tools = tools
         self._settings_scroll_navigate = settings_scroll_navigate
+        self._unicode_text_input = unicode_text_input
         # 系统设置直达捷径默认开启；测试 Planner 决策循环时显式关闭，
         # 避免导航类目标在进入循环前被 Runtime 捷径接管。
         self._navigation_shortcuts_enabled = navigation_shortcuts_enabled
@@ -679,6 +681,24 @@ class AgentRunner:
         self, device_id: str, decision: AgentDecision, confirmed: bool
     ) -> Any:
         arguments = decision.arguments
+        if decision.skill_id == "input.unicode_text":
+            if self._unicode_text_input is None:
+                raise MobileAgentError(
+                    code="CAPABILITY_UNAVAILABLE",
+                    category=ErrorCategory.CAPABILITY,
+                    message="当前 Runtime 未装配 Unicode 输入 Skill",
+                )
+            selector = arguments.get("selector")
+            text = arguments.get("text")
+            if not isinstance(selector, dict) or not isinstance(text, str):
+                raise MobileAgentError(
+                    code="MODEL_OUTPUT_INVALID",
+                    category=ErrorCategory.VALIDATION,
+                    message="Planner 输出缺少有效 selector 或 text",
+                )
+            return await self._unicode_text_input.invoke(
+                device_id, selector, text, confirmed=confirmed
+            )
         target = arguments.get("target_selector")
         expected = arguments.get("expected_selector")
         if not isinstance(target, dict) or not isinstance(expected, dict):

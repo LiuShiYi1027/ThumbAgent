@@ -292,6 +292,9 @@ class McpServer:
             "mobile_read_device_notifications": lambda: (
                 self._client.read_notifications(arguments)
             ),
+            "mobile_input_unicode_text": lambda: (
+                self._client.input_unicode_text(arguments)
+            ),
             "mobile_capture_device_performance": lambda: self._client.capture_performance(
                 arguments
             ),

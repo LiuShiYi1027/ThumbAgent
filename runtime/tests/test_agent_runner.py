@@ -17,6 +17,7 @@ from mobile_agent.agent import (
 )
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.devices.fake import FakeDeviceAdapter
+from mobile_agent.domain.unicode_input import HELPER_PACKAGE
 from mobile_agent.domain.app import InstalledApp
 from mobile_agent.domain.app_lifecycle import AppRuntimeState
 from mobile_agent.domain.artifact import ArtifactWriter
@@ -30,7 +31,9 @@ from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.runtime import RuntimeService
 from mobile_agent.skills.open_app import OpenAppSkill
 from mobile_agent.skills.settings_navigate import SettingsScrollNavigateSkill
+from mobile_agent.skills.unicode_input import UnicodeTextInputSkill
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
+from mobile_agent.tools.unicode_input import UnicodeTextInputTool
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -304,6 +307,114 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         assert task.error is not None
         self.assertEqual("ACTION_REJECTED_BY_POLICY", task.error["code"])
         self.assertEqual([], adapter.actions)
+
+    async def test_agent_executes_unicode_input_skill_via_planner(self) -> None:
+        """中文输入目标经模型循环调用 input.unicode_text 完成并恢复原 IME。"""
+        adapter = FakeDeviceAdapter()
+        adapter.custom_ui_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
+            '<node text="你好世界" resource-id="search_box" class="android.widget.EditText" '
+            'package="com.example.form" clickable="true" enabled="true" '
+            'visible-to-user="true" bounds="[0,0][2,1]"/></hierarchy>'
+        ).encode()
+        adapter.installed_imes = (
+            "com.example.ime/.DefaultIme",
+            f"{HELPER_PACKAGE}/{HELPER_PACKAGE}.UnicodeImeService",
+        )
+        adapter.enabled_imes = ["com.example.ime/.DefaultIme"]
+        adapter.current_ime = "com.example.ime/.DefaultIme"
+        artifacts = ArtifactStore(Path(self.directory.name))
+        registry = ToolRegistry()
+        policy = PolicyEngine()
+        tools = ToolRuntime(adapter, artifacts, registry, policy)
+        unicode_skill = UnicodeTextInputSkill(
+            UnicodeTextInputTool(adapter, artifacts, registry, policy)
+        )
+        payloads = [
+            {
+                "decision_type": "run_skill",
+                "skill_id": "input.unicode_text",
+                "arguments": {
+                    "selector": {
+                        "strategy": "resource_id",
+                        "value": "search_box",
+                        "match": "exact",
+                    },
+                    "text": "你好世界",
+                },
+                "reason": "The goal asks to type Chinese text into the search box.",
+                "confidence": 0.85,
+            },
+            {
+                "decision_type": "finish",
+                "arguments": {
+                    "expected_selector": {
+                        "strategy": "text",
+                        "value": "你好世界",
+                        "match": "exact",
+                    }
+                },
+                "reason": "The field now shows the requested text.",
+                "confidence": 0.9,
+            },
+        ]
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(payloads),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
+            navigation_shortcuts_enabled=False,
+            unicode_text_input=unicode_skill,
+        )
+
+        task = await runner.run(
+            "fake:android-001",
+            "在搜索框输入你好世界",
+            confirmed=True,
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        skill_result = task.steps[0].result["skill_result"]
+        self.assertEqual("input.unicode_text", skill_result["skill_id"])
+        self.assertTrue(skill_result["ime"]["restored"])
+        self.assertEqual(
+            "com.example.ime/.DefaultIme", skill_result["ime"]["previous_id"]
+        )
+        self.assertNotIn("你好世界", str(skill_result))
+        set_actions = [a for a in adapter.actions if a[0] == "input.ime.set"]
+        self.assertEqual(
+            ("input.ime.set", "fake:android-001", "com.example.ime/.DefaultIme"),
+            set_actions[-1],
+        )
+
+    def test_llm_unicode_skill_payload_requires_selector_and_text(self) -> None:
+        valid = {
+            "decision_type": "run_skill",
+            "skill_id": "input.unicode_text",
+            "arguments": {
+                "selector": {"strategy": "resource_id", "value": "search_box"},
+                "text": "你好",
+            },
+            "reason": "type unicode text",
+            "confidence": 0.8,
+        }
+
+        decision = parse_llm_decision_payload(valid, "mock_llm.preview")
+        self.assertEqual("input.unicode_text", decision.skill_id)
+
+        for bad_arguments in (
+            {"selector": {"strategy": "resource_id", "value": "search_box"}},
+            {"text": "你好"},
+            {"target_selector": {}, "expected_selector": {}},
+        ):
+            with self.subTest(arguments=bad_arguments):
+                with self.assertRaises(MobileAgentError) as raised:
+                    parse_llm_decision_payload(
+                        {**valid, "arguments": bad_arguments}, "mock_llm.preview"
+                    )
+                self.assertEqual("MODEL_OUTPUT_INVALID", raised.exception.code)
 
     def test_llm_decision_payload_parser_rejects_invalid_shapes(self) -> None:
         invalid_payloads: list[object] = [
