@@ -80,7 +80,7 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 | 候选 | 类型 | 真实场景 | 治理缺口 | 前置条件 |
 | --- | --- | --- | --- | --- |
 | 应用稳定性测试 Skill（`app.stability_test`） | 官方内置 Skill，纯编排既有能力，无新设备原语 | 「打开京东搜索 iPhone 17，再做 5 分钟稳定性测试」类复合意图：时间盒内确定性遍历交互 + 崩溃/ANR 判定 + 性能曲线采样 + 结构化报告 | 时长与动作频次上限、报告模板、任务取消语义；日志 PII 沿用 `logs.collect@1` 脱敏边界 | 普通迭代（B 档治理粒度），确定性遍历优先于 Monkey 随机 |
-| 声明式 Skill 注册（受限 DSL） | V2 平台扩展能力 | 用户/第三方不经代码评审即可自定义复合技能，支撑「全能移动端操作 agent」的长期扩展形态 | 新代码执行信任边界：禁止任意代码入 Runtime；DSL 由 Runtime 解释执行，只能引用已登记 Tool/Capability 并继承 Policy 授权与确认语义 | 独立 ADR + DSL Contract Schema + 沙箱执行语义设计；稳定性测试 Skill 是其首个驱动场景 |
+| Skill 扩展与管理 | V2 平台元能力：agent 的技能生态与生命周期治理，「全能移动端操作 agent」的扩展形态 | 用户/第三方自定义复合技能（稳定性测试为首驱动场景），并对技能做注册/查看/启停/版本/卸载管理 | 双重信任边界：① 执行边界——禁止任意代码入 Runtime，声明式 DSL 由 Runtime 解释执行，只能引用已登记 Tool/Capability，风险等级从所编排能力派生，继承 Policy 授权与确认语义；② 管理边界——Skill Registry 从启动期装配改为持久化运行时状态，带审计与管理面 | 独立 ADR + DSL Contract Schema + Skill Registry 持久化与管理面（REST/Desktop）设计 |
 
 ## 5. 接入流程（每个候选的固定路径）
 
@@ -95,6 +95,7 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 
 - ~~ITER-0059~~：CJK 文本输入 helper 已交付（`input.unicode@1`，UTF-7 Helper IME 路线，
   真机六场景全 PASS，见 [ITER-0059 复盘](../iterations/0059-unicode-text-input/retrospective.md)）。
-- **下一候选**：应用稳定性测试 Skill（§4.4，驱动场景与治理缺口已明确）；或按真实任务
-  暴露的需求从 A 档拉动（音量/亮度、录屏快照、设置枚举扩充）。
+- 其后按真实任务暴露的需求拉动：候选池见 §4（A 档设备动作与 §4.4 复合 Skill/平台扩展
+  候选，含音量/亮度、录屏快照、设置枚举扩充、稳定性测试 Skill）；候选仅在真实场景
+  重复出现时进入排期。
 - 每次迭代接入 1–2 个候选，保持评审粒度。
