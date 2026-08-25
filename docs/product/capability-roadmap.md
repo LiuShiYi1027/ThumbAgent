@@ -1,7 +1,7 @@
 # Mobile Agent 能力路线图（候选清单与分级治理）
 
 > 文档状态：Draft
-> 更新日期：2026-08-24
+> 更新日期：2026-08-25
 > 关联：[产品定位](./positioning.md) · [Capability 模型](../architecture/capability-model.md) · [ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md) · [ITER-0058 复盘](../iterations/0058-programmatic-navigation/retrospective.md)
 
 ## 1. 目的
@@ -28,7 +28,8 @@
 
 ```text
 设备与观察    device.inspect@1 · screen.observe@1
-GUI 动作      input.tap@1 · input.text@1（ASCII 限制）· input.swipe@1
+GUI 动作      input.tap@1 · input.text@1（ASCII 快路径）· input.swipe@1
+              input.unicode@1（Helper IME：CJK/Unicode，Medium 确认）
               navigation.back@1 · navigation.home@1
 应用管理      app.launch@1 · app.inspect@1 · app.install@1（High）
               app.uninstall@1（High）· app.state.inspect@1 · app.stop@1
@@ -72,6 +73,15 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 读取或转发通知正文、短信正文等内容级数据（默认丢弃，只保留元数据）
 ```
 
+### 4.4 复合 Skill 与平台扩展候选
+
+以下候选不是新设备动作，而是既有能力的组合方式与扩展形态，单独治理。
+
+| 候选 | 类型 | 真实场景 | 治理缺口 | 前置条件 |
+| --- | --- | --- | --- | --- |
+| 应用稳定性测试 Skill（`app.stability_test`） | 官方内置 Skill，纯编排既有能力，无新设备原语 | 「打开京东搜索 iPhone 17，再做 5 分钟稳定性测试」类复合意图：时间盒内确定性遍历交互 + 崩溃/ANR 判定 + 性能曲线采样 + 结构化报告 | 时长与动作频次上限、报告模板、任务取消语义；日志 PII 沿用 `logs.collect@1` 脱敏边界 | 普通迭代（B 档治理粒度），确定性遍历优先于 Monkey 随机 |
+| 声明式 Skill 注册（受限 DSL） | V2 平台扩展能力 | 用户/第三方不经代码评审即可自定义复合技能，支撑「全能移动端操作 agent」的长期扩展形态 | 新代码执行信任边界：禁止任意代码入 Runtime；DSL 由 Runtime 解释执行，只能引用已登记 Tool/Capability 并继承 Policy 授权与确认语义 | 独立 ADR + DSL Contract Schema + 沙箱执行语义设计；稳定性测试 Skill 是其首个驱动场景 |
+
 ## 5. 接入流程（每个候选的固定路径）
 
 1. 在本文档确认场景与档位；A 档候选可直接进入迭代规划。
@@ -83,5 +93,8 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 
 ## 6. 近期排期建议
 
-- **ITER-0059**：CJK 文本输入 helper（A 档首选项，已是 ITER-0058 遗留候选）。
-- 其后按真实任务暴露的需求拉动；每次迭代接入 1–2 个候选，保持评审粒度。
+- ~~ITER-0059~~：CJK 文本输入 helper 已交付（`input.unicode@1`，UTF-7 Helper IME 路线，
+  真机六场景全 PASS，见 [ITER-0059 复盘](../iterations/0059-unicode-text-input/retrospective.md)）。
+- **下一候选**：应用稳定性测试 Skill（§4.4，驱动场景与治理缺口已明确）；或按真实任务
+  暴露的需求从 A 档拉动（音量/亮度、录屏快照、设置枚举扩充）。
+- 每次迭代接入 1–2 个候选，保持评审粒度。
