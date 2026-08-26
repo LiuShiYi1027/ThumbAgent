@@ -5,7 +5,7 @@
  */
 
 export interface UiSelector {
-  strategy: "resource_id" | "text" | "content_description";
+  strategy: "resource_id" | "text" | "content_description" | "hint";
   value: string;
   match?: "exact" | "contains";
   clickable?: boolean;
@@ -13,7 +13,7 @@ export interface UiSelector {
   resolve_clickable_ancestor?: boolean;
   package?: string;
   ancestor_path?: Array<{
-    strategy: "resource_id" | "text" | "content_description";
+    strategy: "resource_id" | "text" | "content_description" | "hint";
     value: string;
     match?: "exact" | "contains";
   }>;

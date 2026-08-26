@@ -22,6 +22,7 @@ export interface AgentObservationSummary {
     content_description: string;
     resource_id: string;
     class_name: string;
+    hint?: string;
     clickable: boolean;
     clickable_ancestor?: boolean;
     enabled: boolean;

@@ -269,3 +269,25 @@ class SemanticNavigationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hint", schema["properties"])
         self.assertNotIn("hint", schema["required"])
         self.assertEqual("string", schema["properties"]["hint"]["type"])
+
+    def test_ui_selector_accepts_hint_strategy(self) -> None:
+        """hint 选择器策略（含 ancestor_path）是 additive 枚举扩充。"""
+        schema = json.loads(
+            (ROOT / "contracts/schemas/ui-selector.schema.json").read_text(encoding="utf-8")
+        )
+
+        self.assertIn("hint", schema["properties"]["strategy"]["enum"])
+        ancestor = schema["properties"]["ancestor_path"]["items"]["properties"]
+        self.assertIn("hint", ancestor["strategy"]["enum"])
+
+    def test_observation_summary_items_hint_is_optional(self) -> None:
+        """观察摘要 item 的 hint 是可选字段：不进 required，向后兼容。"""
+        schema = json.loads(
+            (ROOT / "contracts/schemas/agent-observation-summary.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        items = schema["properties"]["ui_summary"]["items"]
+        self.assertIn("hint", items["properties"])
+        self.assertNotIn("hint", items["required"])

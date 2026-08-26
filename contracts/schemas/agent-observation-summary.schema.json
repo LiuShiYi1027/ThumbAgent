@@ -39,6 +39,7 @@
           "content_description": { "type": "string", "maxLength": 120 },
           "resource_id": { "type": "string", "maxLength": 160 },
           "class_name": { "type": "string", "maxLength": 120 },
+          "hint": { "type": "string", "maxLength": 120 },
           "clickable": { "type": "boolean" },
           "clickable_ancestor": { "type": "boolean" },
           "enabled": { "type": "boolean" }

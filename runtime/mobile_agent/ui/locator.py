@@ -95,6 +95,7 @@ class UiLocator:
             SelectorStrategy.RESOURCE_ID: node.resource_id,
             SelectorStrategy.TEXT: node.text,
             SelectorStrategy.CONTENT_DESCRIPTION: node.content_description,
+            SelectorStrategy.HINT: node.hint,
         }[predicate.strategy]
         semantic_match = (
             candidate == predicate.value

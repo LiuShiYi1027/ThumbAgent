@@ -13,6 +13,8 @@ class SelectorStrategy(str, Enum):
     RESOURCE_ID = "resource_id"
     TEXT = "text"
     CONTENT_DESCRIPTION = "content_description"
+    # 输入框占位文本：真机上空字段的 text 即 hint，text 策略脆弱且语义不符。
+    HINT = "hint"
 
 
 class MatchMode(str, Enum):

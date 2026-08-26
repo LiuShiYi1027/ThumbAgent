@@ -830,6 +830,40 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(step.result["action_result"])
         self.assertEqual("TARGET_NOT_FOUND", step.result["action_feedback"]["error_code"])
 
+    async def test_observation_summary_exposes_hint_for_editable_fields(self) -> None:
+        """空输入框 text==hint 场景：hint 进观察摘要，模型才能用 hint 策略定位。"""
+        adapter = FakeDeviceAdapter()
+        adapter.custom_ui_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
+            '<node text="搜索设置项" hint="搜索设置项" resource-id="android:id/search_src_text" '
+            'class="android.widget.AutoCompleteTextView" package="com.android.settings" '
+            'clickable="true" enabled="true" visible-to-user="true" bounds="[0,0][2,1]"/>'
+            '<node text="Plain" resource-id="plain" class="android.widget.TextView" '
+            'package="com.android.settings" clickable="false" enabled="true" '
+            'visible-to-user="true" bounds="[0,1][2,2]"/>'
+            '</hierarchy>'
+        ).encode()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(valid_llm_payload()),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+        observation = await adapter.observe("fake:android-001", artifacts)
+
+        payload = runner._summarize_observation(observation).to_dict()
+
+        search_item = next(
+            item for item in payload["ui_summary"] if "search_src_text" in item["resource_id"]
+        )
+        self.assertEqual("搜索设置项", search_item["hint"])
+        plain_item = next(item for item in payload["ui_summary"] if item["text"] == "Plain")
+        self.assertNotIn("hint", plain_item)
+
     async def test_observation_summary_prioritizes_semantics_and_redacts_identifiers(self) -> None:
         adapter = FakeDeviceAdapter()
         structural_nodes = "".join(

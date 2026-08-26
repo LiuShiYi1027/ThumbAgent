@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["strategy", "value"],
   "properties": {
-    "strategy": { "enum": ["resource_id", "text", "content_description"] },
+    "strategy": { "enum": ["resource_id", "text", "content_description", "hint"] },
     "value": { "type": "string", "minLength": 1, "maxLength": 1024 },
     "match": { "enum": ["exact", "contains"], "default": "exact" },
     "clickable": { "type": "boolean" },
@@ -21,7 +21,7 @@
         "additionalProperties": false,
         "required": ["strategy", "value"],
         "properties": {
-          "strategy": { "enum": ["resource_id", "text", "content_description"] },
+          "strategy": { "enum": ["resource_id", "text", "content_description", "hint"] },
           "value": { "type": "string", "minLength": 1, "maxLength": 1024 },
           "match": { "enum": ["exact", "contains"], "default": "exact" }
         }

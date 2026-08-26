@@ -175,6 +175,73 @@ class UiParserLocatorTests(unittest.TestCase):
         )
         self.assertEqual("title", match.target_node.resource_id)
 
+    def test_hint_strategy_matches_placeholder_not_text(self) -> None:
+        """hint 策略匹配占位文本：空字段 text==hint 场景下语义比 text 策略稳定。"""
+        xml = (
+            b'<hierarchy>'
+            b'<node text="\xe6\x90\x9c\xe7\xb4\xa2\xe8\xae\xbe\xe7\xbd\xae\xe9\xa1\xb9" '
+            b'hint="\xe6\x90\x9c\xe7\xb4\xa2\xe8\xae\xbe\xe7\xbd\xae\xe9\xa1\xb9" '
+            b'resource-id="search" class="EditText" package="android" clickable="true" '
+            b'enabled="true" visible-to-user="true" bounds="[0,0][100,50]"/>'
+            b'<node text="Filled" hint="Type here" resource-id="filled" class="EditText" '
+            b'package="android" clickable="true" enabled="true" visible-to-user="true" '
+            b'bounds="[0,50][100,100]"/>'
+            b'</hierarchy>'
+        )
+        nodes = self.parser.parse(xml)
+
+        exact = self.locator.locate(
+            nodes,
+            UiSelector.from_dict({"strategy": "hint", "value": "搜索设置项"}),
+            100,
+            100,
+        )
+        self.assertEqual("search", exact.target_node.resource_id)
+
+        contains = self.locator.locate(
+            nodes,
+            UiSelector.from_dict({"strategy": "hint", "value": "Type", "match": "contains"}),
+            100,
+            100,
+        )
+        self.assertEqual("filled", contains.target_node.resource_id)
+
+        with self.assertRaises(MobileAgentError) as missing:
+            self.locator.locate(
+                nodes,
+                UiSelector.from_dict({"strategy": "hint", "value": "Filled"}),
+                100,
+                100,
+            )
+        self.assertEqual("TARGET_NOT_FOUND", missing.exception.code)
+
+    def test_hint_strategy_supported_in_ancestor_path(self) -> None:
+        xml = (
+            b'<hierarchy>'
+            b'<node text="" hint="Section" resource-id="group" class="ViewGroup" '
+            b'package="android" clickable="false" enabled="true" visible-to-user="true" '
+            b'bounds="[0,0][100,100]">'
+            b'<node text="Inner" resource-id="inner" class="TextView" package="android" '
+            b'clickable="true" enabled="true" visible-to-user="true" bounds="[0,0][100,50]"/>'
+            b'</node>'
+            b'</hierarchy>'
+        )
+        nodes = self.parser.parse(xml)
+
+        match = self.locator.locate(
+            nodes,
+            UiSelector.from_dict(
+                {
+                    "strategy": "text",
+                    "value": "Inner",
+                    "ancestor_path": [{"strategy": "hint", "value": "Section"}],
+                }
+            ),
+            100,
+            100,
+        )
+        self.assertEqual("inner", match.target_node.resource_id)
+
     def test_rejects_doctype_after_large_prefix(self) -> None:
         payload = b" " * 5000 + b"<!DOCTYPE hierarchy><hierarchy/>"
         with self.assertRaises(MobileAgentError) as raised:

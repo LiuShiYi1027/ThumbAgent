@@ -502,16 +502,17 @@ class AgentRunner:
         nodes = self._nodes_from_observation(observation)
         nodes_by_id = {node.node_id: node for node in nodes}
         candidates: list[tuple[int, int, int, int, dict[str, Any]]] = []
-        seen: set[tuple[str, str, str]] = set()
+        seen: set[tuple[str, str, str, str]] = set()
         for node in nodes:
             if not node.visible:
                 continue
             text = redact_ui_text(node.text.strip())
             content_description = redact_ui_text(node.content_description.strip())
             resource_id = node.resource_id.strip()
-            if not text and not content_description:
+            hint = redact_ui_text(node.hint.strip())
+            if not text and not content_description and not hint:
                 continue
-            key = (text, content_description, resource_id)
+            key = (text, content_description, resource_id, hint)
             if key in seen:
                 continue
             seen.add(key)
@@ -521,21 +522,26 @@ class AgentRunner:
                 priority = 0 if actionable else 1
             else:
                 priority = 2 if actionable else 3
+            item: dict[str, Any] = {
+                "text": text[:120],
+                "content_description": content_description[:120],
+                "resource_id": resource_id[:160],
+                "class_name": node.class_name[:120],
+                "clickable": node.clickable,
+                "clickable_ancestor": clickable_ancestor,
+                "enabled": node.enabled,
+            }
+            # hint 仅在非空时出现：空字段的 text 即 hint，模型需要看到占位
+            # 文本才能选择 hint 策略定位输入框。
+            if hint:
+                item["hint"] = hint[:120]
             candidates.append(
                 (
                     priority,
                     node.bounds.top,
                     node.bounds.left,
                     node.depth,
-                    {
-                        "text": text[:120],
-                        "content_description": content_description[:120],
-                        "resource_id": resource_id[:160],
-                        "class_name": node.class_name[:120],
-                        "clickable": node.clickable,
-                        "clickable_ancestor": clickable_ancestor,
-                        "enabled": node.enabled,
-                    },
+                    item,
                 )
             )
         candidates.sort(key=lambda item: item[:4])
