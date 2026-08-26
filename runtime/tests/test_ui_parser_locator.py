@@ -149,10 +149,31 @@ class UiParserLocatorTests(unittest.TestCase):
             self.parser.parse(b'<!DOCTYPE x [<!ENTITY x "bad">]><hierarchy/>')
         self.assertEqual("UI_TREE_INVALID", entity.exception.code)
 
-        invalid = b'<hierarchy><node bounds="[10,10][5,5]"/></hierarchy>'
+        # 格式损坏（非法字符/缺失）仍是协议级错误。
+        malformed = b'<hierarchy><node bounds="[10,10][5]"/></hierarchy>'
         with self.assertRaises(MobileAgentError) as bounds:
-            self.parser.parse(invalid)
+            self.parser.parse(malformed)
         self.assertEqual("UI_TREE_INVALID", bounds.exception.code)
+
+    def test_degenerate_bounds_subtree_is_skipped_not_fatal(self) -> None:
+        """AOSP 模拟器实测：手势导航区留下退化 bounds（[0,2382][1080,2337]），
+        零/负面积节点不可交互，应连同子树跳过，而不是让整棵树 UI_TREE_INVALID。"""
+        xml = (
+            b'<hierarchy>'
+            b'<node text="" resource-id="nav_bar" bounds="[0,2382][1080,2337]">'
+            b'<node text="Hidden child" resource-id="nav_child" bounds="[63,2382][1038,2337]"/>'
+            b'</node>'
+            b'<node text="Display" resource-id="title" class="TextView" package="android" '
+            b'clickable="true" enabled="true" visible-to-user="true" bounds="[0,0][100,50]"/>'
+            b'</hierarchy>'
+        )
+        nodes = self.parser.parse(xml)
+
+        self.assertEqual(["Display"], [node.text for node in nodes])
+        match = self.locator.locate(
+            nodes, UiSelector.from_dict({"strategy": "text", "value": "Display"}), 100, 50
+        )
+        self.assertEqual("title", match.target_node.resource_id)
 
     def test_rejects_doctype_after_large_prefix(self) -> None:
         payload = b" " * 5000 + b"<!DOCTYPE hierarchy><hierarchy/>"

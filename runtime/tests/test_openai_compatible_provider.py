@@ -88,6 +88,28 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertIn("obs_test", user_message)
         self.assertNotIn("test-secret-token", json.dumps(transport.last_body))
 
+    def test_request_body_uses_configured_response_format(self) -> None:
+        """LM Studio 等本地服务只支持 text/json_schema，需可配置（默认 json_object）。"""
+        default_transport = FakeTransport(valid_response())
+        OpenAICompatiblePlanner(test_config(), default_transport).decide(
+            "open display settings", observation_summary(), 1
+        )
+        self.assertEqual(
+            {"type": "json_object"}, default_transport.last_body["response_format"]
+        )
+
+        text_transport = FakeTransport(valid_response())
+        text_config = OpenAICompatiblePlannerConfig(
+            base_url="http://127.0.0.1:1234/v1",
+            model="local-model",
+            api_key="test-secret-token",
+            response_format="text",
+        )
+        OpenAICompatiblePlanner(text_config, text_transport).decide(
+            "open display settings", observation_summary(), 1
+        )
+        self.assertEqual({"type": "text"}, text_transport.last_body["response_format"])
+
     def test_invalid_non_json_content_returns_model_output_invalid_without_token(self) -> None:
         transport = FakeTransport(
             {

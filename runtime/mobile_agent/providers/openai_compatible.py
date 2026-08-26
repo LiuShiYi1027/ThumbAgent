@@ -33,6 +33,9 @@ class OpenAICompatiblePlannerConfig:
     model: str
     api_key: str
     timeout_seconds: float = 30.0
+    # 结构化输出模式：json_object（OpenAI 官方）或 text（LM Studio 等只支持
+    # text/json_schema 的本地服务；JSON 约束改由 prompt + 有界修复保证）。
+    response_format: str = "json_object"
 
     def endpoint(self) -> str:
         """Return the chat-completions endpoint URL."""
@@ -335,7 +338,7 @@ class OpenAICompatiblePlanner:
         return {
             "model": self._config.model,
             "temperature": 0,
-            "response_format": {"type": "json_object"},
+            "response_format": {"type": self._config.response_format},
             "messages": messages,
         }
 
@@ -343,7 +346,7 @@ class OpenAICompatiblePlanner:
         return {
             "model": self._config.model,
             "temperature": 0,
-            "response_format": {"type": "json_object"},
+            "response_format": {"type": self._config.response_format},
             "messages": [
                 {"role": "system", "content": _goal_compiler_prompt()},
                 {

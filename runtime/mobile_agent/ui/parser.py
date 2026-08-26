@@ -36,6 +36,11 @@ class UiHierarchyParser:
             if depth > self.MAX_DEPTH or len(nodes) >= self.MAX_NODES:
                 self._invalid("UI hierarchy 超过安全限制")
             if element.tag == "node":
+                if self._is_degenerate(element.attrib):
+                    # 真机/AOSP 实测：系统会给隐藏视图（如手势导航区）留下
+                    # 零/负面积的退化 bounds（如 [0,2382][1080,2337]）。
+                    # 这类节点不可见不可交互，跳过整棵子树而不是让整棵树失效。
+                    return
                 node_id = path
                 nodes.append(self._node(element.attrib, node_id, parent_id, depth))
                 current_parent = node_id
@@ -46,6 +51,14 @@ class UiHierarchyParser:
 
         visit(root, None, 0, "0")
         return nodes
+
+    def _is_degenerate(self, attributes: dict[str, str]) -> bool:
+        """bounds 合法但面积为零/负（含隐藏系统视图），区别于格式损坏。"""
+        match = self._BOUNDS.fullmatch(attributes.get("bounds", ""))
+        if not match:
+            return False
+        x1, y1, x2, y2 = (int(value) for value in match.groups())
+        return x1 >= 0 and y1 >= 0 and (x2 <= x1 or y2 <= y1)
 
     def _node(
         self, attributes: dict[str, str], node_id: str, parent_id: str | None, depth: int

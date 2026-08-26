@@ -28,6 +28,9 @@ class ModelProviderSettings:
     model: str = ""
     api_key_ref: str = ""
     timeout_seconds: float = 30.0
+    # json_object 是 OpenAI 官方语义；text 兼容只支持 text/json_schema 的
+    # 本地推理服务（如 LM Studio），此时 JSON 约束由 prompt 与有界修复保证。
+    response_format: str = "json_object"
 
 
 class SecretResolver(Protocol):
@@ -85,6 +88,7 @@ _ENV_OVERRIDE_NAMES = (
     "MOBILE_AGENT_MODEL_NAME",
     "MOBILE_AGENT_MODEL_API_KEY_REF",
     "MOBILE_AGENT_MODEL_TIMEOUT_SECONDS",
+    "MOBILE_AGENT_MODEL_RESPONSE_FORMAT",
 )
 
 
@@ -111,6 +115,7 @@ def model_provider_config_view(
         "model": settings.model,
         "api_key_ref": settings.api_key_ref,
         "timeout_seconds": settings.timeout_seconds,
+        "response_format": settings.response_format,
         "config_file": str(config_path),
         "env_override": any(
             env.get(name, "").strip() for name in _ENV_OVERRIDE_NAMES
@@ -128,6 +133,7 @@ def coerce_model_provider_payload(payload: Mapping[str, object]) -> ModelProvide
         "model",
         "api_key_ref",
         "timeout_seconds",
+        "response_format",
     }
     unknown = sorted(set(str(key) for key in payload) - allowed)
     if unknown:
@@ -159,6 +165,7 @@ def save_model_provider_settings(
         "model": settings.model,
         "api_key_ref": settings.api_key_ref,
         "timeout_seconds": settings.timeout_seconds,
+        "response_format": settings.response_format,
     }
     config_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = config_path.with_suffix(config_path.suffix + ".tmp")
@@ -218,6 +225,7 @@ def build_planner_from_settings(
             model=safe_settings.model,
             api_key=api_key,
             timeout_seconds=safe_settings.timeout_seconds,
+            response_format=safe_settings.response_format,
         ),
         transport,
     )
@@ -234,6 +242,10 @@ def _validate_openai_compatible_settings(settings: ModelProviderSettings) -> Non
         raise _invalid_settings("模型 api_key_ref 不能为空", settings)
     if settings.timeout_seconds < 1 or settings.timeout_seconds > 120:
         raise _invalid_settings("模型 timeout_seconds 必须在 1 到 120 秒之间", settings)
+    if settings.response_format not in ("json_object", "text"):
+        raise _invalid_settings(
+            "模型 response_format 只支持 json_object 或 text", settings
+        )
 
 
 def _read_settings_file(path: Path) -> dict[str, object]:
@@ -254,6 +266,7 @@ def _settings_from_environment(env: Mapping[str, str]) -> dict[str, object]:
         "model": "MOBILE_AGENT_MODEL_NAME",
         "api_key_ref": "MOBILE_AGENT_MODEL_API_KEY_REF",
         "timeout_seconds": "MOBILE_AGENT_MODEL_TIMEOUT_SECONDS",
+        "response_format": "MOBILE_AGENT_MODEL_RESPONSE_FORMAT",
     }
     result: dict[str, object] = {}
     for field, variable in mapping.items():
@@ -271,6 +284,9 @@ def _coerce_settings(raw: Mapping[str, object]) -> ModelProviderSettings:
         model=_coerce_string(raw.get("model", ""), "model"),
         api_key_ref=_coerce_string(raw.get("api_key_ref", ""), "api_key_ref"),
         timeout_seconds=_coerce_timeout(raw.get("timeout_seconds", 30.0)),
+        response_format=_coerce_string(
+            raw.get("response_format", "json_object"), "response_format"
+        ),
     )
 
 

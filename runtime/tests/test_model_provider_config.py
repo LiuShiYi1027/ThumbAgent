@@ -147,6 +147,56 @@ class ModelProviderConfigTests(unittest.TestCase):
         self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
         self.assertNotIn(str(config_path), str(raised.exception.to_dict()))
 
+    def test_response_format_defaults_and_overrides(self) -> None:
+        """response_format 默认 json_object，可被文件与环境变量覆盖（LM Studio 用 text）。"""
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "model-provider.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "provider": "openai_compatible",
+                        "base_url": "http://127.0.0.1:1234/v1",
+                        "model": "local-model",
+                        "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_LOCAL",
+                        "response_format": "text",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            from_file = load_model_provider_settings(config_path, {})
+            overridden = load_model_provider_settings(
+                config_path,
+                {"MOBILE_AGENT_MODEL_RESPONSE_FORMAT": "json_object"},
+            )
+
+        self.assertEqual("text", from_file.response_format)
+        self.assertEqual("json_object", overridden.response_format)
+        self.assertEqual("json_object", ModelProviderSettings().response_format)
+
+    def test_enabled_settings_reject_unknown_response_format(self) -> None:
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "model-provider.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "provider": "openai_compatible",
+                        "base_url": "http://127.0.0.1:1234/v1",
+                        "model": "local-model",
+                        "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_LOCAL",
+                        "response_format": "json_schema",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(MobileAgentError) as raised:
+                load_model_provider_settings(config_path, {})
+
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+
     def test_environment_secret_resolver_allows_scoped_references_only(self) -> None:
         resolver = EnvironmentSecretResolver(
             {"MOBILE_AGENT_MODEL_SECRET_TEST": "test-secret-value"}
@@ -215,6 +265,7 @@ class ModelProviderSettingsFileTests(unittest.TestCase):
                 "model": "test-model",
                 "api_key_ref": "model-key",
                 "timeout_seconds": 12,
+                "response_format": "json_object",
                 "config_file": str(config_path),
                 "env_override": False,
             },
@@ -263,6 +314,7 @@ class ModelProviderSettingsFileTests(unittest.TestCase):
                 "model": "file-model",
                 "api_key_ref": "env:MOBILE_AGENT_MODEL_SECRET_DESKTOP",
                 "timeout_seconds": 20,
+                "response_format": "json_object",
             },
             json.loads(raw),
         )
