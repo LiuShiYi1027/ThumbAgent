@@ -48,6 +48,13 @@ EN_BATTERY_ACCEPTANCE = {
     "foreground_app_id": "com.android.settings",
     "expected_selector": {"strategy": "text", "value": "Battery usage", "match": "exact"},
 }
+# 中文模型循环 + unicode 输入组合：夸克搜索「你好」。考模型规划（启动/找框）
+# 与 input.unicode_text skill（Helper IME 切换、读回验证、IME 恢复）。
+QUARK_GOAL = "打开夸克浏览器，在搜索框里输入你好"
+QUARK_ACCEPTANCE = {
+    "foreground_app_id": "com.quark.browser",
+    "expected_selector": {"strategy": "text", "value": "你好", "match": "contains"},
+}
 
 
 def _arg_value(flag: str, default: str) -> str:
@@ -77,11 +84,23 @@ async def main() -> int:
     if not devices:
         print("FAIL: 无在线设备")
         return 1
-    device_id = devices[0]["device_id"]
+    wanted = _arg_value("--device", "")
+    if wanted:
+        match = next(
+            (d for d in devices if wanted in d["device_id"]), None
+        )
+        if match is None:
+            print(f"FAIL: 找不到设备 {wanted!r}，在线: {[d['device_id'] for d in devices]}")
+            return 1
+        device_id = match["device_id"]
+    else:
+        device_id = devices[0]["device_id"]
     print(f"[1] 设备: {device_id}")
 
     started = datetime.now()
-    if "--battery" in sys.argv:
+    if "--quark" in sys.argv:
+        goal, acceptance = QUARK_GOAL, QUARK_ACCEPTANCE
+    elif "--battery" in sys.argv:
         goal, acceptance = EN_BATTERY_GOAL, EN_BATTERY_ACCEPTANCE
     elif "--en" in sys.argv:
         goal, acceptance = EN_GOAL, EN_ACCEPTANCE
