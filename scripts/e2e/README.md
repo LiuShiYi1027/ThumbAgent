@@ -21,6 +21,7 @@
 | `e2e_saucedemo_login_unicode.py` | 稳定验收 | SauceDemo fixture 应用登录表单 unicode 输入 | 已装 `com.saucelabs.mydemoapp.android`、Helper IME | IME 由工具自身恢复 |
 | `e2e_dialog_handling.py` | 探索性 | 京东更新弹窗处理（只点「取消」，绝不点「立即体验」） | 京东已安装；弹窗形态随版本变化 | 无残留写动作 |
 | `e2e_jd_search.py` | 探索性 | 京东搜索「iPhone 17」完整链路 | 京东已安装；**已知受登录墙阻塞**，策略拒绝向手机号框输入即符合预期 | Helper 复用不卸载 |
+| `e2e_live_agent_settings.py` | 稳定验收 | 真实模型 Agent 主链路：自然语言目标 → 模型规划 → 设备动作 → Runtime 终态验证 | `local/model-provider.json`（gitignored）+ 密钥环境变量；默认中文目标（中文 ROM），`--en` 走捷径英文目标，`--battery` 强制模型循环；`--rounds`/`--deadline` 可调预算 | 无残留写动作 |
 
 「稳定验收」场景应与代码同步维护，失败视为回归；「探索性」场景依赖
 特定商业 App 版本，失败先核对 App 改版，不直接视为产品回归。

@@ -1,0 +1,128 @@
+"""真机 E2E：真实模型驱动的 Agent 主链路狗食（device_e2e，稳定验收候选）。
+
+目标：验证「自然语言意图 → 模型规划 → 设备动作 → Runtime 终态验证」完整链路。
+模型来自 local/model-provider.json（gitignored；当前指向 LM Studio 本地服务，
+response_format=text）。无真实模型配置时脚本直接报错退出，不会静默降级。
+
+场景：让 Agent 打开显示设置页面。验收由 Runtime 持有（非模型自评）：
+前台为系统设置 且 页面存在「显示」语义节点。
+产物写入 e2e-output/（不入库）。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "runtime"))
+
+from mobile_agent.devices.adapters.android import AdbRunner, AndroidDeviceAdapter
+from mobile_agent.evidence.artifacts import ArtifactStore
+from mobile_agent.providers.config import (
+    EnvironmentSecretResolver,
+    build_planner_from_settings,
+    load_model_provider_settings,
+)
+from mobile_agent.runtime import RuntimeService
+
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "e2e-output"
+MODEL_CONFIG = Path(__file__).resolve().parents[2] / "local" / "model-provider.json"
+GOAL = "打开手机的显示设置页面"
+ACCEPTANCE = {
+    "foreground_app_id": "com.android.settings",
+    "expected_selector": {"strategy": "text", "value": "显示", "match": "contains"},
+}
+# 英文 ROM（如默认 locale 的模拟器）：python3 .../e2e_live_agent_settings.py --en
+EN_GOAL = "Open the Display settings page"
+EN_ACCEPTANCE = {
+    "foreground_app_id": "com.android.settings",
+    "expected_selector": {"strategy": "text", "value": "Display", "match": "contains"},
+}
+# 强制走模型循环（绕开导航捷径词表）的 GUI 任务：设置里找 Battery 并进入。
+# 验收用页面内唯一的精确文本（"Battery" contains 会命中多个节点导致 TARGET_AMBIGUOUS）。
+EN_BATTERY_GOAL = "In Settings, find and open the Battery page"
+EN_BATTERY_ACCEPTANCE = {
+    "foreground_app_id": "com.android.settings",
+    "expected_selector": {"strategy": "text", "value": "Battery usage", "match": "exact"},
+}
+
+
+def _arg_value(flag: str, default: str) -> str:
+    return (
+        sys.argv[sys.argv.index(flag) + 1]
+        if flag in sys.argv and sys.argv.index(flag) + 1 < len(sys.argv)
+        else default
+    )
+
+
+async def main() -> int:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_dir = OUTPUT_DIR / stamp
+    artifacts = ArtifactStore(out_dir / "artifacts")
+
+    settings = load_model_provider_settings(MODEL_CONFIG)
+    if not settings.enabled:
+        print(f"FAIL: 模型未启用，检查 {MODEL_CONFIG}")
+        return 1
+    planner = build_planner_from_settings(settings, EnvironmentSecretResolver())
+    print(f"[0] 模型: {settings.model} @ {settings.base_url} (format={settings.response_format})")
+
+    runtime = RuntimeService(
+        AndroidDeviceAdapter(AdbRunner()), artifacts, planner=planner
+    )
+    devices = await runtime.list_devices()
+    if not devices:
+        print("FAIL: 无在线设备")
+        return 1
+    device_id = devices[0]["device_id"]
+    print(f"[1] 设备: {device_id}")
+
+    started = datetime.now()
+    if "--battery" in sys.argv:
+        goal, acceptance = EN_BATTERY_GOAL, EN_BATTERY_ACCEPTANCE
+    elif "--en" in sys.argv:
+        goal, acceptance = EN_GOAL, EN_ACCEPTANCE
+    else:
+        goal, acceptance = GOAL, ACCEPTANCE
+    print(f"    goal: {goal}")
+    task = await runtime.run_agent_task(
+        device_id,
+        goal,
+        confirmed=True,
+        max_rounds=int(_arg_value("--rounds", "6")),
+        acceptance=acceptance,
+        deadline_seconds=float(_arg_value("--deadline", "600")),
+    )
+    elapsed = (datetime.now() - started).total_seconds()
+
+    print(f"[2] 终态: {task['status']} ({elapsed:.0f}s)")
+    if task.get("error"):
+        print(f"    error: {task['error'].get('code')} {task['error'].get('message')}")
+    for step in task.get("steps", []):
+        result = step.get("result") or {}
+        decision = result.get("decision") or {}
+        error = step.get("error") or {}
+        line = (
+            f"    round {result.get('round', step.get('sequence'))}: "
+            f"{decision.get('decision_type')} "
+            f"{decision.get('tool_id') or decision.get('skill_id') or step.get('name')} "
+            f"latency={decision.get('provider_latency_ms')}ms -> {step.get('status')}"
+        )
+        if error:
+            line += f" ({error.get('code')})"
+        print(line)
+
+    report_path = out_dir / "task-report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"\n产物目录: {out_dir}")
+    return 0 if task["status"] == "succeeded" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))

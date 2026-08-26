@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "runtime"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "runtime"))
 
 from mobile_agent.devices.adapters.android import AdbRunner, AndroidDeviceAdapter
 from mobile_agent.domain.errors import MobileAgentError
@@ -25,7 +25,7 @@ from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.runtime import RuntimeService
 
 HELPER_APK = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "helpers"
     / "unicode-ime"
     / "dist"
