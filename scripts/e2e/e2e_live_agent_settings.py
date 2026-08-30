@@ -51,9 +51,17 @@ EN_BATTERY_ACCEPTANCE = {
 # 中文模型循环 + unicode 输入组合：夸克搜索「你好」。考模型规划（启动/找框）
 # 与 input.unicode_text skill（Helper IME 切换、读回验证、IME 恢复）。
 QUARK_GOAL = "打开夸克浏览器，在搜索框里输入你好"
+# 验收必须锁定输入框本身：夸克搜索页有大量含「你好」的热搜推荐词
+#（真机实测 text+contains 命中 9 个节点 → TARGET_AMBIGUOUS）。
+# exact + clickable 只命中输入后的 EditText（推荐词 TextView 均 clickable=false）。
 QUARK_ACCEPTANCE = {
     "foreground_app_id": "com.quark.browser",
-    "expected_selector": {"strategy": "text", "value": "你好", "match": "contains"},
+    "expected_selector": {
+        "strategy": "text",
+        "value": "你好",
+        "match": "exact",
+        "clickable": True,
+    },
 }
 
 
