@@ -1,7 +1,7 @@
 # ITER-0061 Agent Working Memory & Task Results（跨轮工作记忆 + 结构化任务结果）
 
 > 文档状态：Draft
-> 迭代状态：Planned
+> 迭代状态：Active
 > 创建日期：2026-08-31
 > 关联：[能力路线图 §4.0](../../product/capability-roadmap.md) · [ITER-0060 复盘](../iterations/0060-live-agent-cjk-task-loop/retrospective.md) · [契约版本规范](../../engineering/contract-versioning.md)
 

@@ -18,6 +18,12 @@
         { "required": ["app_id"] },
         { "required": ["activity"] }
       ]
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "任务答案载荷：finish 时由模型携带的结果文本（如查到的价格）。不参与验收判定，由 Runtime 持久化到 TaskRun.result 并在报告中透出；纯操作类任务可缺省。"
     }
   }
 }

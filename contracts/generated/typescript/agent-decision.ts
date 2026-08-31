@@ -19,4 +19,5 @@ export interface AgentDecision {
   provider_retry_count?: number;
   provider_latency_ms?: number;
   provider_attempt_count?: number;
+  scratchpad?: string;
 }

@@ -102,6 +102,8 @@ class TaskRun:
     completion_source: str | None = None
     deadline_seconds: float | None = None
     device_session_id: str | None = None
+    # 结构化任务结果（finish 携带的 answer 载荷）；纯操作类任务为 None。
+    result: dict[str, Any] | None = None
     schema_version: str = "1.0.0"
 
     def to_dict(self) -> dict[str, Any]:
@@ -128,4 +130,6 @@ class TaskRun:
             payload["deadline_seconds"] = self.deadline_seconds
         if self.device_session_id is not None:
             payload["device_session_id"] = self.device_session_id
+        if self.result is not None:
+            payload["result"] = self.result
         return payload

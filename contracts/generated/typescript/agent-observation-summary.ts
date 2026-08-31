@@ -17,6 +17,7 @@ export interface AgentObservationSummary {
   ui_summary_total_candidates?: number;
   ui_summary_truncated?: boolean;
   last_action_feedback?: AgentActionFeedback | null;
+  scratchpad?: string | null;
   ui_summary: Array<{
     text: string;
     content_description: string;

@@ -27,7 +27,12 @@
     "repair_count": { "type": "integer", "minimum": 0, "maximum": 1 },
     "provider_retry_count": { "type": "integer", "minimum": 0, "maximum": 1 },
     "provider_latency_ms": { "type": "integer", "minimum": 0 },
-    "provider_attempt_count": { "type": "integer", "minimum": 0, "maximum": 2 }
+    "provider_attempt_count": { "type": "integer", "minimum": 0, "maximum": 2 },
+    "scratchpad": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "跨轮工作记忆：模型每轮可全量覆盖写入（空字符串表示清空），由 Runtime 持久化并随下一轮 Observation 摘要注入 prompt；字段缺省表示本轮不更新。任务级隔离，不跨任务携带。"
+    }
   },
   "allOf": [
     {

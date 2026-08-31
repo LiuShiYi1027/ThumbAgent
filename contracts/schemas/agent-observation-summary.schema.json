@@ -27,6 +27,13 @@
         { "type": "null" }
       ]
     },
+    "scratchpad": {
+      "oneOf": [
+        { "type": "string", "maxLength": 1024 },
+        { "type": "null" }
+      ],
+      "description": "截至本轮的跨轮工作记忆内容（由上一轮决策的 scratchpad 字段写入）；null 表示尚未写入。随摘要进入 prompt 与任务报告。"
+    },
     "ui_summary": {
       "type": "array",
       "maxItems": 30,

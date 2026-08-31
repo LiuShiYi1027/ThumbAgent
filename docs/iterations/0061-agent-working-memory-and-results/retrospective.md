@@ -1,7 +1,7 @@
 # ITER-0061 Retrospective
 
 > 文档状态：Draft
-> 迭代状态：Planned
+> 迭代状态：Active
 > 更新日期：2026-08-31
 
 （迭代进入 Verifying 后填写：实际交付、验证结果、偏差与限制、效率指标、后续行动。）

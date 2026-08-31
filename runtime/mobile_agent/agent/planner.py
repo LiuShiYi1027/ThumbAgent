@@ -14,6 +14,10 @@ from mobile_agent.ui.model import UiSelector
 
 _NAVIGATION_TARGET_IDS = frozenset(target.value for target in NavigationTarget)
 
+# 与 contracts/schemas 中 agent-decision / agent-finish-criteria 的上限保持一致。
+_SCRATCHPAD_MAX_CHARS = 1024
+_ANSWER_MAX_CHARS = 2000
+
 
 class AgentDecisionType(str, Enum):
     """Supported preview decision types."""
@@ -34,6 +38,7 @@ class AgentObservationSummary:
     ui_summary_total_candidates: int = 0
     ui_summary_truncated: bool = False
     last_action_feedback: dict[str, Any] | None = None
+    scratchpad: str | None = None
     schema_version: str = "1.0.0"
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +53,7 @@ class AgentObservationSummary:
             "last_action_feedback": dict(self.last_action_feedback)
             if self.last_action_feedback
             else None,
+            "scratchpad": self.scratchpad,
         }
 
 
@@ -68,10 +74,13 @@ class AgentDecision:
     provider_retry_count: int = 0
     provider_latency_ms: int = 0
     provider_attempt_count: int = 0
+    # 跨轮工作记忆：非 None 即全量覆盖 Runner 持有的 scratchpad（"" 表示清空），
+    # 由下一轮 Observation 摘要回注。语义见 agent-decision.schema.json。
+    scratchpad: str | None = None
     schema_version: str = "1.0.0"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "decision_id": self.decision_id,
             "decision_type": self.decision_type.value,
@@ -87,6 +96,9 @@ class AgentDecision:
             "provider_latency_ms": self.provider_latency_ms,
             "provider_attempt_count": self.provider_attempt_count,
         }
+        if self.scratchpad is not None:
+            payload["scratchpad"] = self.scratchpad
+        return payload
 
 
 class Planner(Protocol):
@@ -313,6 +325,7 @@ def parse_llm_decision_payload(payload: object, planner_id: str) -> AgentDecisio
             },
         )
     confidence = _parse_confidence(payload.get("confidence"))
+    scratchpad = _parse_scratchpad(payload.get("scratchpad"))
     return AgentDecision(
         decision_id=f"decision_{uuid.uuid4().hex}",
         decision_type=decision_kind,
@@ -323,6 +336,7 @@ def parse_llm_decision_payload(payload: object, planner_id: str) -> AgentDecisio
         planner_id=planner_id,
         confidence=confidence,
         source="llm",
+        scratchpad=scratchpad,
     )
 
 
@@ -408,7 +422,7 @@ def validate_agent_tool_arguments(tool_id: str, arguments: dict[str, Any]) -> No
 def validate_finish_arguments(arguments: dict[str, Any]) -> None:
     """Validate deterministic finish criteria before Runtime verification."""
 
-    allowed = {"expected_selector", "expected_foreground_app"}
+    allowed = {"expected_selector", "expected_foreground_app", "answer"}
     _require_argument_keys("finish", arguments, allowed, {"expected_selector"})
     raw_selector = arguments.get("expected_selector")
     if not isinstance(raw_selector, dict):
@@ -419,6 +433,15 @@ def validate_finish_arguments(arguments: dict[str, Any]) -> None:
         raise _tool_arguments_invalid(
             "finish", arguments, "expected_selector 无效", selector_error=error.code
         ) from error
+    answer = arguments.get("answer")
+    if answer is not None and (
+        not isinstance(answer, str) or not answer or len(answer) > _ANSWER_MAX_CHARS
+    ):
+        raise _tool_arguments_invalid(
+            "finish",
+            arguments,
+            "answer 必须是 1-2000 字符的字符串",
+        )
     foreground = arguments.get("expected_foreground_app")
     if foreground is None:
         return
@@ -486,6 +509,23 @@ def _tool_arguments_invalid(
             "selector_keys": selector_keys or [],
         },
     )
+
+
+def _parse_scratchpad(value: object) -> str | None:
+    """Parse the optional scratchpad overwrite: absent = no update, "" = clear."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > _SCRATCHPAD_MAX_CHARS:
+        raise _model_output_invalid(
+            "Planner 输出的 scratchpad 格式无效",
+            {
+                "scratchpad_type": type(value).__name__,
+                "scratchpad_chars": len(value) if isinstance(value, str) else None,
+                "max_chars": _SCRATCHPAD_MAX_CHARS,
+            },
+        )
+    return value
 
 
 def _parse_confidence(value: object) -> float | None:

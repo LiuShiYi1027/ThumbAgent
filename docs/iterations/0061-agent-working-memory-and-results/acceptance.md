@@ -1,7 +1,7 @@
 # ITER-0061 Acceptance
 
 > 文档状态：Draft
-> 迭代状态：Planned
+> 迭代状态：Active
 > 更新日期：2026-08-31
 
 | 编号 | 验收条件 | 验证方式 | 结果 |

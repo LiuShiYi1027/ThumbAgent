@@ -43,5 +43,8 @@ export interface TaskRun {
     error: Record<string, unknown> | null;
   }>;
   evidence_summary: Record<string, unknown>;
+  result?: {
+    answer: string;
+  };
   error: Record<string, unknown> | null;
 }

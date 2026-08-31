@@ -62,6 +62,20 @@
       }
     },
     "evidence_summary": { "type": "object" },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answer"],
+      "description": "结构化任务结果：finish 决策携带的答案载荷。纯操作类任务（无答案可带回）整个字段缺省。",
+      "properties": {
+        "answer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "模型 finish 时携带的任务答案文本（如查到的价格）。内容为模型产出，正确性不由 Runtime 断言。"
+        }
+      }
+    },
     "error": {
       "oneOf": [
         { "type": "object" },
