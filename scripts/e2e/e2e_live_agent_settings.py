@@ -63,6 +63,13 @@ QUARK_ACCEPTANCE = {
         "clickable": True,
     },
 }
+# Agent 内核（scratchpad + answer）驱动场景（ITER-0061）：京东搜索 iPhone 17 并
+# 带回价格。验收只断言前台到达京东（UI 状态）；answer 正确性由人工核对报告，
+# 不做数据自动断言（V1 语义，见迭代 plan）。
+JD_GOAL = "打开京东，搜索 iPhone 17，把 iPhone 17 的价格带回来"
+JD_ACCEPTANCE = {
+    "foreground_app_id": "com.jingdong.app.mall",
+}
 
 
 def _arg_value(flag: str, default: str) -> str:
@@ -106,7 +113,9 @@ async def main() -> int:
     print(f"[1] 设备: {device_id}")
 
     started = datetime.now()
-    if "--quark" in sys.argv:
+    if "--jd" in sys.argv:
+        goal, acceptance = JD_GOAL, JD_ACCEPTANCE
+    elif "--quark" in sys.argv:
         goal, acceptance = QUARK_GOAL, QUARK_ACCEPTANCE
     elif "--battery" in sys.argv:
         goal, acceptance = EN_BATTERY_GOAL, EN_BATTERY_ACCEPTANCE
@@ -126,6 +135,9 @@ async def main() -> int:
     elapsed = (datetime.now() - started).total_seconds()
 
     print(f"[2] 终态: {task['status']} ({elapsed:.0f}s)")
+    result_payload = task.get("result")
+    if isinstance(result_payload, dict) and result_payload.get("answer"):
+        print(f"    answer: {result_payload['answer']}")
     if task.get("error"):
         print(f"    error: {task['error'].get('code')} {task['error'].get('message')}")
     for step in task.get("steps", []):
