@@ -1,7 +1,7 @@
 # Mobile Agent 能力路线图（候选清单与分级治理）
 
 > 文档状态：Draft
-> 更新日期：2026-08-25
+> 更新日期：2026-08-31
 > 关联：[产品定位](./positioning.md) · [Capability 模型](../architecture/capability-model.md) · [客户端测试场景覆盖盘点](./testing-scenario-coverage.md) · [ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md) · [ITER-0058 复盘](../iterations/0058-programmatic-navigation/retrospective.md)
 
 ## 1. 目的
@@ -41,6 +41,32 @@ Runtime 本地  local.data.cleanup（非设备 Capability）
 ```
 
 ## 4. 候选清单
+
+### 4.0 Agent 内核（V2 前置：结构性必需，不适用需求拉动）
+
+2026-08-30 跨应用比价场景评估暴露了按「设备动作候选」组织排期的框架盲区：
+任何移动端意图都分解为同一个 agent 循环——
+
+```text
+感知 → 记忆 → 规划 → 行动 → 验证 → 产出
+```
+
+而循环的「记忆」与「产出」环节从未进入候选清单。契约全量检索确认：决策与任务
+契约中不存在 scratchpad / answer / result_data 字段；Provider `_request_body`
+每轮只发 goal + 当前 observation，无跨轮历史。
+
+内核能力与设备动作适用不同治理规则：设备动作无穷多，必须需求拉动（§2.1）；
+内核是循环的承重环节，每轮执行都从其上经过，属结构性必需，不等第二个需求出现。
+
+| 内核能力 | 缺口证据 | 解锁的意图类 |
+| --- | --- | --- |
+| 跨轮工作记忆（scratchpad） | 决策/观察契约无该字段；模型离开页面即遗忘其中信息 | 跨应用比价、验证码回填、跨应用搬运、多页表单 |
+| 结构化任务结果（finish 携带 answer/data，TaskRun 持久化） | finish/acceptance 仅 UI 状态断言，任务带不回答案 | 查价带回、测试报告产出、一切「带回答案」类任务 |
+| 子目标追踪（轻量：scratchpad 内 plan 字段，不立独立机制） | 长任务无分解持久化 | 时间盒任务、多阶段复合意图 |
+
+场景矩阵证据（2026-08-30 评估）：六个代表性意图（比价 / 验证码回填 / 跨应用搬运 /
+稳定性测试 / 多页表单 / 单应用查价带回）中五个需要记忆或结果契约，零个需要新设备
+动作。DSL Skill（§4.4）自身也需读写记忆与产出报告，内核必须先于编排层落地。
 
 ### 4.1 A 档：需求明确、低/中风险，按序接入
 
@@ -97,7 +123,12 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 
 - ~~ITER-0059~~：CJK 文本输入 helper 已交付（`input.unicode@1`，UTF-7 Helper IME 路线，
   真机六场景全 PASS，见 [ITER-0059 复盘](../iterations/0059-unicode-text-input/retrospective.md)）。
-- 其后按真实任务暴露的需求拉动：候选池见 §4（A 档设备动作与 §4.4 复合 Skill/平台扩展
-  候选，含音量/亮度、录屏快照、设置枚举扩充、稳定性测试 Skill）；候选仅在真实场景
+- ~~ITER-0060~~：真机模型驱动中文任务闭环已验证（hint 选择器策略、unicode 输入在线调用、
+  runtime acceptance 验收，见 [ITER-0060 复盘](../iterations/0060-live-agent-cjk-task-loop/retrospective.md)）。
+- **ITER-0061**：Agent 内核——跨轮工作记忆 + 结构化任务结果（§4.0，V2 前置；
+  驱动场景「打开京东搜索 iPhone 17 并带回价格」）。
+- ITER-0062 候选：Skill 扩展与管理（§4.4，依赖 0061 的 scratchpad/result 契约，
+  稳定性测试 Skill 为首驱动场景）。
+- 其后按真实任务暴露的需求拉动：候选池见 §4.1（A 档设备动作）；候选仅在真实场景
   重复出现时进入排期。
 - 每次迭代接入 1–2 个候选，保持评审粒度。
