@@ -120,6 +120,8 @@ class AgentRunner:
         steps: list[TaskStep] = []
         last_decision: AgentDecision | None = None
         last_action_feedback: dict[str, Any] | None = None
+        # 跨轮工作记忆：任务级状态，仅由决策的 scratchpad 字段全量覆盖更新。
+        scratchpad: str | None = None
         pending_summary: AgentObservationSummary | None = None
         pending_decision: AgentDecision | None = None
         pending_round = 0
@@ -203,7 +205,7 @@ class AgentRunner:
                     device_id, cancellation_requested, deadline_exceeded
                 )
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
-                summary = self._summarize_observation(observation, last_action_feedback)
+                summary = self._summarize_observation(observation, last_action_feedback, scratchpad)
                 pending_summary = summary
                 pending_round = round_index
                 pending_step_id = step_id
@@ -213,6 +215,9 @@ class AgentRunner:
                 last_decision = decision
                 self._validate_decision(decision)
                 pending_decision = decision
+                if decision.scratchpad is not None:
+                    # 全量覆盖语义：空字符串表示清空，内部归一为 None（回注 null）。
+                    scratchpad = decision.scratchpad or None
                 self._reject_repeated_no_progress(decision, last_action_feedback)
                 recoverable_error: MobileAgentError | None = None
                 try:
@@ -328,6 +333,7 @@ class AgentRunner:
                             else "planner_finish"
                         ),
                         deadline_seconds=deadline_seconds,
+                        result=_task_result_from(decision),
                     )
             if last_recoverable_error is not None:
                 completed_at = _now()
@@ -486,6 +492,7 @@ class AgentRunner:
         self,
         observation: Observation,
         last_action_feedback: dict[str, Any] | None = None,
+        scratchpad: str | None = None,
     ) -> AgentObservationSummary:
         ui_summary, total_candidates = self._ui_summary(observation)
         return AgentObservationSummary(
@@ -496,6 +503,7 @@ class AgentRunner:
             ui_summary_total_candidates=total_candidates,
             ui_summary_truncated=total_candidates > len(ui_summary),
             last_action_feedback=last_action_feedback,
+            scratchpad=scratchpad,
         )
 
     def _ui_summary(self, observation: Observation) -> tuple[list[dict[str, Any]], int]:
@@ -928,6 +936,15 @@ class AgentRunner:
             goal_spec=goal_spec,
             goal_acceptance=acceptance.to_dict() if acceptance is not None else None,
         )
+
+
+def _task_result_from(decision: AgentDecision) -> dict[str, Any] | None:
+    """提取 finish 决策的答案载荷；无 answer 时返回 None（纯操作类任务）。"""
+
+    answer = decision.arguments.get("answer")
+    if isinstance(answer, str) and answer:
+        return {"answer": answer}
+    return None
 
 
 def _string_arg(arguments: dict[str, Any], name: str, default: str) -> str:

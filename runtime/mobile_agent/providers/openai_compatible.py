@@ -397,6 +397,12 @@ def _system_prompt() -> str:
         "numbers and other sensitive digit shapes are rejected, and pure ASCII text should use "
         "input.text instead. The runtime switches to a helper IME, verifies the field content by "
         "read-back and restores the previous IME automatically. "
+        "The observation may include scratchpad, your working memory carried across rounds. "
+        "To update it, add a top-level \"scratchpad\" string (up to 1024 chars) to any decision: "
+        "it fully replaces the previous note and reappears in the next observation; omit the "
+        "field to keep the note unchanged, or use an empty string to clear it. Record facts you "
+        "must not forget later (seen prices, values to retype, subgoal progress); never store "
+        "secrets, passwords, or verification codes there. "
         "For finish, prefer a unique page-title resource_id when repeated text appears in ui_summary. "
         "Also include expected_foreground_app with app_id and activity when the observation provides "
         "stable values. If finish verification feedback reports TARGET_AMBIGUOUS, refine the selector "
@@ -405,7 +411,10 @@ def _system_prompt() -> str:
         "{\"app_id\":\"com.android.settings\"},\"expected_selector\":"
         "{\"strategy\":\"text\",\"value\":\"亮度\",\"match\":\"contains\",\"package\":\"com.android.settings\"}},"
         "\"reason\":\"...\",\"confidence\":0.8}. "
-        "finish must include expected_selector; runtime will verify it and may reject your finish."
+        "finish must include expected_selector; runtime will verify it and may reject your finish. "
+        "When the goal asks you to bring back information (for example a price), also include an "
+        "\"answer\" string (1-2000 chars) inside finish arguments carrying the final answer; the "
+        "runtime persists it as the task result. Pure action tasks omit answer."
     )
 
 

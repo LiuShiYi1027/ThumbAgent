@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from mobile_agent.agent import (
     AgentDecision,
@@ -1277,3 +1278,145 @@ def valid_llm_payload() -> dict[str, object]:
         "reason": "The goal asks to open the display settings page.",
         "confidence": 0.82,
     }
+
+
+_RESULT_PAGE_XML = (
+    b'<?xml version="1.0"?><hierarchy>'
+    b'<node text="ResultPage" resource-id="result_title" class="android.widget.TextView" '
+    b'package="com.example.fake" clickable="false" enabled="true" '
+    b'visible-to-user="true" bounds="[0,0][2,1]"/>'
+    b"</hierarchy>"
+)
+
+
+class AgentRunnerMemoryResultTests(unittest.IsolatedAsyncioTestCase):
+    """ITER-0061：跨轮工作记忆（scratchpad）与结构化任务结果（answer）。"""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def _build(self, adapter: FakeDeviceAdapter, planner: MockLLMPlanner) -> AgentRunner:
+        adapter.custom_ui_xml = _RESULT_PAGE_XML
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        return AgentRunner(
+            adapter,
+            artifacts,
+            planner,
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+
+    @staticmethod
+    def _finish(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "decision_type": "finish",
+            "arguments": {
+                "expected_selector": {
+                    "strategy": "text",
+                    "value": "ResultPage",
+                    "match": "exact",
+                    "package": "com.example.fake",
+                },
+                **(arguments or {}),
+            },
+            "reason": "Done.",
+        }
+
+    async def test_scratchpad_flows_into_next_round_and_answer_persists(self) -> None:
+        adapter = FakeDeviceAdapter()
+        runner = self._build(
+            adapter,
+            MockLLMPlanner(
+                [
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "navigation.back",
+                        "arguments": {},
+                        "reason": "记录后返回。",
+                        "scratchpad": "京东 iPhone 17 到手价 ¥5999",
+                    },
+                    self._finish({"answer": "京东 iPhone 17 到手价 ¥5999"}),
+                ]
+            ),
+        )
+
+        task = await runner.run("fake:android-001", "查价并带回", confirmed=True)
+
+        self.assertEqual("succeeded", task.status.value)
+        # 第 1 轮摘要尚无记忆；第 2 轮摘要携带第 1 轮写入的 scratchpad。
+        self.assertIsNone(task.steps[0].result["observation"]["scratchpad"])
+        self.assertEqual(
+            "京东 iPhone 17 到手价 ¥5999",
+            task.steps[1].result["observation"]["scratchpad"],
+        )
+        self.assertEqual({"answer": "京东 iPhone 17 到手价 ¥5999"}, task.result)
+        self.assertEqual(
+            "京东 iPhone 17 到手价 ¥5999", task.to_dict()["result"]["answer"]
+        )
+
+    async def test_scratchpad_empty_string_clears(self) -> None:
+        adapter = FakeDeviceAdapter()
+        runner = self._build(
+            adapter,
+            MockLLMPlanner(
+                [
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "navigation.back",
+                        "arguments": {},
+                        "scratchpad": "临时笔记",
+                    },
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "navigation.home",
+                        "arguments": {},
+                        "scratchpad": "",
+                    },
+                    self._finish(),
+                ]
+            ),
+        )
+
+        task = await runner.run("fake:android-001", "写入后清空", confirmed=True)
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("临时笔记", task.steps[1].result["observation"]["scratchpad"])
+        self.assertIsNone(task.steps[2].result["observation"]["scratchpad"])
+
+    async def test_finish_without_answer_leaves_result_absent(self) -> None:
+        adapter = FakeDeviceAdapter()
+        runner = self._build(adapter, MockLLMPlanner([self._finish()]))
+
+        task = await runner.run("fake:android-001", "纯操作", confirmed=True)
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertIsNone(task.result)
+        self.assertNotIn("result", task.to_dict())
+
+    async def test_scratchpad_does_not_leak_across_tasks(self) -> None:
+        adapter = FakeDeviceAdapter()
+        planner = MockLLMPlanner(
+            [
+                {
+                    "decision_type": "run_tool",
+                    "tool_id": "navigation.back",
+                    "arguments": {},
+                    "scratchpad": "上一任务的笔记",
+                },
+                self._finish(),
+            ]
+        )
+        runner = self._build(adapter, planner)
+
+        first = await runner.run("fake:android-001", "任务一", confirmed=True)
+        second = await runner.run("fake:android-001", "任务二", confirmed=True)
+
+        self.assertEqual("succeeded", first.status.value)
+        self.assertEqual("succeeded", second.status.value)
+        # 第二个任务的首轮摘要不携带上一任务的 scratchpad。
+        self.assertIsNone(second.steps[0].result["observation"]["scratchpad"])

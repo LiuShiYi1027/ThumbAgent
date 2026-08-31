@@ -316,3 +316,36 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Completion: runtime_acceptance", report)
         self.assertIn('"foreground_activity":".DisplaySettings"', report)
+
+    def test_renders_answer_from_task_result(self) -> None:
+        task = {
+            "task_id": "task_test",
+            "task_type": "agent.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "查价并带回",
+            "result": {"answer": "京东 iPhone 17 到手价 ¥5999"},
+            "started_at": "2026-08-31T00:00:00Z",
+            "completed_at": "2026-08-31T00:00:01Z",
+            "steps": [],
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn("Answer: 京东 iPhone 17 到手价 ¥5999", report)
+
+    def test_omits_answer_line_without_result(self) -> None:
+        task = {
+            "task_id": "task_test",
+            "task_type": "agent.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "纯操作",
+            "started_at": "2026-08-31T00:00:00Z",
+            "completed_at": "2026-08-31T00:00:01Z",
+            "steps": [],
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertNotIn("Answer:", report)

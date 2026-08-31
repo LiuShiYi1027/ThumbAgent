@@ -43,6 +43,9 @@ def render_task_report(task: dict[str, Any], events: list[dict[str, Any]]) -> st
             "GoalSpec: "
             + json.dumps(goal_spec, ensure_ascii=False, separators=(",", ":")),
         )
+    result = task.get("result")
+    if isinstance(result, dict) and isinstance(result.get("answer"), str):
+        lines.insert(8, f"Answer: {result['answer']}")
     steps = task.get("steps", [])
     if isinstance(steps, list) and steps:
         for step in steps:

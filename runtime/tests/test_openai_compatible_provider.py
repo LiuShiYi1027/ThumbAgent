@@ -353,6 +353,31 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertIn('"effect":"unchanged"', user_message)
         self.assertIn('"direction":"up"', user_message)
 
+    def test_request_carries_scratchpad_across_rounds(self) -> None:
+        transport = FakeTransport(valid_response())
+        planner = OpenAICompatiblePlanner(test_config(), transport)
+        summary = AgentObservationSummary(
+            observation_id="obs_test",
+            foreground_app={"app_id": "com.example.fake", "activity": ".Main"},
+            device_state="interactive",
+            scratchpad="京东 iPhone 17 到手价 ¥5999",
+        )
+
+        planner.decide("查价并对比", summary, 2)
+
+        user_message = transport.last_body["messages"][1]["content"]
+        self.assertIn('"scratchpad":"京东 iPhone 17 到手价 ¥5999"', user_message)
+
+    def test_system_prompt_documents_scratchpad_and_answer(self) -> None:
+        from mobile_agent.providers.openai_compatible import _system_prompt
+
+        prompt = _system_prompt()
+
+        self.assertIn("scratchpad", prompt)
+        self.assertIn("working memory", prompt)
+        self.assertIn('"answer"', prompt)
+        self.assertIn("task result", prompt)
+
     def test_request_uses_already_redacted_observation_summary(self) -> None:
         transport = FakeTransport(valid_response())
         planner = OpenAICompatiblePlanner(test_config(), transport)
