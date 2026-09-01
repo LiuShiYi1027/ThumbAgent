@@ -93,6 +93,42 @@ class ToolRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual("INVALID_ARGUMENT", bounds.exception.code)
 
+    async def test_tap_on_permission_dialog_is_rejected_for_manual_takeover(self) -> None:
+        """前台为系统权限弹窗时，即使 confirmed=True 也拒绝点击派发。
+
+        ITER-0061 真机实测：模型在录音权限弹窗上自主点击「仅使用期间允许」，
+        通用点击作为 Medium 动作绕过了权限决策的 High 风险边界。权限决策属于
+        人工接管，不允许 Agent 或客户端直接点击。
+        """
+        for package in (
+            "com.android.permissioncontroller",
+            "com.google.android.permissioncontroller",
+        ):
+            self.adapter.foreground_app = package
+            before_actions = len(self.adapter.actions)
+            with self.assertRaises(MobileAgentError) as raised:
+                await self.runtime.execute(
+                    "input.tap", "fake:android-001", {"x": 1, "y": 1}, confirmed=True
+                )
+            self.assertEqual("ACTION_REJECTED_BY_POLICY", raised.exception.code)
+            with self.assertRaises(MobileAgentError) as raised_element:
+                await self.runtime.execute(
+                    "input.tap_element",
+                    "fake:android-001",
+                    {"selector": {"strategy": "text", "value": "允许", "match": "contains"}},
+                    confirmed=True,
+                )
+            self.assertEqual("ACTION_REJECTED_BY_POLICY", raised_element.exception.code)
+            # 拒绝发生在任何设备写动作之前
+            self.assertEqual(before_actions, len(self.adapter.actions))
+
+        # 非权限弹窗前台不受影响
+        self.adapter.foreground_app = "com.example.fake"
+        result = await self.runtime.execute(
+            "input.tap", "fake:android-001", {"x": 1, "y": 1}, confirmed=True
+        )
+        self.assertEqual(VerificationStatus.INCONCLUSIVE, result.verification)
+
     async def test_swipe_requires_confirmation_and_uses_safe_semantic_arguments(self) -> None:
         with self.assertRaises(MobileAgentError) as confirmation:
             await self.runtime.execute("input.swipe", "fake:android-001", {"direction": "up"})

@@ -81,7 +81,10 @@ class CapabilityCatalog:
                 Idempotency.UNSAFE,
                 CapabilityVerification.REQUIRED,
                 ("设备在线", "用户明确确认"),
-                ("系统安全区和不可交互目标会在派发前拒绝",),
+                (
+                    "系统安全区和不可交互目标会在派发前拒绝",
+                    "前台为系统权限弹窗时一律拒绝派发，权限决策需人工接管（ADR-0020）",
+                ),
             ),
             CapabilityDefinition(
                 "input.swipe@1",

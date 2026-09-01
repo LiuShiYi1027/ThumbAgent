@@ -20,7 +20,7 @@ from mobile_agent.domain.action import (
 )
 from mobile_agent.domain.capability import CapabilityCatalog
 from mobile_agent.domain.device import ConnectionState
-from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.errors import ErrorCategory, ErrorOutcome, MobileAgentError
 from mobile_agent.domain.navigation import (
     NAVIGATION_TARGETS,
     navigation_target_matches,
@@ -35,6 +35,19 @@ from mobile_agent.ui.parser import UiHierarchyParser
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# 系统权限弹窗前台包名。点击这类弹窗等于授予/拒绝运行时权限（产品文档定义的
+# High 风险账号与安全设置修改），但通用 tap 只是 Medium 动作——ITER-0061 真机
+# 实测模型在录音权限弹窗上自主点击「仅使用期间允许」。权限决策属于人工接管：
+# 前台为权限弹窗时，点击类动作在派发前一律拒绝（ADR-0020）。
+_PERMISSION_DIALOG_PACKAGES = frozenset(
+    {
+        "com.android.permissioncontroller",
+        "com.google.android.permissioncontroller",
+    }
+)
+_PERMISSION_DIALOG_GUARDED_TOOLS = frozenset({"input.tap", "input.tap_element"})
 
 
 def _is_editable_node(node: UiNode) -> bool:
@@ -291,6 +304,18 @@ class ToolRuntime:
 
         started_at = _now()
         before = await self._adapter.observe(device_id, self._artifacts)
+        if (
+            tool_id in _PERMISSION_DIALOG_GUARDED_TOOLS
+            and before.foreground_app.app_id in _PERMISSION_DIALOG_PACKAGES
+        ):
+            raise MobileAgentError(
+                code="ACTION_REJECTED_BY_POLICY",
+                category=ErrorCategory.POLICY,
+                message="前台为系统权限弹窗，自动点击已拒绝",
+                outcome=ErrorOutcome.REJECTED,
+                suggested_action="权限决策请暂停任务并人工接管设备完成",
+                details={"foreground_app_id": before.foreground_app.app_id},
+            )
         ui_match = await self._dispatch(tool_id, device_id, arguments, before)
         after = await self._adapter.observe(device_id, self._artifacts)
         verification = self._verify(tool_id, arguments, after)

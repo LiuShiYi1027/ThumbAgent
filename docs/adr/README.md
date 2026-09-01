@@ -59,3 +59,4 @@ NNNN-short-kebab-case-title.md
 - [ADR-0017：应用卸载独立确认数据删除影响](./0017-scoped-app-removal.md)
 - [ADR-0018：程序化系统设置导航与 Runtime 导航捷径](./0018-programmatic-navigation-shortcuts.md)
 - [ADR-0019：Unicode 文本输入的受控 IME Helper](./0019-unicode-input-ime-helper.md)
+- [ADR-0020：系统权限弹窗前台的点击动作拒绝派发](./0020-permission-dialog-tap-guard.md)
