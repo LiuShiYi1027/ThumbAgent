@@ -37,8 +37,7 @@ MAX_TIMEOUT_SECONDS = 1800
 StepType = Literal["tool", "loop", "if"]
 
 
-def _invalid(field: str, message: str) -> MobileAgentError:
-    return MobileAgentError(
+def _invalid(field: str, message: str) -> MobileAgentError:    return MobileAgentError(
         code="SKILL_DSL_INVALID",
         category=ErrorCategory.VALIDATION,
         message=message,
