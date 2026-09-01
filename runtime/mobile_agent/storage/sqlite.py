@@ -9,7 +9,12 @@ from typing import Any
 
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.task import TaskRun
-from mobile_agent.tasks.store import derive_task_events, task_not_found, task_summary
+from mobile_agent.tasks.store import (
+    derive_task_events,
+    task_not_found,
+    task_summary,
+    terminal_task_run_conflict,
+)
 
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
@@ -59,15 +64,28 @@ class SQLiteTaskStore:
         return self._path
 
     def save(self, task: TaskRun) -> None:
-        """Persist a completed task run and its derived event sequence."""
+        """Persist a completed task run and its derived event sequence.
+
+        终态 TaskRun 不可变：同一 task_id 的同内容重写幂等，不同内容的覆盖
+        写入以 TASK_STATE_CONFLICT 拒绝，派生事件不重复写入。
+        """
 
         task_dict = task.to_dict()
         events = derive_task_events(task)
+        task_json = _json_dumps(task_dict)
         try:
             with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT task_json FROM tasks WHERE task_id = ?",
+                    (task.task_id,),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing[0]) == task_json:
+                        return  # 同内容重写幂等
+                    raise terminal_task_run_conflict(task.task_id)
                 connection.execute(
                     """
-                    INSERT OR REPLACE INTO tasks(
+                    INSERT INTO tasks(
                         task_id, task_type, device_id, status, started_at, completed_at, task_json
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -79,10 +97,9 @@ class SQLiteTaskStore:
                         task.status.value,
                         task.started_at,
                         task.completed_at,
-                        _json_dumps(task_dict),
+                        task_json,
                     ),
                 )
-                connection.execute("DELETE FROM task_events WHERE task_id = ?", (task.task_id,))
                 connection.executemany(
                     """
                     INSERT INTO task_events(

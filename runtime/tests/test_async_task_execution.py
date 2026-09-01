@@ -5,6 +5,7 @@ import json
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from mobile_agent.domain.task import TaskRun, TaskStatus
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.runtime import RuntimeService
 from mobile_agent.storage.execution import SQLiteTaskExecutionStore
+from mobile_agent.storage.sqlite import SQLiteTaskStore
 from mobile_agent.tasks.execution import (
     AsyncTaskExecutor,
     ExecutionStatus,
@@ -562,6 +564,214 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         self.assertEqual("TASK_INTERRUPTED", recovered.error["code"])
         self.assertEqual("unknown_outcome", recovered.error["outcome"])
         self.assertEqual("task.completed", events[-1]["event_type"])
+
+    def test_sqlite_recovery_adopts_terminal_task_run_from_crash_window(self) -> None:
+        """崩溃窗口：TaskRun 已终态落库而 execution 仍为 running 时，恢复必须
+        采纳 TaskStore 终态，不得写入与之矛盾的 TASK_INTERRUPTED。"""
+        database = self.root / "adopt.db"
+        task_store = SQLiteTaskStore(database)
+        store = SQLiteTaskExecutionStore(database)
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000010",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="crash after report write",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+        )
+        store.save_execution(execution)
+        task_store.save(
+            _task(execution.task_id, "crash after report write", TaskStatus.SUCCEEDED)
+        )
+
+        store.recover_incomplete_executions()
+
+        recovered = store.get_execution(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, recovered.status)
+        self.assertTrue(recovered.result_available)
+        self.assertIsNone(recovered.error)
+        completed = [
+            event
+            for event in store.list_execution_events(execution.task_id)
+            if event["event_type"] == "task.completed"
+        ]
+        self.assertEqual(1, len(completed))
+        self.assertEqual("succeeded", completed[0]["payload"]["status"])
+
+        # 恢复幂等：再次扫描不改变状态、不追加第二个 COMPLETED 事件
+        store.recover_incomplete_executions()
+        self.assertEqual(
+            ExecutionStatus.SUCCEEDED,
+            store.get_execution(execution.task_id).status,
+        )
+        self.assertEqual(
+            1,
+            len(
+                [
+                    event
+                    for event in store.list_execution_events(execution.task_id)
+                    if event["event_type"] == "task.completed"
+                ]
+            ),
+        )
+
+    def test_sqlite_recovery_adopts_failed_task_run_error(self) -> None:
+        """TaskRun 以 failed 终态落库时，恢复采纳其状态与错误，而非 unknown_outcome。"""
+        database = self.root / "adopt-failed.db"
+        task_store = SQLiteTaskStore(database)
+        store = SQLiteTaskExecutionStore(database)
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000011",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="crash after failed report",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+        )
+        store.save_execution(execution)
+        failed_run = replace(
+            _task(execution.task_id, "crash after failed report", TaskStatus.FAILED),
+            error={
+                "code": "MODEL_UNAVAILABLE",
+                "category": "provider",
+                "message": "模型服务不可用",
+                "retryable": False,
+                "outcome": "known_failure",
+            },
+        )
+        task_store.save(failed_run)
+
+        store.recover_incomplete_executions()
+
+        recovered = store.get_execution(execution.task_id)
+        self.assertEqual(ExecutionStatus.FAILED, recovered.status)
+        self.assertEqual("MODEL_UNAVAILABLE", recovered.error["code"])
+        self.assertNotEqual("TASK_INTERRUPTED", recovered.error["code"])
+
+    def test_worker_exception_preserves_terminal_stored_execution(self) -> None:
+        """终态已落库后执行器再遇异常时，不得覆盖终态或追加第二个 COMPLETED 事件。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+
+        async def run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            return _task(task_id, "handler boom", TaskStatus.SUCCEEDED)
+
+        def completion(task: TaskRun) -> None:
+            stored = store.get_execution(task.task_id)
+            store.save_execution(
+                replace(
+                    stored,
+                    status=ExecutionStatus.SUCCEEDED,
+                    completed_at=_now(),
+                    result_available=True,
+                )
+            )
+            raise RuntimeError("report pipeline crashed after terminal write")
+
+        first = executor.submit("fake:android-001", "handler boom", run, completion)
+        probe_done = threading.Event()
+
+        async def probe(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            return _task(task_id, "probe", TaskStatus.SUCCEEDED)
+
+        # 串行 worker：探针任务完成即保证第一个任务已完全走完后置处理
+        executor.submit(
+            "fake:android-001", "probe", probe, lambda task: probe_done.set()
+        )
+        self.assertTrue(probe_done.wait(2), "serial worker did not drain")
+
+        final = executor.get(first.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, final.status)
+        self.assertIsNone(final.error)
+        event_types = [
+            event["event_type"] for event in executor.list_events(first.task_id)
+        ]
+        self.assertNotIn("task.completed", event_types)
+
+    def test_in_memory_execution_store_rejects_terminal_overwrite(self) -> None:
+        """终态 execution 不可变：不同内容的覆盖写入被拒绝，同内容重写幂等。"""
+        store = InMemoryTaskExecutionStore()
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000012",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="immutable",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+        )
+        store.create_execution(execution, None, "")
+        succeeded = replace(
+            execution,
+            status=ExecutionStatus.SUCCEEDED,
+            completed_at=_now(),
+            result_available=True,
+        )
+        store.save_execution(succeeded)
+        store.save_execution(succeeded)
+
+        with self.assertRaises(MobileAgentError) as raised:
+            store.save_execution(
+                replace(
+                    succeeded,
+                    status=ExecutionStatus.FAILED,
+                    error={"code": "TASK_INTERRUPTED"},
+                )
+            )
+
+        self.assertEqual("TASK_STATE_CONFLICT", raised.exception.code)
+        self.assertEqual(
+            ExecutionStatus.SUCCEEDED,
+            store.get_execution(execution.task_id).status,
+        )
+
+    def test_sqlite_save_execution_rejects_terminal_overwrite(self) -> None:
+        """SQLite 执行存储在数据库层拒绝终态覆盖，恢复路径写入不受影响。"""
+        store = SQLiteTaskExecutionStore(self.root / "immutable.db")
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000013",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="immutable",
+            status=ExecutionStatus.RUNNING,
+            submitted_at=_now(),
+            started_at=_now(),
+        )
+        store.save_execution(execution)
+        succeeded = replace(
+            execution,
+            status=ExecutionStatus.SUCCEEDED,
+            completed_at=_now(),
+            result_available=True,
+        )
+        store.save_execution(succeeded)
+        store.save_execution(succeeded)
+
+        with self.assertRaises(MobileAgentError) as raised:
+            store.save_execution(
+                replace(
+                    succeeded,
+                    status=ExecutionStatus.FAILED,
+                    error={"code": "TASK_INTERRUPTED"},
+                )
+            )
+
+        self.assertEqual("TASK_STATE_CONFLICT", raised.exception.code)
+        persisted = store.get_execution(execution.task_id)
+        self.assertEqual(ExecutionStatus.SUCCEEDED, persisted.status)
+        self.assertIsNone(persisted.error)
 
     def test_pause_engages_at_safe_boundary_and_resume_continues(self) -> None:
         """暂停在探针边界生效，暂停期间无后续动作，恢复后续跑并完成。"""

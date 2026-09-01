@@ -181,6 +181,11 @@ class InMemoryTaskExecutionStore:
 
     def save_execution(self, execution: TaskExecution) -> None:
         with self._lock:
+            existing = self._executions.get(execution.task_id)
+            if existing is not None and existing.status in _TERMINAL:
+                if existing == execution:
+                    return  # 同内容重写幂等
+                raise terminal_execution_conflict(execution.task_id)
             self._executions[execution.task_id] = execution
             self._events.setdefault(execution.task_id, [])
 
@@ -551,24 +556,26 @@ class AsyncTaskExecutor:
                 self._append_event(final, TaskEventType.COMPLETED, payload)
                 self._store.save_execution(final)
             except Exception:
-                failed = replace(
-                    self._store.get_execution(item.execution.task_id),
-                    status=ExecutionStatus.FAILED,
-                    completed_at=_now(),
-                    error={
-                        "code": "INTERNAL_ERROR",
-                        "category": "internal",
-                        "message": "异步任务执行器发生内部错误",
-                        "retryable": False,
-                        "outcome": "known_failure",
-                    },
-                )
-                self._append_event(
-                    failed,
-                    TaskEventType.COMPLETED,
-                    {"status": "failed", "error_code": "INTERNAL_ERROR"},
-                )
-                self._store.save_execution(failed)
+                stored = self._store.get_execution(item.execution.task_id)
+                if stored.status not in _TERMINAL:
+                    failed = replace(
+                        stored,
+                        status=ExecutionStatus.FAILED,
+                        completed_at=_now(),
+                        error={
+                            "code": "INTERNAL_ERROR",
+                            "category": "internal",
+                            "message": "异步任务执行器发生内部错误",
+                            "retryable": False,
+                            "outcome": "known_failure",
+                        },
+                    )
+                    self._append_event(
+                        failed,
+                        TaskEventType.COMPLETED,
+                        {"status": "failed", "error_code": "INTERNAL_ERROR"},
+                    )
+                    self._store.save_execution(failed)
             finally:
                 with self._lock:
                     self._items.pop(item.execution.task_id, None)
@@ -642,6 +649,17 @@ class AsyncTaskExecutor:
                     payload=payload,
                 )
             )
+
+
+def terminal_execution_conflict(task_id: str) -> MobileAgentError:
+    """Build the stable conflict error for writes against terminal executions."""
+
+    return MobileAgentError(
+        code="TASK_STATE_CONFLICT",
+        category=ErrorCategory.EXECUTION,
+        message="任务执行已到终态，状态不可变",
+        details={"task_id": task_id},
+    )
 
 
 def _cancelled_error() -> dict[str, Any]:

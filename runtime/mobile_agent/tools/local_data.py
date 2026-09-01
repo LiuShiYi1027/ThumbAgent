@@ -59,7 +59,7 @@ class LocalDataTool:
         retention_days = validate_retention_days(retention_days)
         now = self._clock()
         cutoff = now - retention_days * 86400
-        entries = self._scan(hash_contents=False)
+        entries, _oversized = self._scan(hash_contents=False)
         by_kind: dict[str, dict[str, int]] = {}
         for kind in ArtifactKind:
             by_kind[kind.value] = {"count": 0, "size_bytes": 0}
@@ -83,19 +83,27 @@ class LocalDataTool:
 
     def prepare(
         self, retention_days: int, max_artifacts: int
-    ) -> tuple[float, tuple[LocalArtifactEntry, ...], bool]:
+    ) -> tuple[float, tuple[LocalArtifactEntry, ...], bool, dict[str, int]]:
+        """Build the exact expired candidate set plus oversized-skip statistics.
+
+        返回（cutoff, candidates, truncated, oversized_skipped）。超过保留扫描
+        上限的 Artifact 不参与哈希与清理，其数量与字节数以 oversized_skipped
+        表面化，不再静默跳过。
+        """
         retention_days = validate_retention_days(retention_days)
         max_artifacts = validate_cleanup_limit(max_artifacts)
         cutoff = self._clock() - retention_days * 86400
+        entries, oversized = self._scan(hash_contents=True)
         expired = sorted(
-            (
-                item
-                for item in self._scan(hash_contents=True)
-                if item.created_at_epoch < cutoff
-            ),
+            (item for item in entries if item.created_at_epoch < cutoff),
             key=lambda item: (item.created_at_epoch, item.artifact_id),
         )
-        return cutoff, tuple(expired[:max_artifacts]), len(expired) > max_artifacts
+        return (
+            cutoff,
+            tuple(expired[:max_artifacts]),
+            len(expired) > max_artifacts,
+            oversized,
+        )
 
     def cleanup(
         self,
@@ -160,8 +168,12 @@ class LocalDataTool:
             deleted_bytes += candidate.size_bytes
         return tuple(deleted), deleted_bytes
 
-    def _scan(self, hash_contents: bool) -> tuple[LocalArtifactEntry, ...]:
+    def _scan(
+        self, hash_contents: bool
+    ) -> tuple[tuple[LocalArtifactEntry, ...], dict[str, int]]:
         entries: list[LocalArtifactEntry] = []
+        oversized_count = 0
+        oversized_bytes = 0
         try:
             paths = tuple(self._artifacts.root.rglob("artifact_*"))
         except OSError as error:
@@ -181,6 +193,8 @@ class LocalDataTool:
                 if stat.st_nlink != 1:
                     continue
                 if hash_contents and stat.st_size > _MAX_RETENTION_ARTIFACT_BYTES:
+                    oversized_count += 1
+                    oversized_bytes += stat.st_size
                     continue
                 digest = _sha256(path) if hash_contents else ""
             except OSError as error:
@@ -199,7 +213,10 @@ class LocalDataTool:
                     stat.st_mtime,
                 )
             )
-        return tuple(entries)
+        return tuple(entries), {
+            "count": oversized_count,
+            "bytes": oversized_bytes,
+        }
 
     def _candidate_path(self, candidate: LocalArtifactEntry) -> Path:
         path = self._artifacts.root / candidate.relative_path

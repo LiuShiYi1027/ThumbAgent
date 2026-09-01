@@ -51,6 +51,42 @@ class ArtifactStoreTests(unittest.TestCase):
             self.store.screenshot_content("artifact_" + "0" * 32)
         self.assertEqual("ARTIFACT_NOT_FOUND", missing.exception.code)
 
+    def test_write_rejects_oversized_artifacts_by_kind(self) -> None:
+        """写入侧按 kind 限制大小：截图与读取侧同为 8MiB，诊断包对齐 24MiB。"""
+        oversized_png = b"\x89PNG\r\n\x1a\n" + b"\0" * (8 * 1024 * 1024)
+        with self.assertRaises(MobileAgentError) as screenshot:
+            self.store.write(
+                ArtifactKind.SCREENSHOT, "image/png", oversized_png, ".png"
+            )
+        self.assertEqual("ARTIFACT_TOO_LARGE", screenshot.exception.code)
+
+        with self.assertRaises(MobileAgentError) as performance:
+            self.store.write(
+                ArtifactKind.DEVICE_PERFORMANCE,
+                "application/json",
+                b"{}" + b"\0" * (1024 * 1024),
+                ".json",
+            )
+        self.assertEqual("ARTIFACT_TOO_LARGE", performance.exception.code)
+
+        with self.assertRaises(MobileAgentError) as bundle:
+            self.store.write(
+                ArtifactKind.DIAGNOSTIC_BUNDLE,
+                "application/zip",
+                b"PK" + b"\0" * (24 * 1024 * 1024),
+                ".zip",
+            )
+        self.assertEqual("ARTIFACT_TOO_LARGE", bundle.exception.code)
+
+    def test_write_accepts_artifact_at_kind_limit(self) -> None:
+        at_limit = b"\x89PNG\r\n\x1a\n" + b"\0" * (8 * 1024 * 1024 - 8)
+        artifact = self.store.write(
+            ArtifactKind.SCREENSHOT, "image/png", at_limit, ".png"
+        )
+
+        self.assertEqual(len(at_limit), artifact.size_bytes)
+        self.assertEqual(at_limit, self.store.screenshot_content(artifact.artifact_id))
+
     def test_screenshot_content_rejects_non_png_content(self) -> None:
         # 文件名由系统生成且扩展名固定为 .png，但内容仍重新校验签名，
         # 防止磁盘上被替换的文件经端点流出。

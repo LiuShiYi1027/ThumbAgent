@@ -17,6 +17,17 @@ from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 _ARTIFACT_ID = re.compile(r"^artifact_[a-f0-9]{32}$")
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+# 写入侧按 kind 的大小上限：截图与 screenshot_content 读取上限对齐，诊断包对齐
+# diagnostic_bundle.MAX_BUNDLE_BYTES；全部低于保留清理扫描的 64MiB 上限，
+# 保证任何成功写入的 Artifact 都仍在保留语义内。
+_MAX_ARTIFACT_BYTES = {
+    ArtifactKind.SCREENSHOT: _MAX_SCREENSHOT_BYTES,
+    ArtifactKind.UI_TREE: 8 * 1024 * 1024,
+    ArtifactKind.DEVICE_LOG: 8 * 1024 * 1024,
+    ArtifactKind.DEVICE_PERFORMANCE: 1024 * 1024,
+    ArtifactKind.DEVICE_NOTIFICATIONS: 1024 * 1024,
+    ArtifactKind.DIAGNOSTIC_BUNDLE: 24 * 1024 * 1024,
+}
 
 
 class ArtifactStore:
@@ -53,6 +64,18 @@ class ArtifactStore:
                 code="ARTIFACT_EMPTY",
                 category=ErrorCategory.STORAGE,
                 message="不能保存空证据",
+            )
+        limit = _MAX_ARTIFACT_BYTES[kind]
+        if len(data) > limit:
+            raise MobileAgentError(
+                code="ARTIFACT_TOO_LARGE",
+                category=ErrorCategory.STORAGE,
+                message="Artifact 超出大小上限",
+                details={
+                    "kind": kind.value,
+                    "size_bytes": len(data),
+                    "limit_bytes": limit,
+                },
             )
         now = datetime.now(timezone.utc)
         artifact_id = f"artifact_{uuid.uuid4().hex}"

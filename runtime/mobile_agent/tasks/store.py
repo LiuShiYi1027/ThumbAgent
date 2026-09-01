@@ -38,10 +38,19 @@ class InMemoryTaskStore:
         self._lock = threading.Lock()
 
     def save(self, task: TaskRun) -> None:
-        """Store a task run and derive its compact event log."""
+        """Store a task run and derive its compact event log.
+
+        终态 TaskRun 不可变：同一 task_id 的同内容重写幂等，不同内容的覆盖
+        写入以 TASK_STATE_CONFLICT 拒绝。
+        """
 
         events = derive_task_events(task)
         with self._lock:
+            existing = self._runs.get(task.task_id)
+            if existing is not None:
+                if existing == task:
+                    return  # 同内容重写幂等
+                raise terminal_task_run_conflict(task.task_id)
             self._runs[task.task_id] = task
             self._events[task.task_id] = events
 
@@ -109,6 +118,17 @@ def task_not_found(task_id: str) -> MobileAgentError:
         code="TASK_NOT_FOUND",
         category=ErrorCategory.VALIDATION,
         message="任务不存在或已不在当前 Runtime 生命周期内",
+        details={"task_id": task_id},
+    )
+
+
+def terminal_task_run_conflict(task_id: str) -> MobileAgentError:
+    """Build the stable conflict error for writes against terminal task runs."""
+
+    return MobileAgentError(
+        code="TASK_STATE_CONFLICT",
+        category=ErrorCategory.EXECUTION,
+        message="终态任务报告不可变",
         details={"task_id": task_id},
     )
 

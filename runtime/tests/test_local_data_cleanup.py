@@ -214,13 +214,45 @@ class LocalDataCleanupTests(unittest.TestCase):
 
         self.assertEqual(0, approval["candidate_count"])
 
+    def test_prepare_surfaces_oversized_skipped_artifacts(self) -> None:
+        """超过保留扫描上限的 Artifact 不再静默跳过：预检摘要公开跳过统计。"""
+        with tempfile.TemporaryDirectory() as directory:
+            runtime, store = _runtime(directory)
+            _, normal_path = _artifact(store, 10, b"normal")
+            _, oversized_path = _artifact(store, 10, b"large")
+            os.truncate(oversized_path, 64 * 1024 * 1024 + 1)
+            old = NOW - 10 * 86400
+            os.utime(normal_path, (old, old))
+            os.utime(oversized_path, (old, old))
+
+            approval = runtime.prepare_local_data_cleanup()
+            summary = runtime.local_storage_summary()
+
+        self.assertEqual(1, approval["candidate_count"])
+        self.assertEqual(
+            {"count": 1, "bytes": 64 * 1024 * 1024 + 1},
+            approval["oversized_skipped"],
+        )
+        # 只读摘要保持既有 Contract 形状，不新增字段
+        self.assertNotIn("oversized_skipped", summary)
+
+    def test_prepare_omits_oversized_skipped_when_none(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime, store = _runtime(directory)
+            _artifact(store, 10, b"old")
+
+            approval = runtime.prepare_local_data_cleanup()
+
+        self.assertEqual(1, approval["candidate_count"])
+        self.assertNotIn("oversized_skipped", approval)
+
     def test_cancellation_boundary_stops_before_next_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = ArtifactStore(Path(directory) / "artifacts")
             _, first_path = _artifact(store, 11, b"first")
             _, second_path = _artifact(store, 10, b"second")
             tool = LocalDataTool(store, PolicyEngine(), lambda: NOW)
-            cutoff, candidates, truncated = tool.prepare(7, 500)
+            cutoff, candidates, truncated, _oversized = tool.prepare(7, 500)
             approval = LocalDataCleanupApprovalStore(
                 lambda: NOW
             ).create(7, cutoff, candidates, truncated)
