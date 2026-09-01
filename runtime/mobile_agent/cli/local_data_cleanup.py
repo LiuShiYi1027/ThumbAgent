@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from mobile_agent.api.idempotency import stable_idempotency_key
 from mobile_agent.cli.device_logs_collect import render_submission
 
 
@@ -24,20 +24,20 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.confirm:
         parser.error("--confirm is required for permanent local data deletion")
+    body = {
+        "approval_id": args.approval_id,
+        "confirmed": True,
+        "deadline_seconds": args.deadline_seconds,
+    }
+    endpoint = "/v1/tasks/local.data.cleanup/async"
     request = Request(
-        f"{args.base_url.rstrip('/')}/v1/tasks/local.data.cleanup/async",
-        data=json.dumps(
-            {
-                "approval_id": args.approval_id,
-                "confirmed": True,
-                "deadline_seconds": args.deadline_seconds,
-            }
-        ).encode(),
+        f"{args.base_url.rstrip('/')}{endpoint}",
+        data=json.dumps(body).encode(),
         headers={
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {args.token}",
-            "Idempotency-Key": f"cli-{uuid.uuid4().hex}",
+            "Idempotency-Key": stable_idempotency_key("cli", endpoint, body),
         },
         method="POST",
     )

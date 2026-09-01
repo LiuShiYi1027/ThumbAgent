@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from mobile_agent.api.idempotency import stable_idempotency_key
 from mobile_agent.cli.device_logs_collect import render_submission
 
 
@@ -44,14 +44,15 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.app_id:
         body["app_id"] = args.app_id
+    endpoint = "/v1/tasks/device.diagnostics.bundle/async"
     request = Request(
-        f"{args.base_url.rstrip('/')}/v1/tasks/device.diagnostics.bundle/async",
+        f"{args.base_url.rstrip('/')}{endpoint}",
         data=json.dumps(body).encode(),
         headers={
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {args.token}",
-            "Idempotency-Key": f"cli-{uuid.uuid4()}",
+            "Idempotency-Key": stable_idempotency_key("cli", endpoint, body),
         },
         method="POST",
     )

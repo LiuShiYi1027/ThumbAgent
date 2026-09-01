@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from mobile_agent.api.idempotency import stable_idempotency_key
 from mobile_agent.cli.device_logs_collect import render_submission
 
 
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.async_task:
         endpoint = "/v1/tasks/device.performance.snapshot/async"
         body["deadline_seconds"] = args.deadline_seconds
-        headers["Idempotency-Key"] = f"cli-{uuid.uuid4()}"
+        headers["Idempotency-Key"] = stable_idempotency_key("cli", endpoint, body)
     request = Request(
         f"{args.base_url.rstrip('/')}{endpoint}",
         data=json.dumps(body).encode("utf-8"),

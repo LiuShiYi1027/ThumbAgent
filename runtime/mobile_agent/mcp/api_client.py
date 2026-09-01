@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from mobile_agent.api.idempotency import stable_idempotency_key
 
 
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -254,7 +255,9 @@ class RuntimeApiClient:
             headers["Content-Type"] = "application/json"
             encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
         if idempotent_submission:
-            headers["Idempotency-Key"] = f"mcp-{uuid.uuid4().hex}"
+            headers["Idempotency-Key"] = stable_idempotency_key(
+                "mcp", path, body or {}
+            )
         try:
             status, raw = self._transport(
                 method, f"{self._base_url}{path}", headers, encoded, 30.0
