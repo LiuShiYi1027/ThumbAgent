@@ -155,6 +155,7 @@ def _get_config(runtime: RuntimeService) -> dict[str, Any]:
     handler = object.__new__(RuntimeRequestHandler)
     handler.path = "/v1/model-provider/config"
     handler.headers = Message()
+    handler.headers["Host"] = "127.0.0.1:8765"
     handler.server = SimpleNamespace(
         runtime=runtime,
         api_token="test-token",
@@ -175,6 +176,7 @@ def _post_config(
     handler = object.__new__(RuntimeRequestHandler)
     handler.path = "/v1/model-provider/config"
     headers = Message()
+    headers["Host"] = "127.0.0.1:8765"
     headers["Content-Type"] = "application/json"
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"

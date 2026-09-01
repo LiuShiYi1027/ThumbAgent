@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
+from email.message import Message
 from http import HTTPStatus
+from types import SimpleNamespace
 
 from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.web import TASK_UI_HTML
@@ -110,6 +113,39 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("诊断：", TASK_UI_HTML)
         self.assertIn("/events", TASK_UI_HTML)
 
+    def test_get_ui_without_token_returns_unauthorized(self) -> None:
+        for path in ("/ui", "/ui/"):
+            with self.subTest(path=path):
+                handler, captured = _ui_get_handler(path)
+
+                handler.do_GET()
+
+                self.assertEqual(HTTPStatus.UNAUTHORIZED, captured["status"])
+                payload = captured["payload"]
+                assert isinstance(payload, dict)
+                self.assertEqual("UNAUTHORIZED", payload["error"]["code"])
+                self.assertNotIn("html", captured)
+                self.assertNotIn("test-token", json.dumps(payload, ensure_ascii=False))
+
+    def test_get_ui_with_wrong_token_returns_unauthorized(self) -> None:
+        handler, captured = _ui_get_handler("/ui?token=wrong-token")
+
+        handler.do_GET()
+
+        self.assertEqual(HTTPStatus.UNAUTHORIZED, captured["status"])
+        self.assertNotIn("html", captured)
+
+    def test_get_ui_with_valid_token_serves_embedded_page(self) -> None:
+        handler, captured = _ui_get_handler("/ui?token=test-token")
+
+        handler.do_GET()
+
+        self.assertEqual(HTTPStatus.OK, captured["status"])
+        html = captured["html"]
+        assert isinstance(html, str)
+        self.assertIn(json.dumps("test-token"), html)
+        self.assertNotIn("__MOBILE_AGENT_API_TOKEN__", html)
+
     def test_write_html_uses_safe_headers(self) -> None:
         handler = object.__new__(RuntimeRequestHandler)
         captured: dict[str, object] = {"headers": []}
@@ -133,6 +169,22 @@ class WebUiTests(unittest.TestCase):
         self.assertIn(("Content-Type", "text/html; charset=utf-8"), captured["headers"])
         self.assertIn(("Cache-Control", "no-store"), captured["headers"])
         self.assertEqual(b"<h1>ok</h1>", handler.wfile.data)
+
+
+def _ui_get_handler(path: str) -> tuple[RuntimeRequestHandler, dict[str, object]]:
+    handler = object.__new__(RuntimeRequestHandler)
+    handler.path = path
+    handler.headers = Message()
+    handler.headers["Host"] = "127.0.0.1:8765"
+    handler.server = SimpleNamespace(api_token="test-token")
+    captured: dict[str, object] = {}
+    handler._write_html = lambda status, html: captured.update(
+        {"status": status, "html": html}
+    )
+    handler._write_json = lambda status, payload: captured.update(
+        {"status": status, "payload": payload}
+    )
+    return handler, captured
 
 
 class _FakeWriter:

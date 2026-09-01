@@ -510,6 +510,8 @@ class _InProcessHttpTransport:
         message = Message()
         for key, value in headers.items():
             message[key] = value
+        if "Host" not in message:
+            message["Host"] = "127.0.0.1:8765"
         handler.headers = message
         handler.server = SimpleNamespace(
             runtime=self.runtime,

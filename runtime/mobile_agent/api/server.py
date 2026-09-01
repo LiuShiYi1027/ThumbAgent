@@ -13,11 +13,61 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
-from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
+from mobile_agent.domain.errors import ErrorCategory, ErrorOutcome, MobileAgentError
 from mobile_agent.evidence.artifacts import default_artifact_root
 from mobile_agent.runtime import RuntimeService, build_default_runtime
 from mobile_agent.runtime_lock import RuntimeInstanceLock
 from mobile_agent.web import TASK_UI_HTML
+
+
+_TOOL_INVOKE_ROUTE = r"/v1/tools/([a-z0-9._]+)/invoke"
+_LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _interface_error(
+    code: str,
+    message: str,
+    *,
+    category: ErrorCategory = ErrorCategory.VALIDATION,
+) -> dict[str, Any]:
+    """接口层错误统一信封，形状与 MobileAgentError.to_dict 完全一致。"""
+
+    return {
+        "error": MobileAgentError(
+            code=code,
+            category=category,
+            message=message,
+            outcome=ErrorOutcome.REJECTED,
+        ).to_dict()
+    }
+
+
+def _is_loopback_host(host_header: str | None) -> bool:
+    """Host 头必须指向 loopback（任意端口），抵御 DNS rebinding。"""
+
+    if not host_header:
+        return False
+    value = host_header.strip()
+    if value.startswith("["):
+        closing = value.find("]")
+        if closing == -1:
+            return False
+        hostname = value[1:closing]
+        remainder = value[closing + 1 :]
+        if remainder and (
+            not remainder.startswith(":") or not remainder[1:].isdigit()
+        ):
+            return False
+    elif value.count(":") == 0:
+        hostname = value
+    elif value.count(":") == 1:
+        hostname, _, port = value.partition(":")
+        if not port.isdigit():
+            return False
+    else:
+        return False
+    return hostname.lower() in _LOOPBACK_HOSTNAMES
 
 
 class RuntimeRequestHandler(BaseHTTPRequestHandler):
@@ -27,9 +77,13 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
     server_version = "MobileAgentRuntime/0.1"
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if not self._authorize_host():
+            return
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         if path in {"/ui", "/ui/"}:
+            if not self._authorize_ui_get(parsed_path.query):
+                return
             token = getattr(self.server, "api_token", "")
             self._write_html(
                 HTTPStatus.OK,
@@ -47,10 +101,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             self._write_json(status, payload)
             return
         if path == "/v1/devices":
-            try:
-                status, payload = self._runtime().list_devices_sync()
-            except MobileAgentError as error:
-                status, payload = HTTPStatus.SERVICE_UNAVAILABLE, {"error": error.to_dict()}
+            status, payload = self._runtime().list_devices_sync()
             self._write_json(status, payload)
             return
         if path == "/v1/tools":
@@ -92,7 +143,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._write_json(
                     HTTPStatus.BAD_REQUEST,
-                    {"error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}},
+                    _interface_error("INVALID_ARGUMENT", "请求参数无效"),
                 )
                 return
             status, payload = self._runtime().local_storage_summary_sync(
@@ -121,7 +172,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._write_json(
                     HTTPStatus.BAD_REQUEST,
-                    {"error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}},
+                    _interface_error("INVALID_ARGUMENT", "请求参数无效"),
                 )
                 return
             status, payload = self._runtime().list_installed_apps_sync(
@@ -152,7 +203,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._write_json(
                     HTTPStatus.BAD_REQUEST,
-                    {"error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}},
+                    _interface_error("INVALID_ARGUMENT", "请求参数无效"),
                 )
                 return
             status, payload = self._runtime().list_tasks_sync(limit)
@@ -188,30 +239,21 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             return
         self._write_json(
             HTTPStatus.NOT_FOUND,
-            {
-                "error": {
-                    "code": "RESOURCE_NOT_FOUND",
-                    "category": "validation",
-                    "message": "请求的本地资源不存在",
-                    "retryable": False,
-                    "outcome": "rejected",
-                }
-            },
+            _interface_error("RESOURCE_NOT_FOUND", "请求的本地资源不存在"),
         )
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if not self._authorize_host():
+            return
         if not self._authorize_post():
             return
         match = re.fullmatch(r"/v1/devices/([^/]+)/observe", self.path)
         if match:
-            try:
-                status, payload = self._runtime().observe_sync(match.group(1))
-            except MobileAgentError as error:
-                status, payload = HTTPStatus.SERVICE_UNAVAILABLE, {"error": error.to_dict()}
+            status, payload = self._runtime().observe_sync(match.group(1))
             self._write_json(status, payload)
             return
 
-        tool_match = re.fullmatch(r"/v1/tools/([a-z.]+)/invoke", self.path)
+        tool_match = re.fullmatch(_TOOL_INVOKE_ROUTE, self.path)
         skill_match = re.fullmatch(r"/v1/skills/app\.open/invoke", self.path)
         device_logs_match = re.fullmatch(
             r"/v1/skills/device\.logs\.collect/invoke", self.path
@@ -721,6 +763,13 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     deadline_seconds,
                 )
             elif navigation_match:
+                if set(body) - {
+                    "device_id",
+                    "target_selector",
+                    "expected_selector",
+                    "confirmed",
+                }:
+                    raise ValueError("settings navigate fields")
                 target = body.get("target_selector")
                 expected = body.get("expected_selector")
                 confirmed = body.get("confirmed", False)
@@ -732,6 +781,18 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     device_id, target, expected, confirmed
                 )
             elif scroll_navigation_match:
+                if set(body) - {
+                    "device_id",
+                    "target_selector",
+                    "expected_selector",
+                    "direction",
+                    "max_scrolls",
+                    "confirmed",
+                    "distance_percent",
+                    "duration_ms",
+                    "settle_seconds",
+                }:
+                    raise ValueError("scroll navigate fields")
                 target = body.get("target_selector")
                 expected = body.get("expected_selector")
                 direction = body.get("direction", "up")
@@ -747,6 +808,8 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 if (
                     not isinstance(max_scrolls, int)
                     or isinstance(max_scrolls, bool)
+                    or max_scrolls < 1
+                    or max_scrolls > 50
                     or not isinstance(confirmed, bool)
                 ):
                     raise ValueError("max_scrolls/confirmed")
@@ -762,6 +825,19 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     settle_seconds,
                 )
             elif task_run_match:
+                if set(body) - {
+                    "device_id",
+                    "target_selector",
+                    "expected_selector",
+                    "direction",
+                    "max_scrolls",
+                    "confirmed",
+                    "distance_percent",
+                    "duration_ms",
+                    "settle_seconds",
+                    "goal",
+                }:
+                    raise ValueError("scroll navigate task fields")
                 target = body.get("target_selector")
                 expected = body.get("expected_selector")
                 direction = body.get("direction", "up")
@@ -778,6 +854,8 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 if (
                     not isinstance(max_scrolls, int)
                     or isinstance(max_scrolls, bool)
+                    or max_scrolls < 1
+                    or max_scrolls > 50
                     or not isinstance(confirmed, bool)
                 ):
                     raise ValueError("max_scrolls/confirmed")
@@ -796,6 +874,17 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     goal,
                 )
             elif agent_run_match or async_agent_run_match:
+                if set(body) - {
+                    "device_id",
+                    "goal",
+                    "confirmed",
+                    "max_rounds",
+                    "acceptance",
+                    "goal_spec",
+                    "goal_spec_confirmed",
+                    "deadline_seconds",
+                }:
+                    raise ValueError("agent run fields")
                 goal = body.get("goal")
                 confirmed = body.get("confirmed", False)
                 max_rounds = body.get("max_rounds", 6)
@@ -813,7 +902,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     not isinstance(max_rounds, int)
                     or isinstance(max_rounds, bool)
                     or max_rounds < 1
-                    or max_rounds > 12
+                    or max_rounds > MAX_AGENT_ROUNDS
                 ):
                     raise ValueError("max_rounds")
                 if acceptance is not None and not isinstance(acceptance, dict):
@@ -847,13 +936,13 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                         deadline_seconds,
                     )
             else:
-                status, payload = HTTPStatus.NOT_FOUND, {
-                    "error": {"code": "RESOURCE_NOT_FOUND", "message": "资源不存在"}
-                }
+                status, payload = HTTPStatus.NOT_FOUND, _interface_error(
+                    "RESOURCE_NOT_FOUND", "资源不存在"
+                )
         except (ValueError, json.JSONDecodeError):
-            status, payload = HTTPStatus.BAD_REQUEST, {
-                "error": {"code": "INVALID_ARGUMENT", "message": "请求参数无效"}
-            }
+            status, payload = HTTPStatus.BAD_REQUEST, _interface_error(
+                "INVALID_ARGUMENT", "请求参数无效"
+            )
         except MobileAgentError as error:
             status, payload = HTTPStatus.SERVICE_UNAVAILABLE, {"error": error.to_dict()}
         self._write_json(status, payload)
@@ -864,12 +953,27 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             return runtime
         return self.runtime_factory()
 
+    def _authorize_host(self) -> bool:
+        """拒绝非 loopback Host 头，作为 DNS rebinding 防线（所有请求生效）。"""
+
+        if _is_loopback_host(self.headers.get("Host")):
+            return True
+        self._write_json(
+            HTTPStatus.FORBIDDEN,
+            _interface_error(
+                "HOST_NOT_ALLOWED",
+                "仅允许来自本机回环地址的请求",
+                category=ErrorCategory.POLICY,
+            ),
+        )
+        return False
+
     def _authorize_post(self) -> bool:
         content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         if content_type != "application/json":
             self._write_json(
                 HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-                {"error": {"code": "INVALID_CONTENT_TYPE", "message": "需要 application/json"}},
+                _interface_error("INVALID_CONTENT_TYPE", "需要 application/json"),
             )
             return False
         expected = getattr(self.server, "api_token", "")
@@ -878,7 +982,11 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         if not expected or not secrets.compare_digest(supplied, expected):
             self._write_json(
                 HTTPStatus.UNAUTHORIZED,
-                {"error": {"code": "UNAUTHORIZED", "message": "缺少有效的本地 API 令牌"}},
+                _interface_error(
+                    "UNAUTHORIZED",
+                    "缺少有效的本地 API 令牌",
+                    category=ErrorCategory.POLICY,
+                ),
             )
             return False
         origin = self.headers.get("Origin")
@@ -888,7 +996,11 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             if not self._is_same_loopback_origin(parsed):
                 self._write_json(
                     HTTPStatus.FORBIDDEN,
-                    {"error": {"code": "ORIGIN_REJECTED", "message": "请求来源未获授权"}},
+                    _interface_error(
+                        "ORIGIN_REJECTED",
+                        "请求来源未获授权",
+                        category=ErrorCategory.POLICY,
+                    ),
                 )
                 return False
         return True
@@ -938,6 +1050,25 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorize_ui_get(self, query: str) -> bool:
+        """/ui 页面内嵌 Bearer token，访问必须携带匹配的 query token。
+
+        token 只出现在 URL query 中，log_message 已被静默，不得写入任何日志。
+        """
+        expected = str(getattr(self.server, "api_token", ""))
+        supplied = parse_qs(query).get("token", [""])[0]
+        if not expected or not secrets.compare_digest(supplied, expected):
+            self._write_json(
+                HTTPStatus.UNAUTHORIZED,
+                _interface_error(
+                    "UNAUTHORIZED",
+                    "缺少有效的本地 API 令牌",
+                    category=ErrorCategory.POLICY,
+                ),
+            )
+            return False
+        return True
+
     def _authorize_artifact_get(self) -> bool:
         """证据内容端点单独要求 Bearer token，即使其他 GET 只读端点不强制。"""
         expected = getattr(self.server, "api_token", "")
@@ -946,7 +1077,11 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         if not expected or not secrets.compare_digest(supplied, expected):
             self._write_json(
                 HTTPStatus.UNAUTHORIZED,
-                {"error": {"code": "UNAUTHORIZED", "message": "缺少有效的本地 API 令牌"}},
+                _interface_error(
+                    "UNAUTHORIZED",
+                    "缺少有效的本地 API 令牌",
+                    category=ErrorCategory.POLICY,
+                ),
             )
             return False
         return True
@@ -1050,6 +1185,11 @@ def main() -> None:
             try:
                 server = create_server(args.host, args.port, token)
                 print(f"Mobile Agent runtime listening on http://{args.host}:{server.server_port}")
+                ui_token_display = "<MOBILE_AGENT_API_TOKEN>" if configured_token else token
+                print(
+                    "Local web UI: "
+                    f"http://{args.host}:{server.server_port}/ui?token={ui_token_display}"
+                )
                 if token_file is not None:
                     print(f"Local API token written to {token_file}")
                 server.serve_forever()

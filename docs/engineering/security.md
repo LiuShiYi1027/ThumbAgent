@@ -36,6 +36,7 @@ Mobile Agent 能够影响真实设备，所有模型、客户端输入和设备�
 
 - Local API 只监听 loopback。
 - 每次 Runtime 启动使用随机短期令牌。
+- `/ui` 页面内嵌令牌供浏览器调用控制面，`GET /ui` 必须携带匹配的 `?token=` 查询令牌，否则返回 401 且不渲染页面；令牌只通过启动 stdout 与 0600 权限的 token 文件分发，不进入请求日志。
 - 校验 Origin 和 Content-Type。
 - 变更操作进行认证、幂等和参数校验。
 - WebSocket 建立时认证，断线重连不能绕过权限。

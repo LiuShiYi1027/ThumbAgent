@@ -198,6 +198,22 @@ class DeviceLeaseDeadlineTests(unittest.TestCase):
         self.assertEqual("INVALID_ARGUMENT", payload["error"]["code"])
         self.assertEqual([], adapter.actions)
 
+    def test_non_finite_deadline_is_rejected_before_queue_or_device(self) -> None:
+        adapter = FakeDeviceAdapter()
+        runtime = RuntimeService(adapter, ArtifactStore(self.root / "artifacts"))
+
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(deadline=bad):
+                status, payload = runtime.submit_agent_task_sync(
+                    "fake:android-001",
+                    "open display settings",
+                    confirmed=True,
+                    deadline_seconds=bad,
+                )
+                self.assertEqual(400, status.value)
+                self.assertEqual("INVALID_ARGUMENT", payload["error"]["code"])
+        self.assertEqual([], adapter.actions)
+
     def test_sync_deadline_releases_lease_for_next_writer(self) -> None:
         clock = [0.0]
         adapter = _DeadlineObserveAdapter(clock)

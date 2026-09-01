@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -343,12 +344,17 @@ class RuntimeService:
             else validate_retention_days(retention_days)
         )
         max_artifacts = validate_cleanup_limit(max_artifacts)
-        cutoff, candidates, truncated = self._local_data_tool.prepare(
+        cutoff, candidates, truncated, oversized = self._local_data_tool.prepare(
             days, max_artifacts
         )
-        return self._local_data_cleanup_approvals.create(
+        approval = self._local_data_cleanup_approvals.create(
             days, cutoff, candidates, truncated
         ).to_public_dict()
+        if oversized["count"]:
+            # 可选键：超过保留扫描上限的 Artifact 不参与清理，向用户表面化；
+            # 未触碰 local-data-cleanup-approval Contract Schema。
+            approval["oversized_skipped"] = oversized
+        return approval
 
     def submit_local_data_cleanup_task(
         self,
@@ -1733,6 +1739,7 @@ class RuntimeService:
         if (
             not isinstance(value, int | float)
             or isinstance(value, bool)
+            or not math.isfinite(value)
             or value < 1
             or value > 1800
         ):
@@ -1873,12 +1880,7 @@ class RuntimeService:
         try:
             return HTTPStatus.OK, {"devices": asyncio.run(self.list_devices())}
         except MobileAgentError as error:
-            status = (
-                HTTPStatus.SERVICE_UNAVAILABLE
-                if error.code in {"ADB_NOT_FOUND", "DEVICE_DISCOVERY_FAILED"}
-                else HTTPStatus.UNPROCESSABLE_ENTITY
-            )
-            return status, {"error": error.to_dict()}
+            return self._error_response(error)
 
     def readiness_sync(self) -> tuple[HTTPStatus, dict[str, Any]]:
         """Return readiness as a renderable snapshot even when blocked."""
@@ -1889,13 +1891,7 @@ class RuntimeService:
         try:
             return HTTPStatus.OK, {"observation": asyncio.run(self.observe(device_id))}
         except MobileAgentError as error:
-            if error.code == "DEVICE_NOT_FOUND":
-                status = HTTPStatus.NOT_FOUND
-            elif error.code in {"INVALID_ARGUMENT"}:
-                status = HTTPStatus.BAD_REQUEST
-            else:
-                status = HTTPStatus.SERVICE_UNAVAILABLE
-            return status, {"error": error.to_dict()}
+            return self._error_response(error)
 
     def inspect_device_sync(
         self, device_id: str

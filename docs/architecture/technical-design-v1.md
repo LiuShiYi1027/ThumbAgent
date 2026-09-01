@@ -729,7 +729,7 @@ POST   /v1/tasks/settings.scroll_navigate/run
 GET    /v1/tasks/{task_id}
 GET    /v1/tasks/{task_id}/events
 GET    /v1/tasks?limit=N
-GET    /ui
+GET    /ui?token=<本地 API 令牌>
 ```
 
 这些端点只包装已有 `settings.scroll_navigate` Skill，并保存 `TaskRun` 与紧凑 `TaskEvent`；它们不替代后续正式异步 `/v1/tasks` 队列、实时事件流和运行中任务恢复语义。
@@ -737,6 +737,8 @@ GET    /ui
 ITER-0011 提供 `/ui` 本地 Web 页面，作为桌面端任务历史和报告详情的无构建原型。该页面只调用 GET API，不触发设备动作。
 
 ITER-0012 在 `/ui` 中加入固定安全 demo 任务按钮。浏览器 POST 仍需要 Runtime token，且只允许同源 loopback Origin；任意外部 Web Origin 不能触发设备动作。
+
+`/ui` 页面内嵌 Runtime token 供浏览器 POST 使用，因此 `GET /ui` 本身也必须携带匹配的 `?token=` 查询令牌，缺失或不匹配返回 401，不渲染页面。启动时 stdout 会打印可直接打开的完整 URL（使用 `MOBILE_AGENT_API_TOKEN` 环境变量时只打印占位提示，不回显密钥）。
 
 ### 12.2 WebSocket 事件
 

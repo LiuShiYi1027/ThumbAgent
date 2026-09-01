@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import unittest
 import threading
 from email.message import Message
@@ -8,11 +9,14 @@ from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from typing import NoReturn
 
 from mobile_agent.api.server import RuntimeRequestHandler
+from mobile_agent.api.server import _TOOL_INVOKE_ROUTE
 from mobile_agent.api.server import _query_int
 from mobile_agent.devices.fake import FakeDeviceAdapter
-from mobile_agent.domain.artifact import ArtifactKind
+from mobile_agent.domain.artifact import ArtifactKind, ArtifactWriter
+from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.domain.task import TaskRun, TaskStatus
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.goals import AgentGoalSpec
@@ -37,6 +41,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/tasks/agent.run/async"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -79,6 +84,7 @@ class ApiSecurityTests(unittest.TestCase):
                 handler = object.__new__(RuntimeRequestHandler)
                 handler.path = "/v1/tasks/agent.run/async"
                 headers = Message()
+                headers["Host"] = "127.0.0.1:8765"
                 headers["Content-Type"] = "application/json"
                 headers["Authorization"] = "Bearer test-token"
                 handler.headers = headers
@@ -124,6 +130,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/goals/compile"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -207,6 +214,7 @@ class ApiSecurityTests(unittest.TestCase):
         handler = object.__new__(RuntimeRequestHandler)
         handler.path = path
         headers = Message()
+        headers["Host"] = "127.0.0.1:8765"
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
         handler.headers = headers
@@ -278,6 +286,7 @@ class ApiSecurityTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/model-provider/status"
+            handler.headers = _loopback_host_headers()
             handler.server = SimpleNamespace(
                 runtime=RuntimeService(
                     FakeDeviceAdapter(),
@@ -314,6 +323,7 @@ class ApiSecurityTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/readiness"
+            handler.headers = _loopback_host_headers()
             handler.server = SimpleNamespace(
                 runtime=RuntimeService(
                     FakeDeviceAdapter(), ArtifactStore(Path(directory))
@@ -338,6 +348,7 @@ class ApiSecurityTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/devices/fake%3Aandroid-001/inspection"
+            handler.headers = _loopback_host_headers()
             handler.server = SimpleNamespace(
                 runtime=RuntimeService(
                     FakeDeviceAdapter(), ArtifactStore(Path(directory))
@@ -363,6 +374,7 @@ class ApiSecurityTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/devices/fake%3Aandroid-001/apps?limit=500&prefix=com.example"
+            handler.headers = _loopback_host_headers()
             handler.server = SimpleNamespace(
                 runtime=RuntimeService(
                     FakeDeviceAdapter(), ArtifactStore(Path(directory))
@@ -385,6 +397,7 @@ class ApiSecurityTests(unittest.TestCase):
             with self.subTest(query=query), TemporaryDirectory() as directory:
                 handler = object.__new__(RuntimeRequestHandler)
                 handler.path = f"/v1/devices/fake%3Aandroid-001/apps?{query}"
+                handler.headers = _loopback_host_headers()
                 handler.server = SimpleNamespace(
                     runtime=RuntimeService(
                         FakeDeviceAdapter(), ArtifactStore(Path(directory))
@@ -407,6 +420,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/skills/device.logs.collect/invoke"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -440,6 +454,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/skills/device.logs.collect/invoke"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -476,6 +491,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/tasks/device.logs.collect/async"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             headers["Idempotency-Key"] = "api-log-task"
@@ -511,6 +527,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/skills/device.performance.snapshot/invoke"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -543,6 +560,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/tasks/device.performance.snapshot/async"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             headers["Idempotency-Key"] = "api-performance"
@@ -581,6 +599,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/skills/device.performance.snapshot/invoke"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -617,6 +636,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = f"/v1/tasks/{task_id}/evaluate"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -661,6 +681,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/tasks/agent.run"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -723,6 +744,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/performance-comparisons"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -756,6 +778,7 @@ class ApiSecurityTests(unittest.TestCase):
             handler = object.__new__(RuntimeRequestHandler)
             handler.path = "/v1/performance-comparisons"
             headers = Message()
+            headers["Host"] = "127.0.0.1:8765"
             headers["Content-Type"] = "application/json"
             headers["Authorization"] = "Bearer test-token"
             handler.headers = headers
@@ -935,6 +958,7 @@ def _post_execution_control(
     handler = object.__new__(RuntimeRequestHandler)
     handler.path = path
     headers = Message()
+    headers["Host"] = "127.0.0.1:8765"
     headers["Content-Type"] = "application/json"
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
@@ -952,3 +976,421 @@ def _post_execution_control(
     )
     handler.do_POST()
     return captured
+
+
+_LOOPBACK_HOST = "127.0.0.1:8765"
+_INTERFACE_ERROR_KEYS = {
+    "code",
+    "category",
+    "message",
+    "retryable",
+    "outcome",
+    "suggested_action",
+    "details",
+}
+
+
+def _loopback_host_headers() -> Message:
+    """直连 handler 的测试默认携带 loopback Host 头（对齐真实 HTTP 客户端）。"""
+
+    message = Message()
+    message["Host"] = _LOOPBACK_HOST
+    return message
+
+
+def _driven_handler(
+    runtime: RuntimeService,
+    path: str,
+    *,
+    host: str | None = _LOOPBACK_HOST,
+    token: str | None = "test-token",
+    content_type: str = "application/json",
+    body: dict[str, object] | None = None,
+) -> tuple[RuntimeRequestHandler, dict[str, object]]:
+    """构造直连 do_GET/do_POST 的 handler 并捕获 JSON 响应。"""
+
+    handler = object.__new__(RuntimeRequestHandler)
+    handler.path = path
+    headers = Message()
+    if host is not None:
+        headers["Host"] = host
+    if body is not None:
+        headers["Content-Type"] = content_type
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+    handler.headers = headers
+    handler.server = SimpleNamespace(
+        runtime=runtime,
+        api_token="test-token",
+        allowed_origins=frozenset(),
+        server_port=8765,
+    )
+    if body is not None:
+        handler._read_json = lambda: body
+    captured: dict[str, object] = {}
+    handler._write_json = lambda status, payload: captured.update(
+        {"status": status, "payload": payload}
+    )
+    return handler, captured
+
+
+class HostHeaderValidationTests(unittest.TestCase):
+    """H2：所有请求校验 Host 头，非 loopback 一律 403（DNS rebinding 防线）。"""
+
+    def test_get_accepts_loopback_host_on_any_port(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            for host in (
+                "127.0.0.1:8765",
+                "127.0.0.1:1",
+                "localhost",
+                "localhost:8765",
+                "[::1]",
+                "[::1]:8765",
+            ):
+                with self.subTest(host=host):
+                    handler, captured = _driven_handler(
+                        runtime, "/v1/health", host=host
+                    )
+                    handler.do_GET()
+                    self.assertEqual(HTTPStatus.OK, captured["status"])
+
+    def test_get_rejects_foreign_or_malformed_host(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            for host in (
+                "evil.com",
+                "127.0.0.1.evil.com",
+                "evil.com:8765",
+                "127.0.0.1:",
+                None,
+            ):
+                with self.subTest(host=host):
+                    handler, captured = _driven_handler(
+                        runtime, "/v1/health", host=host
+                    )
+                    handler.do_GET()
+                    self.assertEqual(HTTPStatus.FORBIDDEN, captured["status"])
+                    payload = captured["payload"]
+                    self.assertIsInstance(payload, dict)
+                    self.assertEqual(
+                        "HOST_NOT_ALLOWED", payload["error"]["code"]
+                    )
+                    self.assertEqual(
+                        _INTERFACE_ERROR_KEYS, set(payload["error"])
+                    )
+
+    def test_post_rejects_foreign_host_despite_valid_token(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            handler, captured = _driven_handler(
+                runtime,
+                "/v1/goals/compile",
+                host="evil.com:8765",
+                body={"goal": "进入蓝牙设置"},
+            )
+            handler.do_POST()
+        self.assertEqual(HTTPStatus.FORBIDDEN, captured["status"])
+        self.assertEqual(
+            "HOST_NOT_ALLOWED", captured["payload"]["error"]["code"]
+        )
+
+
+class ToolInvokeRouteTests(unittest.TestCase):
+    """H3：工具 invoke 路由必须覆盖所有广告的 direct_invocation 工具。"""
+
+    def test_tool_invoke_route_matches_underscored_tool_id(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            handler, captured = _driven_handler(
+                runtime,
+                "/v1/tools/input.tap_element/invoke",
+                body={
+                    "device_id": "fake:missing",
+                    "arguments": {},
+                    "confirmed": True,
+                },
+            )
+            handler.do_POST()
+
+        # 路由匹配后进入执行层，未知设备报 DEVICE_NOT_FOUND；
+        # 修复前路由正则不含下划线，落入通用 RESOURCE_NOT_FOUND。
+        self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+        self.assertEqual(
+            "DEVICE_NOT_FOUND", captured["payload"]["error"]["code"]
+        )
+
+    def test_every_advertised_direct_invocable_tool_matches_route(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            tools = runtime.list_tools()
+        direct = [tool["tool_id"] for tool in tools if tool["direct_invocation"]]
+        self.assertIn("input.tap_element", direct)
+        for tool_id in direct:
+            with self.subTest(tool_id=tool_id):
+                self.assertIsNotNone(
+                    re.fullmatch(_TOOL_INVOKE_ROUTE, f"/v1/tools/{tool_id}/invoke"),
+                    f"{tool_id} 的 invoke 路径不匹配路由正则",
+                )
+
+
+class InterfaceErrorEnvelopeTests(unittest.TestCase):
+    """M10：接口层错误与 domain 错误共用同一完整信封形状。"""
+
+    def test_post_interface_errors_use_full_envelope(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+
+            handler, captured = _driven_handler(
+                runtime, "/v1/no-such-endpoint", body={"device_id": "fake:android-001"}
+            )
+            handler.do_POST()
+            self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "RESOURCE_NOT_FOUND", captured["payload"]["error"]["code"]
+            )
+
+            handler, captured = _driven_handler(
+                runtime,
+                "/v1/tasks/agent.run",
+                body={"device_id": "fake:android-001", "goal": 1},
+            )
+            handler.do_POST()
+            self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "INVALID_ARGUMENT", captured["payload"]["error"]["code"]
+            )
+
+            handler, captured = _driven_handler(
+                runtime,
+                "/v1/no-such-endpoint",
+                token=None,
+                body={"device_id": "fake:android-001"},
+            )
+            handler.do_POST()
+            self.assertEqual(HTTPStatus.UNAUTHORIZED, captured["status"])
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "UNAUTHORIZED", captured["payload"]["error"]["code"]
+            )
+
+            handler, captured = _driven_handler(
+                runtime,
+                "/v1/no-such-endpoint",
+                content_type="text/plain",
+                body={"device_id": "fake:android-001"},
+            )
+            handler.do_POST()
+            self.assertEqual(
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE, captured["status"]
+            )
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "INVALID_CONTENT_TYPE", captured["payload"]["error"]["code"]
+            )
+
+    def test_get_interface_errors_use_full_envelope(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+
+            handler, captured = _driven_handler(runtime, "/v1/tasks?limit=abc")
+            handler.do_GET()
+            self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "INVALID_ARGUMENT", captured["payload"]["error"]["code"]
+            )
+
+            handler, captured = _driven_handler(runtime, "/v1/nope")
+            handler.do_GET()
+            self.assertEqual(HTTPStatus.NOT_FOUND, captured["status"])
+            self.assertEqual(
+                _INTERFACE_ERROR_KEYS, set(captured["payload"]["error"])
+            )
+            self.assertEqual(
+                "RESOURCE_NOT_FOUND", captured["payload"]["error"]["code"]
+            )
+
+
+class _PolicyFailingObserveAdapter(FakeDeviceAdapter):
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> NoReturn:
+        raise MobileAgentError(
+            code="CONFIRMATION_REQUIRED",
+            category=ErrorCategory.POLICY,
+            message="需要用户确认",
+        )
+
+
+class _DiscoveryFailingAdapter(FakeDeviceAdapter):
+    async def list_devices(self) -> NoReturn:
+        raise MobileAgentError(
+            code="ADB_NOT_FOUND",
+            category=ErrorCategory.DEVICE,
+            message="未找到 ADB 可执行文件",
+        )
+
+
+class StatusMappingTests(unittest.TestCase):
+    """M11：list_devices_sync/observe_sync 复用统一 _error_response 映射。"""
+
+    def test_observe_sync_maps_policy_rejection_to_forbidden(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                _PolicyFailingObserveAdapter(), ArtifactStore(Path(directory))
+            )
+            status, payload = runtime.observe_sync("fake:android-001")
+        # 修复前自建映射把策略拒绝误报为 503
+        self.assertEqual(HTTPStatus.FORBIDDEN, status)
+        self.assertEqual("CONFIRMATION_REQUIRED", payload["error"]["code"])
+
+    def test_list_devices_sync_maps_gateway_failure_to_unavailable(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                _DiscoveryFailingAdapter(), ArtifactStore(Path(directory))
+            )
+            status, payload = runtime.list_devices_sync()
+        self.assertEqual(HTTPStatus.SERVICE_UNAVAILABLE, status)
+        self.assertEqual("ADB_NOT_FOUND", payload["error"]["code"])
+
+    def test_get_devices_surfaces_unavailable_after_dead_catch_removal(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                _DiscoveryFailingAdapter(), ArtifactStore(Path(directory))
+            )
+            handler, captured = _driven_handler(runtime, "/v1/devices")
+            handler.do_GET()
+        self.assertEqual(HTTPStatus.SERVICE_UNAVAILABLE, captured["status"])
+        self.assertEqual("ADB_NOT_FOUND", captured["payload"]["error"]["code"])
+
+
+class InputValidationTests(unittest.TestCase):
+    """M12：导航/Agent 端点拒绝未知字段，max_scrolls 限定 1-50。"""
+
+    _SELECTOR = {"strategy": "text", "value": "亮度", "match": "contains"}
+
+    def _post(
+        self, runtime: RuntimeService, path: str, body: dict[str, object]
+    ) -> dict[str, object]:
+        handler, captured = _driven_handler(runtime, path, body=body)
+        handler.do_POST()
+        return captured
+
+    def test_scroll_navigate_rejects_max_scrolls_out_of_bounds(self) -> None:
+        for path in (
+            "/v1/skills/settings.scroll_navigate/invoke",
+            "/v1/tasks/settings.scroll_navigate/run",
+        ):
+            for max_scrolls in (0, 51):
+                with (
+                    self.subTest(path=path, max_scrolls=max_scrolls),
+                    TemporaryDirectory() as directory,
+                ):
+                    runtime = RuntimeService(
+                        FakeDeviceAdapter(), ArtifactStore(Path(directory))
+                    )
+                    captured = self._post(
+                        runtime,
+                        path,
+                        {
+                            "device_id": "fake:android-001",
+                            "target_selector": dict(self._SELECTOR),
+                            "expected_selector": dict(self._SELECTOR),
+                            "confirmed": True,
+                            "max_scrolls": max_scrolls,
+                        },
+                    )
+                    self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+                    self.assertEqual(
+                        "INVALID_ARGUMENT", captured["payload"]["error"]["code"]
+                    )
+
+    def test_navigation_endpoints_reject_unknown_fields(self) -> None:
+        base = {
+            "device_id": "fake:android-001",
+            "target_selector": dict(self._SELECTOR),
+            "expected_selector": dict(self._SELECTOR),
+            "confirmed": True,
+        }
+        for path in (
+            "/v1/skills/settings.navigate/invoke",
+            "/v1/skills/settings.scroll_navigate/invoke",
+            "/v1/tasks/settings.scroll_navigate/run",
+        ):
+            with self.subTest(path=path), TemporaryDirectory() as directory:
+                runtime = RuntimeService(
+                    FakeDeviceAdapter(), ArtifactStore(Path(directory))
+                )
+                captured = self._post(runtime, path, {**base, "raw_command": "x"})
+                self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+                self.assertEqual(
+                    "INVALID_ARGUMENT", captured["payload"]["error"]["code"]
+                )
+
+    def test_agent_run_rejects_unknown_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(), ArtifactStore(Path(directory))
+            )
+            captured = self._post(
+                runtime,
+                "/v1/tasks/agent.run",
+                {
+                    "device_id": "fake:android-001",
+                    "goal": "open display settings",
+                    "confirmed": True,
+                    "raw_command": "dumpsys all",
+                },
+            )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, captured["status"])
+        self.assertEqual("INVALID_ARGUMENT", captured["payload"]["error"]["code"])
+
+    def test_agent_run_accepts_full_known_field_set(self) -> None:
+        with TemporaryDirectory() as directory:
+            runtime = RuntimeService(
+                FakeDeviceAdapter(),
+                ArtifactStore(Path(directory)),
+                navigation_shortcuts_enabled=False,
+            )
+            captured = self._post(
+                runtime,
+                "/v1/tasks/agent.run",
+                {
+                    "device_id": "fake:android-001",
+                    "goal": "open display settings",
+                    "confirmed": True,
+                    "max_rounds": 6,
+                    "deadline_seconds": 600,
+                    "acceptance": {
+                        "foreground_app_id": "com.android.settings",
+                    },
+                    "goal_spec": None,
+                    "goal_spec_confirmed": False,
+                },
+            )
+        self.assertEqual(HTTPStatus.OK, captured["status"])
