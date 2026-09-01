@@ -119,6 +119,23 @@ export function ExecutionView({
     }
   }, [execution, onTerminal])
 
+  if (executionQuery.isError) {
+    return (
+      <section className="panel panel-error">
+        <h2>执行状态</h2>
+        <p className="error-detail">{String(executionQuery.error)}</p>
+        <div className="composer-actions">
+          <button
+            type="button"
+            className="plain-button"
+            onClick={() => void executionQuery.refetch()}
+          >
+            重试
+          </button>
+        </div>
+      </section>
+    )
+  }
   if (!execution) {
     return (
       <section className="panel">

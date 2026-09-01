@@ -9,48 +9,78 @@ struct AppState {
     sidecar: Arc<Sidecar>,
 }
 
+/// IO-bound commands (loopback HTTP, Keychain subprocess, child respawn)
+/// run inside `spawn_blocking` so the Tauri IPC handler never blocks the
+/// main event loop; pure in-memory reads stay synchronous.
 #[tauri::command]
 fn runtime_bridge_status(state: State<'_, AppState>) -> SidecarStatus {
     state.sidecar.status()
 }
 
 #[tauri::command]
-fn runtime_api_get(path: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    state.sidecar.api_get(&path)
-}
-
-#[tauri::command]
-fn runtime_api_get_bytes(path: String, state: State<'_, AppState>) -> Result<String, String> {
-    state.sidecar.api_get_bytes(&path)
-}
-
-#[tauri::command]
-fn runtime_api_post(
+async fn runtime_api_get(
     path: String,
-    body: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    state.sidecar.api_post(&path, &body)
+    let sidecar = Arc::clone(&state.sidecar);
+    tauri::async_runtime::spawn_blocking(move || sidecar.api_get(&path))
+        .await
+        .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[tauri::command]
-fn model_secret_store(secret: String) -> Result<(), String> {
-    sidecar::model_secret_store(&secret)
+async fn runtime_api_get_bytes(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let sidecar = Arc::clone(&state.sidecar);
+    tauri::async_runtime::spawn_blocking(move || sidecar.api_get_bytes(&path))
+        .await
+        .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[tauri::command]
-fn model_secret_clear() -> Result<(), String> {
-    sidecar::model_secret_clear()
+async fn runtime_api_post(
+    path: String,
+    body: serde_json::Value,
+    idempotency_key: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let sidecar = Arc::clone(&state.sidecar);
+    tauri::async_runtime::spawn_blocking(move || {
+        sidecar.api_post(&path, &body, idempotency_key.as_deref())
+    })
+    .await
+    .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[tauri::command]
-fn model_secret_is_stored() -> bool {
-    sidecar::model_secret_is_stored()
+async fn model_secret_store(secret: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || sidecar::model_secret_store(&secret))
+        .await
+        .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[tauri::command]
-fn restart_runtime(state: State<'_, AppState>) -> Result<(), String> {
-    state.sidecar.restart()
+async fn model_secret_clear() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(sidecar::model_secret_clear)
+        .await
+        .map_err(|error| format!("后台任务执行失败：{error}"))?
+}
+
+#[tauri::command]
+async fn model_secret_is_stored() -> bool {
+    tauri::async_runtime::spawn_blocking(sidecar::model_secret_is_stored)
+        .await
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+async fn restart_runtime(state: State<'_, AppState>) -> Result<(), String> {
+    let sidecar = Arc::clone(&state.sidecar);
+    tauri::async_runtime::spawn_blocking(move || sidecar.restart())
+        .await
+        .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[tauri::command]
@@ -59,8 +89,12 @@ fn data_dir_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn reveal_data_dir() -> Result<String, String> {
-    sidecar::reveal_data_dir().map(|path| path.display().to_string())
+async fn reveal_data_dir() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        sidecar::reveal_data_dir().map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|error| format!("后台任务执行失败：{error}"))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

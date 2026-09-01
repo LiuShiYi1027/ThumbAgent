@@ -54,18 +54,27 @@ interface TaskRunResponse {
  * Submit a confirmed asynchronous Agent task. The caller must have shown the
  * goal, device and risk summary and collected an explicit user confirmation
  * before invoking this; `confirmed: true` attests to that.
+ *
+ * `idempotencyKey` is minted when the confirmation dialog opens and reused
+ * for every retry inside that flow, so duplicate submissions of the same
+ * user intent collapse into one Runtime task.
  */
 export async function submitAgentTask(
   deviceId: string,
   goal: string,
+  idempotencyKey: string,
 ): Promise<TaskExecution> {
-  const payload = await runtimeApiPost<ExecutionResponse>(AGENT_RUN_ASYNC_PATH, {
-    device_id: deviceId,
-    goal,
-    confirmed: true,
-    max_rounds: AGENT_MAX_ROUNDS,
-    deadline_seconds: AGENT_DEADLINE_SECONDS,
-  })
+  const payload = await runtimeApiPost<ExecutionResponse>(
+    AGENT_RUN_ASYNC_PATH,
+    {
+      device_id: deviceId,
+      goal,
+      confirmed: true,
+      max_rounds: AGENT_MAX_ROUNDS,
+      deadline_seconds: AGENT_DEADLINE_SECONDS,
+    },
+    idempotencyKey,
+  )
   return payload.execution
 }
 

@@ -31,6 +31,7 @@ const completionSourceLabel: Record<
   planner_finish: '模型判定完成',
   runtime_acceptance: 'Runtime 验收完成',
   skill_result: 'Skill 结果完成',
+  runtime_shortcut: '程序化捷径完成',
 }
 
 const decisionTypeLabel: Record<string, string> = {
@@ -151,6 +152,8 @@ export function TaskReportView({ taskId }: { taskId: string }) {
   const report = reportQuery.data
   const taskError = errorSummary(report.error)
   const takeoverIntervals = collectTakeoverIntervals(eventsQuery.data ?? [])
+  // ITER-0061: surface the agent's final answer when the run produced one.
+  const answer = report.result?.answer?.replace(/\s+/g, ' ').trim()
 
   return (
     <section className="panel">
@@ -182,6 +185,12 @@ export function TaskReportView({ taskId }: { taskId: string }) {
               {takeoverReasonLabel(interval.reason)}）
             </span>
           ))}
+        </div>
+      ) : null}
+      {answer ? (
+        <div className="report-answer">
+          <span className="report-answer-label">结论</span>
+          <p className="report-answer-text">{answer}</p>
         </div>
       ) : null}
       <ol className="step-list">

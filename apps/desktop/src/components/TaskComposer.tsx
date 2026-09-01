@@ -7,6 +7,12 @@ import type { DeviceAvailability } from '@contracts/runtime-readiness'
 export interface TaskIntent {
   deviceId: string
   goal: string
+  /**
+   * Minted when the intent leaves the composer (i.e. when the confirmation
+   * dialog opens). Every submit retry inside that one confirmation flow
+   * reuses this key so the Runtime dedupes repeat submissions.
+   */
+  idempotencyKey: string
 }
 
 export function TaskComposer({
@@ -44,7 +50,11 @@ export function TaskComposer({
           onSubmit={(event) => {
             event.preventDefault()
             if (canSubmit) {
-              onSubmit({ deviceId: selected, goal: trimmed })
+              onSubmit({
+                deviceId: selected,
+                goal: trimmed,
+                idempotencyKey: crypto.randomUUID(),
+              })
             }
           }}
         >

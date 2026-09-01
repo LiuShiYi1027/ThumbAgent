@@ -28,11 +28,12 @@ const STDERR_TAIL_BYTES: usize = 4 * 1024;
 const MAX_API_PATH_BYTES: usize = 512;
 const MAX_API_BODY_BYTES: usize = 16 * 1024;
 /// Only these Runtime writes are reachable from the webview: asynchronous
-/// Agent task submission, task cancellation and model settings save.
+/// Agent task submission, task cancel/pause/resume and model settings save.
 /// Everything else stays GET-only.
 const AGENT_RUN_ASYNC_PATH: &str = "/v1/tasks/agent.run/async";
-const TASK_CANCEL_PREFIX: &str = "/v1/task-executions/";
-const TASK_CANCEL_SUFFIX: &str = "/cancel";
+const TASK_EXECUTIONS_PREFIX: &str = "/v1/task-executions/";
+/// Control actions mirror the Runtime routes (ITER-0053 pause/resume).
+const TASK_CONTROL_SUFFIXES: [&str; 3] = ["/cancel", "/pause", "/resume"];
 /// Settings page writes go through the same whitelist as task submit/cancel.
 const MODEL_PROVIDER_CONFIG_PATH: &str = "/v1/model-provider/config";
 
@@ -267,13 +268,15 @@ impl Sidecar {
     /// Execute an authenticated POST against the sidecar Runtime.
     ///
     /// Restricted to the desktop write whitelist (task submit/cancel and
-    /// model settings save). Task
-    /// submission gets a fresh Rust-generated Idempotency-Key per call; the
-    /// frontend must debounce repeat submissions of the same user intent.
+    /// model settings save). Task submission carries an Idempotency-Key: the
+    /// frontend supplies one per confirmation flow so retries of the same
+    /// user intent dedupe server-side; when the caller passes none (model
+    /// settings save, task controls) a fresh key is generated per call.
     pub fn api_post(
         &self,
         path: &str,
         body: &serde_json::Value,
+        idempotency_key: Option<&str>,
     ) -> Result<serde_json::Value, String> {
         validate_api_post_path(path)?;
         let payload =
@@ -283,7 +286,10 @@ impl Sidecar {
         }
         let (port, token) = self.ready_endpoint()?;
         let idempotency_key = (path == AGENT_RUN_ASYNC_PATH)
-            .then(|| generate_token().map_err(|error| format!("无法生成幂等键：{error}")))
+            .then(|| {
+                resolve_idempotency_key(idempotency_key)
+                    .map_err(|error| format!("幂等键无效：{error}"))
+            })
             .transpose()?;
         let (status, response) = http_request(
             port,
@@ -309,9 +315,17 @@ impl Sidecar {
     ///
     /// A restart issues a fresh port and token; in-flight tasks die with the
     /// old child, so the UI must confirm with the user before invoking this.
+    /// A failed respawn must not leave the stale Ready phase behind: the old
+    /// child is already dead, so the sidecar reports Failed with the reason.
     pub fn restart(self: &Arc<Self>) -> Result<(), String> {
         self.shutdown_child();
-        let fresh = Self::spawn_inner()?;
+        let fresh = Self::spawn_inner().map_err(|detail| {
+            let mut inner = self.inner.lock().unwrap();
+            inner.phase = SidecarPhase::Failed;
+            inner.detail = format!("重启 Runtime 失败：{detail}");
+            inner.child = None;
+            detail
+        })?;
         {
             let mut inner = self.inner.lock().unwrap();
             *inner = fresh;
@@ -509,15 +523,26 @@ fn start_stderr_drain(mut stderr: impl Read + Send + 'static, tail: Arc<Mutex<St
                 Ok(read) => {
                     let mut tail = tail.lock().unwrap();
                     tail.push_str(&String::from_utf8_lossy(&chunk[..read]));
-                    if tail.len() > STDERR_TAIL_BYTES {
-                        let keep_from = tail.len() - STDERR_TAIL_BYTES;
-                        tail.replace_range(..keep_from, "");
-                    }
+                    trim_stderr_tail(&mut tail);
                 }
                 Err(_) => return,
             }
         }
     });
+}
+
+/// Keep only the last STDERR_TAIL_BYTES of stderr output. The cut point must
+/// land on a char boundary: Runtime diagnostics contain CJK text, and
+/// `replace_range` panics on a mid-character byte index (which would poison
+/// the tail mutex and kill the health-check thread).
+fn trim_stderr_tail(tail: &mut String) {
+    if tail.len() > STDERR_TAIL_BYTES {
+        let mut keep_from = tail.len() - STDERR_TAIL_BYTES;
+        while !tail.is_char_boundary(keep_from) {
+            keep_from += 1;
+        }
+        tail.replace_range(..keep_from, "");
+    }
 }
 
 fn pick_loopback_port() -> std::io::Result<u16> {
@@ -529,6 +554,33 @@ fn generate_token() -> Result<String, getrandom::Error> {
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes)?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+const MAX_IDEMPOTENCY_KEY_BYTES: usize = 128;
+
+/// Pick the Idempotency-Key for a task submission: the frontend-supplied key
+/// wins (one key per confirmation flow, reused across retries); otherwise a
+/// fresh random key preserves the previous per-call behavior.
+fn resolve_idempotency_key(provided: Option<&str>) -> Result<String, String> {
+    match provided {
+        Some(key) => Ok(validate_idempotency_key(key)?.to_string()),
+        None => generate_token().map_err(|error| format!("无法生成幂等键：{error}")),
+    }
+}
+
+/// The key is interpolated into a raw HTTP header, so it must be bounded and
+/// free of CR/LF or any header-hostile characters.
+fn validate_idempotency_key(key: &str) -> Result<&str, String> {
+    if key.is_empty() || key.len() > MAX_IDEMPOTENCY_KEY_BYTES {
+        return Err("幂等键长度无效".to_string());
+    }
+    if !key
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("幂等键包含非法字符".to_string());
+    }
+    Ok(key)
 }
 
 /// Ordered python3.11 candidates: explicit override, PATH, then the absolute
@@ -633,20 +685,23 @@ fn validate_api_post_path(path: &str) -> Result<(), String> {
     validate_api_path(path)?;
     if path == AGENT_RUN_ASYNC_PATH
         || path == MODEL_PROVIDER_CONFIG_PATH
-        || is_task_cancel_path(path)
+        || is_task_control_path(path)
     {
         return Ok(());
     }
     Err("POST 路径不在桌面端白名单内".to_string())
 }
 
-/// `/v1/task-executions/task_<32 lowercase hex>/cancel`, mirroring the Runtime
-/// route pattern without pulling in a regex dependency.
-fn is_task_cancel_path(path: &str) -> bool {
-    let Some(rest) = path.strip_prefix(TASK_CANCEL_PREFIX) else {
+/// `/v1/task-executions/task_<32 lowercase hex>/{cancel,pause,resume}`,
+/// mirroring the Runtime route pattern without pulling in a regex dependency.
+fn is_task_control_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix(TASK_EXECUTIONS_PREFIX) else {
         return false;
     };
-    let Some(task_id) = rest.strip_suffix(TASK_CANCEL_SUFFIX) else {
+    let Some(task_id) = TASK_CONTROL_SUFFIXES
+        .iter()
+        .find_map(|suffix| rest.strip_suffix(suffix))
+    else {
         return false;
     };
     let Some(hex) = task_id.strip_prefix("task_") else {
@@ -866,6 +921,20 @@ mod tests {
     }
 
     #[test]
+    fn stderr_tail_truncation_respects_char_boundaries() {
+        // 2000 CJK chars = 6000 bytes; the naive byte cut at len-4096 lands
+        // mid-character (byte 1904 is offset 2 of char 634) and used to panic.
+        let mut tail = "中".repeat(2000);
+        trim_stderr_tail(&mut tail);
+        assert!(tail.len() <= STDERR_TAIL_BYTES);
+        assert!(!tail.is_empty());
+
+        let mut short = "中".repeat(100);
+        trim_stderr_tail(&mut short);
+        assert_eq!(short, "中".repeat(100));
+    }
+
+    #[test]
     fn api_path_validation_accepts_only_bounded_v1_gets() {
         assert!(validate_api_path("/v1/health").is_ok());
         assert!(validate_api_path("/v1/devices?limit=20").is_ok());
@@ -877,26 +946,32 @@ mod tests {
     }
 
     #[test]
-    fn post_path_whitelist_accepts_only_submit_and_cancel() {
+    fn post_path_whitelist_accepts_only_submit_and_task_controls() {
         assert!(validate_api_post_path(AGENT_RUN_ASYNC_PATH).is_ok());
-        assert!(validate_api_post_path(
-            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/cancel"
-        )
-        .is_ok());
+        for suffix in TASK_CONTROL_SUFFIXES {
+            assert!(validate_api_post_path(&format!(
+                "/v1/task-executions/task_0123456789abcdef0123456789abcdef{suffix}"
+            ))
+            .is_ok());
+        }
         // Sync agent.run, skill invoke and arbitrary writes stay blocked.
         assert!(validate_api_post_path("/v1/tasks/agent.run").is_err());
         assert!(validate_api_post_path("/v1/skills/app.open/invoke").is_err());
         assert!(validate_api_post_path("/v1/devices/emulator-5554/observe").is_err());
-        // Cancel path must mirror the Runtime route pattern exactly.
+        // Control paths must mirror the Runtime route pattern exactly.
         assert!(validate_api_post_path(
-            "/v1/task-executions/task_0123456789ABCDEF0123456789abcdef/cancel"
+            "/v1/task-executions/task_0123456789ABCDEF0123456789abcdef/pause"
         )
         .is_err());
         assert!(
             validate_api_post_path("/v1/task-executions/task_0123456789abcdef/cancel").is_err()
         );
         assert!(validate_api_post_path(
-            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/cancel/extra"
+            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/resume/extra"
+        )
+        .is_err());
+        assert!(validate_api_post_path(
+            "/v1/task-executions/task_0123456789abcdef0123456789abcdef/delete"
         )
         .is_err());
     }
@@ -940,7 +1015,7 @@ mod tests {
             }),
         };
         let payload = serde_json::json!({"device_id": "adb:emulator-5554", "goal": "打开系统设置"});
-        let value = sidecar.api_post(AGENT_RUN_ASYNC_PATH, &payload).unwrap();
+        let value = sidecar.api_post(AGENT_RUN_ASYNC_PATH, &payload, None).unwrap();
         let request_text = server.join().unwrap();
         assert_eq!(
             value.pointer("/task_id").and_then(|v| v.as_str()),
@@ -975,9 +1050,9 @@ mod tests {
             }),
         };
         let oversized = serde_json::json!({"goal": "x".repeat(MAX_API_BODY_BYTES)});
-        assert!(sidecar.api_post(AGENT_RUN_ASYNC_PATH, &oversized).is_err());
+        assert!(sidecar.api_post(AGENT_RUN_ASYNC_PATH, &oversized, None).is_err());
         let small = serde_json::json!({"goal": "ok"});
-        assert!(sidecar.api_post("/v1/tasks/agent.run", &small).is_err());
+        assert!(sidecar.api_post("/v1/tasks/agent.run", &small, None).is_err());
     }
 
     #[test]
@@ -1193,5 +1268,122 @@ mod tests {
         // 其他写路径仍然拒绝。
         assert!(validate_api_post_path("/v1/model-provider/config/extra").is_err());
         assert!(validate_api_post_path("/v1/model-provider/status").is_err());
+    }
+
+    fn ready_sidecar(port: u16) -> Sidecar {
+        Sidecar {
+            inner: Mutex::new(SidecarInner {
+                phase: SidecarPhase::Ready,
+                detail: String::new(),
+                child: None,
+                port,
+                token: "secret-token".to_string(),
+                stderr_tail: Arc::new(Mutex::new(String::new())),
+            }),
+        }
+    }
+
+    #[test]
+    fn api_post_forwards_frontend_idempotency_key() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 512];
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if String::from_utf8_lossy(&request).contains("\"goal\"") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request).to_string();
+            let body = b"{\"task_id\":\"task_0123456789abcdef0123456789abcdef\"}";
+            let response = format!(
+                "HTTP/1.0 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+            request_text
+        });
+        let sidecar = ready_sidecar(port);
+        let payload = serde_json::json!({"device_id": "adb:emulator-5554", "goal": "查询价格"});
+        let key = "desktop-9f2c1a4e-7b3d-4e5f-8a6b-0c1d2e3f4a5b";
+        let value = sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &payload, Some(key))
+            .unwrap();
+        let request_text = server.join().unwrap();
+        assert_eq!(
+            value.pointer("/task_id").and_then(|v| v.as_str()),
+            Some("task_0123456789abcdef0123456789abcdef")
+        );
+        // 前端确认流程的键原样透出，同一流程内重试因此在服务端去重。
+        assert!(request_text.contains(&format!("Idempotency-Key: {key}\r\n")));
+    }
+
+    #[test]
+    fn api_post_rejects_invalid_frontend_idempotency_key_before_io() {
+        // Port 1 is never reachable: any attempt at IO fails the test intent.
+        let sidecar = ready_sidecar(1);
+        let payload = serde_json::json!({"goal": "ok"});
+        assert!(sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &payload, Some(""))
+            .is_err());
+        assert!(sidecar
+            .api_post(
+                AGENT_RUN_ASYNC_PATH,
+                &payload,
+                Some(&"k".repeat(MAX_IDEMPOTENCY_KEY_BYTES + 1)),
+            )
+            .is_err());
+        // CR/LF would smuggle extra headers into the raw HTTP request.
+        assert!(sidecar
+            .api_post(
+                AGENT_RUN_ASYNC_PATH,
+                &payload,
+                Some("abc\r\nX-Injected: yes"),
+            )
+            .is_err());
+        assert!(sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &payload, Some("with space"))
+            .is_err());
+        assert!(sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &payload, Some("键"))
+            .is_err());
+    }
+
+    #[test]
+    fn restart_failure_marks_phase_failed_with_detail() {
+        // spawn_inner fails fast on a nonexistent python override before any
+        // keychain or spawn work; repo root must still resolve.
+        let dir = unique_temp_dir("restart-fail");
+        std::fs::create_dir_all(dir.join("runtime/mobile_agent")).unwrap();
+        std::env::set_var("MOBILE_AGENT_REPO_ROOT", &dir);
+        std::env::set_var("MOBILE_AGENT_PYTHON", dir.join("missing-python3.11"));
+        let sidecar = Arc::new(ready_sidecar(1));
+        {
+            let mut inner = sidecar.inner.lock().unwrap();
+            inner.detail = "本地 Runtime 已就绪".to_string();
+        }
+
+        let result = sidecar.restart();
+
+        std::env::remove_var("MOBILE_AGENT_REPO_ROOT");
+        std::env::remove_var("MOBILE_AGENT_PYTHON");
+        assert!(result.is_err());
+        let inner = sidecar.inner.lock().unwrap();
+        assert_eq!(inner.phase, SidecarPhase::Failed);
+        assert!(inner.detail.contains("重启 Runtime 失败"));
+        assert!(inner.child.is_none());
+        // status() must no longer advertise a base URL for a dead child.
+        drop(inner);
+        let status = sidecar.status();
+        assert_eq!(status.phase, SidecarPhase::Failed);
+        assert!(status.base_url.is_none());
     }
 }

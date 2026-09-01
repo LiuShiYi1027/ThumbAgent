@@ -30,10 +30,15 @@ export function runtimeApiGetBytes(path: string): Promise<string> {
 /**
  * Authenticated POST against the local Runtime. The sidecar only forwards
  * whitelisted paths (task submit/cancel, model settings save); everything
- * else is rejected.
+ * else is rejected. For task submission, `idempotencyKey` carries the
+ * per-confirmation key so retries of the same user intent dedupe server-side.
  */
-export function runtimeApiPost<T>(path: string, body: unknown): Promise<T> {
-  return invoke<T>('runtime_api_post', { path, body })
+export function runtimeApiPost<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey?: string,
+): Promise<T> {
+  return invoke<T>('runtime_api_post', { path, body, idempotencyKey })
 }
 
 /** Store the model API key in the macOS Keychain (never sent to the Runtime). */

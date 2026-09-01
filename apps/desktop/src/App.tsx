@@ -77,7 +77,8 @@ function Workbench() {
   const [showSettings, setShowSettings] = useState(false)
 
   const submitMutation = useMutation({
-    mutationFn: (intent: TaskIntent) => submitAgentTask(intent.deviceId, intent.goal),
+    mutationFn: (intent: TaskIntent) =>
+      submitAgentTask(intent.deviceId, intent.goal, intent.idempotencyKey),
     onSuccess: (execution) => {
       setPendingIntent(null)
       setFinishedExecution(null)
