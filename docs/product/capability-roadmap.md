@@ -130,8 +130,10 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 - ~~ITER-0061~~：Agent 内核——跨轮工作记忆 + 结构化任务结果已交付（scratchpad 全量覆盖语义、
   finish answer 持久化与三端透出、捷径谓词守卫；真机验收见
   [ITER-0061 复盘](../iterations/0061-agent-working-memory-and-results/retrospective.md)）。
-- ITER-0062 候选：Skill 扩展与管理（§4.4，依赖 0061 的 scratchpad/result 契约，
-  稳定性测试 Skill 为首驱动场景）。
+- **ITER-0062**：Skill 扩展与管理（§4.4）已立项 Planned——ADR-0021（声明式 DSL +
+  Registry 持久化，双重信任边界）起草完成待负责人确认方向；首驱动场景
+  `app.stability_test`。迭代文档见
+  [0062-declarative-skill-dsl](../iterations/0062-declarative-skill-dsl/plan.md)。
 - 其后按真实任务暴露的需求拉动：候选池见 §4.1（A 档设备动作）；候选仅在真实场景
   重复出现时进入排期。
 - 每次迭代接入 1–2 个候选，保持评审粒度。
