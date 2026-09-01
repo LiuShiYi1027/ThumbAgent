@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mobile-agent.local/schemas/skill-dsl/v1.json",
+  "title": "SkillDslDocument",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "skill_id",
+    "skill_version",
+    "name",
+    "description",
+    "inputs",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "skill_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 64
+    },
+    "skill_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "maxLength": 16
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1800
+    },
+    "inputs": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "maxLength": 32
+          },
+          "type": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean"]
+          },
+          "required": { "type": "boolean" },
+          "description": { "type": "string", "maxLength": 200 },
+          "max_length": { "type": "integer", "minimum": 1, "maximum": 2000 },
+          "minimum": { "type": "number" },
+          "maximum": { "type": "number" }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/tool_step" },
+          { "$ref": "#/$defs/loop_step" },
+          { "$ref": "#/$defs/if_step" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "tool_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "step_id", "tool_id", "arguments"],
+      "properties": {
+        "type": { "const": "tool" },
+        "step_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 32
+        },
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9_]*)+$",
+          "maxLength": 64
+        },
+        "arguments": {
+          "type": "object",
+          "maxProperties": 8,
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "description": "Literal, or a whole-string input reference of the form $inputs.<name>"
+              },
+              { "type": "number" },
+              { "type": "boolean" }
+            ]
+          }
+        }
+      }
+    },
+    "loop_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "step_id", "max_duration_seconds", "max_iterations", "steps"],
+      "properties": {
+        "type": { "const": "loop" },
+        "step_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 32
+        },
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/tool_step" },
+          "description": "Loop bodies contain tool steps only; no nested control flow (ADR-0021)."
+        }
+      }
+    },
+    "if_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "step_id", "condition", "then"],
+      "properties": {
+        "type": { "const": "if" },
+        "step_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 32
+        },
+        "condition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["step", "field", "equals"],
+          "properties": {
+            "step": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 32,
+              "description": "step_id of a previously executed step"
+            },
+            "field": {
+              "type": "string",
+              "const": "status",
+              "description": "V1 conditions branch on the referenced step's outcome status only (ADR-0021: no arbitrary expressions)."
+            },
+            "equals": {
+              "type": "string",
+              "enum": ["succeeded", "failed"]
+            }
+          }
+        },
+        "then": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/tool_step" }
+        },
+        "else": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/tool_step" }
+        }
+      }
+    }
+  }
+}

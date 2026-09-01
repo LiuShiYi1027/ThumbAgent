@@ -44,6 +44,7 @@ SCHEMA_NAMES = (
     "navigation-result",
     "observation",
     "runtime-readiness",
+    "skill-dsl",
     "skill-result",
     "task-event",
     "task-execution",
