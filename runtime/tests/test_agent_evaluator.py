@@ -5,9 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
 from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.errors import MobileAgentError
-from mobile_agent.evaluation import AgentEvaluator, AgentGoalAcceptance
+from mobile_agent.evaluation import (
+    AgentEvaluationScenario,
+    AgentEvaluator,
+    AgentGoalAcceptance,
+)
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.runtime import RuntimeService
 
@@ -146,6 +151,22 @@ class AgentEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(200, status.value)
         self.assertTrue(payload["evaluation"]["passed"])
 
+    def test_scenario_max_rounds_aligns_with_agent_round_budget(self) -> None:
+        """M2：评测场景预算上限与 Runner 轮次预算同源（MAX_AGENT_ROUNDS）。"""
+        accepted = AgentEvaluationScenario.from_dict(
+            scenario(foreground_app_id="com.android.settings", max_rounds=MAX_AGENT_ROUNDS)
+        )
+
+        self.assertEqual(MAX_AGENT_ROUNDS, accepted.max_rounds)
+        with self.assertRaises(MobileAgentError) as raised:
+            AgentEvaluationScenario.from_dict(
+                scenario(
+                    foreground_app_id="com.android.settings",
+                    max_rounds=MAX_AGENT_ROUNDS + 1,
+                )
+            )
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+
     def test_evaluation_contracts_are_versioned(self) -> None:
         scenario_schema = json.loads(
             (ROOT / "contracts/schemas/agent-evaluation-scenario.schema.json").read_text(
@@ -209,6 +230,7 @@ def scenario(
     foreground_app_id: str | None = None,
     foreground_activity: str | None = None,
     expected_selector: dict[str, object] | None = None,
+    max_rounds: int = 6,
 ) -> dict[str, object]:
     acceptance: dict[str, object] = {}
     if foreground_app_id is not None:
@@ -223,5 +245,5 @@ def scenario(
         "goal": "open display settings",
         "acceptance": acceptance,
         "forbidden_tools": [],
-        "max_rounds": 6,
+        "max_rounds": max_rounds,
     }

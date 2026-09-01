@@ -7,6 +7,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from mobile_agent.agent import AgentObservationSummary
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
 from mobile_agent.domain.errors import MobileAgentError
 from mobile_agent.providers import (
     HttpModelTransport,
@@ -406,13 +407,13 @@ class OpenAICompatiblePlannerTests(unittest.TestCase):
         self.assertIn("[REDACTED_PHONE]", user_message)
         self.assertNotIn("150******20", user_message)
 
-    def test_provider_rejects_rounds_outside_budget(self) -> None:
+    def test_provider_allows_rounds_within_runner_budget(self) -> None:
+        """轮次预算由 Runner 统一把关（MAX_AGENT_ROUNDS）；Provider 不再 >6 轮硬拒。"""
         planner = OpenAICompatiblePlanner(test_config(), FakeTransport(valid_response()))
 
-        with self.assertRaises(MobileAgentError) as raised:
-            planner.decide("open display settings", observation_summary(), 7)
-
-        self.assertEqual("NO_PROGRESS", raised.exception.code)
+        for round_index in (7, MAX_AGENT_ROUNDS):
+            decision = planner.decide("open display settings", observation_summary(), round_index)
+            self.assertEqual("settings.scroll_navigate", decision.skill_id)
 
     def test_provider_repairs_invalid_tool_arguments_once_without_device_action(self) -> None:
         invalid = {

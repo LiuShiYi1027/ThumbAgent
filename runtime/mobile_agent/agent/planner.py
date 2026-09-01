@@ -14,6 +14,10 @@ from mobile_agent.ui.model import UiSelector
 
 _NAVIGATION_TARGET_IDS = frozenset(target.value for target in NavigationTarget)
 
+# 轮次预算唯一真源：Runner / REST / 评测统一引用本常量，
+# 任何 Planner 不再各自硬编码预算上限（ITER-0061 收口）。
+MAX_AGENT_ROUNDS = 12
+
 # 与 contracts/schemas 中 agent-decision / agent-finish-criteria 的上限保持一致。
 _SCRATCHPAD_MAX_CHARS = 1024
 _ANSWER_MAX_CHARS = 2000
@@ -119,11 +123,12 @@ class RuleBasedPlanner:
         """Return deterministic tool decisions for the display/brightness demo goal."""
 
         normalized = goal.strip().lower()
-        if round_index < 1 or round_index > 6:
+        # 轮次预算由 Runner 以 MAX_AGENT_ROUNDS 统一把关；Planner 只防无效轮次序号。
+        if round_index < 1:
             raise MobileAgentError(
                 code="NO_PROGRESS",
                 category=ErrorCategory.EXECUTION,
-                message="预览 Planner 超出多轮决策预算",
+                message="决策轮次序号无效",
                 details={"round": round_index},
             )
         if not _is_display_brightness_goal(normalized):

@@ -163,11 +163,12 @@ class OpenAICompatiblePlanner:
     ) -> AgentDecision:
         """Call the configured provider and parse a structured Agent decision."""
 
-        if round_index < 1 or round_index > 6:
+        # 轮次预算由 Runner 以 MAX_AGENT_ROUNDS 统一把关；Planner 只防无效轮次序号。
+        if round_index < 1:
             raise MobileAgentError(
                 code="NO_PROGRESS",
                 category=ErrorCategory.EXECUTION,
-                message="OpenAI-compatible Planner Preview 超出多轮决策预算",
+                message="决策轮次序号无效",
                 details={"round": round_index},
             )
         repair_error: MobileAgentError | None = None

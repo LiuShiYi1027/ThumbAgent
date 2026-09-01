@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.evaluation.acceptance import AgentGoalAcceptance
 from mobile_agent.ui.model import MatchMode, SelectorStrategy, UiSelector
@@ -66,12 +67,13 @@ class AgentEvaluationScenario:
             or len(set(forbidden_tools)) != len(forbidden_tools)
         ):
             raise _invalid("评测场景 forbidden_tools 无效")
+        # 上限与 Runner 轮次预算同源（MAX_AGENT_ROUNDS），不再使用独立的 50。
         max_rounds = payload.get("max_rounds")
         if (
             not isinstance(max_rounds, int)
             or isinstance(max_rounds, bool)
             or max_rounds < 1
-            or max_rounds > 50
+            or max_rounds > MAX_AGENT_ROUNDS
         ):
             raise _invalid("评测场景 max_rounds 无效")
         return cls(

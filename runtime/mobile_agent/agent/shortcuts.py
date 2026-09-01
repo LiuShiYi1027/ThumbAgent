@@ -28,12 +28,45 @@ _SHORTCUT_KEYWORDS: tuple[tuple[NavigationTarget, tuple[str, ...]], ...] = (
     (NavigationTarget.SETTINGS_HOME, ("系统设置", "open settings", "打开设置")),
 )
 
+# 结果类谓词：目标虽命中导航关键词，但要求带回答案/数值时不能走捷径——
+# 捷径只负责到达页面，无法产出结果，必须降级到模型主循环完成取数。
+_RESULT_PREDICATES: tuple[str, ...] = (
+    "告诉",
+    "带回",
+    "查询",
+    "查一下",
+    "价格",
+    "多少",
+    "是什么",
+    "有没有",
+    "是否",
+    "tell me",
+    "answer",
+    "price",
+    "how much",
+    "what is",
+    "what's",
+    "whether",
+    "is there",
+    "are there",
+)
+
+
+def has_result_predicate(goal: str) -> bool:
+    """Return True when the goal asks for an answer/value, not just navigation."""
+
+    normalized = goal.strip().lower()
+    return any(predicate in normalized for predicate in _RESULT_PREDICATES)
+
 
 def match_navigation_shortcut(goal: str) -> NavigationTarget | None:
     """Return the registered navigation target a goal clearly refers to."""
 
     normalized = goal.strip().lower()
     if not normalized:
+        return None
+    if has_result_predicate(normalized):
+        # 取数/问答类目标需要模型主循环读取页面内容，捷径只导航不产生结果。
         return None
     for target, keywords in _SHORTCUT_KEYWORDS:
         if any(keyword.lower() in normalized for keyword in keywords):

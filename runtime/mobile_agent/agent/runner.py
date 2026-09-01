@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from mobile_agent.agent.planner import (
+    MAX_AGENT_ROUNDS,
     AgentDecision,
     AgentDecisionType,
     AgentObservationSummary,
@@ -99,7 +100,7 @@ class AgentRunner:
 
         task_started_at = _now()
         task_id = task_id or f"task_{uuid.uuid4().hex}"
-        if not isinstance(max_rounds, int) or isinstance(max_rounds, bool) or max_rounds < 1 or max_rounds > 12:
+        if not isinstance(max_rounds, int) or isinstance(max_rounds, bool) or max_rounds < 1 or max_rounds > MAX_AGENT_ROUNDS:
             failed = self._failed_task(
                 task_id,
                 device_id,
@@ -107,7 +108,7 @@ class AgentRunner:
                 task_started_at,
                 1,
                 "INVALID_ARGUMENT",
-                "max_rounds 必须在 1 到 12 之间",
+                f"max_rounds 必须在 1 到 {MAX_AGENT_ROUNDS} 之间",
                 acceptance,
                 goal_spec,
             )
@@ -152,8 +153,9 @@ class AgentRunner:
                 if navigation is not None:
                     verified_node = None
                     if acceptance is not None:
-                        verification_observation = await self._adapter.observe(
-                            device_id, self._artifacts
+                        # 验收观察与主循环观察同享瞬时故障有界重试。
+                        verification_observation = await self._observe_with_retry(
+                            device_id, cancellation_requested, deadline_exceeded
                         )
                         verified = self._verify_goal_acceptance(
                             verification_observation, acceptance
@@ -222,7 +224,13 @@ class AgentRunner:
                 recoverable_error: MobileAgentError | None = None
                 try:
                     round_result = await self._run_decision(
-                        device_id, observation, decision, confirmed, acceptance
+                        device_id,
+                        observation,
+                        decision,
+                        confirmed,
+                        acceptance,
+                        cancellation_requested,
+                        deadline_exceeded,
                     )
                 except MobileAgentError as error:
                     if not self._is_recoverable_decision_error(decision, error):
@@ -272,8 +280,12 @@ class AgentRunner:
                     on_step(completed_step)
                 last_completed_summary = summary
                 last_completed_decision = decision
+                # 轮次完成即清空全部 pending 状态：耗尽/异常路径追加的失败步骤
+                # 必须持有独立 step_id 与时间戳，不复用本轮已落账的步骤标识。
                 pending_summary = None
                 pending_decision = None
+                pending_step_id = ""
+                pending_step_started_at = completed_at
                 last_action_feedback = (
                     current_action_feedback if isinstance(current_action_feedback, dict) else None
                 )
@@ -635,13 +647,16 @@ class AgentRunner:
         decision: AgentDecision,
         confirmed: bool,
         acceptance: AgentGoalAcceptance | None,
+        cancellation_requested: Callable[[], bool] | None = None,
+        deadline_exceeded: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if decision.decision_type is AgentDecisionType.RUN_SKILL:
             skill_result = await self._run_skill_decision(device_id, decision, confirmed)
             result: dict[str, Any] = {"skill_result": skill_result.to_dict()}
             if acceptance is not None:
-                verification_observation = await self._adapter.observe(
-                    device_id, self._artifacts
+                # 验收观察与主循环观察同享瞬时故障有界重试。
+                verification_observation = await self._observe_with_retry(
+                    device_id, cancellation_requested, deadline_exceeded
                 )
                 verified = self._verify_goal_acceptance(
                     verification_observation, acceptance

@@ -16,6 +16,8 @@ from mobile_agent.agent import (
     UnavailablePlanner,
     parse_llm_decision_payload,
 )
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
+from mobile_agent.agent.shortcuts import match_navigation_shortcut
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.unicode_input import HELPER_PACKAGE
@@ -25,9 +27,11 @@ from mobile_agent.domain.artifact import ArtifactWriter
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
+from mobile_agent.domain.navigation import NavigationTarget
 from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.performance import DevicePerformanceSnapshot
 from mobile_agent.evidence.artifacts import ArtifactStore
+from mobile_agent.evaluation import AgentGoalAcceptance
 from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.runtime import RuntimeService
 from mobile_agent.skills.open_app import OpenAppSkill
@@ -1135,6 +1139,247 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("failed", task["status"])
             self.assertEqual("INVALID_ARGUMENT", task["error"]["code"])
 
+    async def test_no_progress_exhaustion_does_not_reuse_completed_step_id(self) -> None:
+        """M1：轮次预算耗尽时，追加的失败步骤不得复用上一轮已完成步骤的 step_id。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(
+                [
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "app.launch",
+                        "arguments": {"app_id": "com.android.settings"},
+                        "reason": "Open settings.",
+                    },
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "navigation.home",
+                        "arguments": {},
+                        "reason": "Go home without finishing.",
+                    },
+                ]
+            ),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+
+        task = await runner.run(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=2
+        )
+
+        self.assertEqual("failed", task.status.value)
+        assert task.error is not None
+        self.assertEqual("NO_PROGRESS", task.error["code"])
+        self.assertEqual(3, len(task.steps))
+        self.assertEqual("failed", task.steps[-1].status.value)
+        step_ids = [step.step_id for step in task.steps]
+        self.assertEqual(len(step_ids), len(set(step_ids)))
+        self.assertGreaterEqual(task.steps[-1].started_at, task.steps[-2].completed_at)
+
+    def test_rule_planner_does_not_hard_fail_within_runner_budget(self) -> None:
+        """M2：轮次预算由 Runner 统一把关（MAX_AGENT_ROUNDS）；Planner 不再 >6 轮硬拒。"""
+        planner = RuleBasedPlanner()
+        summary = AgentObservationSummary(
+            observation_id="obs_test",
+            foreground_app={"app_id": "com.android.settings", "activity": ".Main"},
+            device_state="interactive",
+        )
+
+        for round_index in (7, MAX_AGENT_ROUNDS):
+            decision = planner.decide("进入显示和亮度页面", summary, round_index)
+            self.assertEqual("input.swipe", decision.tool_id)
+
+    async def test_runner_completes_finish_at_round_eight_within_budget(self) -> None:
+        """M2：max_rounds=8 时第 7、8 轮正常执行，第 8 轮 finish 成功收尾。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        launch = {
+            "decision_type": "run_tool",
+            "tool_id": "app.launch",
+            "arguments": {"app_id": "com.android.settings"},
+            "reason": "Open settings.",
+        }
+        home = {
+            "decision_type": "run_tool",
+            "tool_id": "navigation.home",
+            "arguments": {},
+            "reason": "Return home.",
+        }
+        finish = {
+            "decision_type": "finish",
+            "arguments": {
+                "expected_selector": {
+                    "strategy": "text",
+                    "value": "Fake home",
+                    "match": "contains",
+                }
+            },
+            "reason": "Back at the home screen.",
+        }
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner([launch, home, launch, home, launch, home, home, finish]),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+
+        task = await runner.run(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=8
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual(8, len(task.steps))
+        self.assertEqual("finish", task.steps[-1].result["decision"]["decision_type"])
+
+    async def test_shortcut_acceptance_observe_retries_transient_failure(self) -> None:
+        """M3：捷径验收观察走带重试路径，瞬时 UI_TREE_INVALID 不应导致任务失败。"""
+        acceptance = AgentGoalAcceptance(foreground_app_id="com.android.settings")
+
+        def build(adapter: DeviceAdapter) -> AgentRunner:
+            artifacts = ArtifactStore(Path(self.directory.name))
+            tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+            return AgentRunner(
+                adapter,
+                artifacts,
+                RuleBasedPlanner(),
+                tools,
+                SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+                # 捷径保持默认开启：本用例验证捷径路径的验收观察重试。
+            )
+
+        # 探针运行：app.navigate 自身有 before/after 观察，验收观察是最后一次。
+        probe = _FailOnObserveCallsAdapter(set())
+        probe_task = await build(probe).run(
+            "fake:android-001", "打开显示设置", confirmed=True, acceptance=acceptance
+        )
+        self.assertEqual("succeeded", probe_task.status.value)
+        verification_call = probe.observe_calls
+        self.assertGreater(verification_call, 1)
+
+        adapter = _FailOnObserveCallsAdapter({verification_call})
+        task = await build(adapter).run(
+            "fake:android-001", "打开显示设置", confirmed=True, acceptance=acceptance
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("runtime_shortcut", task.completion_source)
+        self.assertEqual(1, adapter.failed_observe_calls)
+
+    async def test_run_skill_acceptance_observe_retries_transient_failure(self) -> None:
+        """M3：RUN_SKILL 后的验收观察同样走带重试路径，瞬时故障不应终止任务。"""
+        decision = {
+            "decision_type": "run_skill",
+            "skill_id": "settings.scroll_navigate",
+            "arguments": {
+                "target_selector": {
+                    "strategy": "text",
+                    "value": "Display",
+                    "match": "contains",
+                    "resolve_clickable_ancestor": True,
+                },
+                "expected_selector": {
+                    "strategy": "text",
+                    "value": "Display settings",
+                    "match": "contains",
+                },
+            },
+            "reason": "Open display settings.",
+        }
+        acceptance = AgentGoalAcceptance(
+            foreground_app_id="com.android.settings",
+            foreground_activity=".DisplaySettings",
+        )
+
+        def build(adapter: DeviceAdapter) -> AgentRunner:
+            artifacts = ArtifactStore(Path(self.directory.name))
+            tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+            return AgentRunner(
+                adapter,
+                artifacts,
+                MockLLMPlanner(dict(decision)),
+                tools,
+                SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+                navigation_shortcuts_enabled=False,
+            )
+
+        # 探针运行：确定验收观察是整轮最后一次 observe 调用。
+        probe = _FailOnObserveCallsAdapter(set())
+        probe_task = await build(probe).run(
+            "fake:android-001", "进入显示设置", confirmed=True, acceptance=acceptance
+        )
+        self.assertEqual("succeeded", probe_task.status.value)
+        verification_call = probe.observe_calls
+
+        adapter = _FailOnObserveCallsAdapter({verification_call})
+        task = await build(adapter).run(
+            "fake:android-001", "进入显示设置", confirmed=True, acceptance=acceptance
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("runtime_acceptance", task.completion_source)
+        self.assertEqual(1, adapter.failed_observe_calls)
+
+    def test_navigation_shortcut_result_predicates(self) -> None:
+        """M6：命中导航关键词但含结果类谓词时不走捷径；纯导航目标行为不变。"""
+        self.assertEqual(
+            NavigationTarget.SETTINGS_DISPLAY, match_navigation_shortcut("打开显示设置")
+        )
+        self.assertEqual(
+            NavigationTarget.SETTINGS_DISPLAY, match_navigation_shortcut("打开显示与亮度页面")
+        )
+        self.assertEqual(
+            NavigationTarget.SETTINGS_BLUETOOTH, match_navigation_shortcut("打开蓝牙设置")
+        )
+        self.assertIsNone(match_navigation_shortcut("打开显示与亮度页面并告诉我当前亮度值"))
+        self.assertIsNone(match_navigation_shortcut("打开WiFi设置，查一下当前连接的SSID"))
+        self.assertIsNone(
+            match_navigation_shortcut("open display settings and tell me the brightness")
+        )
+
+    async def test_result_predicate_goal_bypasses_navigation_shortcut(self) -> None:
+        """M6：含结果类谓词的导航目标降级到模型主循环，不被捷径截胡。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(
+                {
+                    "decision_type": "finish",
+                    "arguments": {
+                        "expected_selector": {
+                            "strategy": "text",
+                            "value": "Fake home",
+                            "match": "contains",
+                        },
+                        "answer": "当前亮度值为 50%",
+                    },
+                    "reason": "Report the brightness value.",
+                }
+            ),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 捷径保持默认开启：含结果谓词的目标应绕过捷径进入 Planner 循环。
+        )
+
+        task = await runner.run(
+            "fake:android-001", "打开显示与亮度页面并告诉我当前亮度值", confirmed=True
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("planner_finish", task.completion_source)
+        self.assertEqual({"answer": "当前亮度值为 50%"}, task.result)
+        self.assertFalse(any(action[0] == "app.navigate" for action in adapter.actions))
+
     def test_rule_planner_reverses_swipe_after_unchanged_feedback(self) -> None:
         planner = RuleBasedPlanner()
         summary = AgentObservationSummary(
@@ -1231,6 +1476,35 @@ class _FlakyObserveAdapter:
 
     async def capture_performance(self, device_id: str) -> DevicePerformanceSnapshot:
         return await self._inner.capture_performance(device_id)
+
+
+class _FailOnObserveCallsAdapter:
+    """在指定 observe 调用序号注入一次瞬时观察故障，其余方法委托 FakeDeviceAdapter。
+
+    用于验证捷径验收与 RUN_SKILL 验收的观察路径同样享有有界重试；
+    fail_on_calls 为空集时退化为纯计数探针。
+    """
+
+    def __init__(self, fail_on_calls: set[int], code: str = "UI_TREE_INVALID") -> None:
+        self.observe_calls = 0
+        self.failed_observe_calls = 0
+        self._fail_on_calls = frozenset(fail_on_calls)
+        self._code = code
+        self._inner = FakeDeviceAdapter()
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        self.observe_calls += 1
+        if self.observe_calls in self._fail_on_calls:
+            self.failed_observe_calls += 1
+            raise MobileAgentError(
+                code=self._code,
+                category=ErrorCategory.DEVICE,
+                message="注入的观察故障",
+            )
+        return await self._inner.observe(device_id, artifacts)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 class UnsafePlanner:
