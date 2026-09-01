@@ -38,6 +38,7 @@ GUI 动作      input.tap@1 · input.text@1（ASCII 快路径）· input.swipe@1
 程序化捷径    app.navigate@1（14 个系统设置页面枚举直达）
 通知          notifications.read@1（有界脱敏快照）
 Runtime 本地  local.data.cleanup（非设备 Capability）
+Agent 内核    跨轮工作记忆 scratchpad · finish 结构化 answer · 捷径谓词守卫（ITER-0061）
 ```
 
 ## 4. 候选清单
@@ -82,6 +83,7 @@ Runtime 本地  local.data.cleanup（非设备 Capability）
 
 | 候选 | 真实场景 | 治理缺口 | 前置条件 |
 | --- | --- | --- | --- |
+| 权限弹窗交互风险升级 | ITER-0061 真机实测：模型在录音权限弹窗自主点击「仅使用期间允许」，语义点击作为通用动作绕过了权限类 High 风险边界 | 前台为 permissioncontroller 时的动作风险升级策略与确认语义；误拦正常导航的误报预算 | 独立迭代；策略变更需记录理由（ADR 或可靠性/安全文档更新） |
 | Deep Link / URI 白名单跳转 | 「打开微信扫一扫」「直达应用内页面」 | URI 白名单治理、scheme 风险分级、防钓鱼 | 独立迭代 + ADR（ITER-0058 已明确排除） |
 | 剪贴板读取/写入 | 跨应用搬运文本、配合 CJK 输入 | 剪贴板含密码等敏感内容的脱敏与确认语义 | 数据分类策略；写入需确认 |
 | 文件传输（push/pull） | 测试素材下发、日志回取 | 目录白名单、大小上限、路径遍历防护 | 作用域绑定 Approval（ADR-0016 模式） |
@@ -125,8 +127,9 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
   真机六场景全 PASS，见 [ITER-0059 复盘](../iterations/0059-unicode-text-input/retrospective.md)）。
 - ~~ITER-0060~~：真机模型驱动中文任务闭环已验证（hint 选择器策略、unicode 输入在线调用、
   runtime acceptance 验收，见 [ITER-0060 复盘](../iterations/0060-live-agent-cjk-task-loop/retrospective.md)）。
-- **ITER-0061**：Agent 内核——跨轮工作记忆 + 结构化任务结果（§4.0，V2 前置；
-  驱动场景「打开京东搜索 iPhone 17 并带回价格」）。
+- ~~ITER-0061~~：Agent 内核——跨轮工作记忆 + 结构化任务结果已交付（scratchpad 全量覆盖语义、
+  finish answer 持久化与三端透出、捷径谓词守卫；真机验收见
+  [ITER-0061 复盘](../iterations/0061-agent-working-memory-and-results/retrospective.md)）。
 - ITER-0062 候选：Skill 扩展与管理（§4.4，依赖 0061 的 scratchpad/result 契约，
   稳定性测试 Skill 为首驱动场景）。
 - 其后按真实任务暴露的需求拉动：候选池见 §4.1（A 档设备动作）；候选仅在真实场景
