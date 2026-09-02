@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0.0",
+  "skill_id": "app.stability_test",
+  "skill_version": "1.0.0",
+  "name": "应用稳定性遍历压测",
+  "description": "启动目标应用后在时间盒内执行确定性遍历（上滑/下滑/返回），结束后重新拉起目标应用形成结构化收尾。DSL 不支持把输入绑定到循环上限：duration_seconds 与 max_actions 是调用方声明并经 preflight 校验的遍历预算，文档内 loop 固定 600 秒 / 200 次双上限作为绝对天花板，实际时间盒由任务的 deadline_seconds 控制。device.performance.capture 为 direct_invocation=false（TOOL_REQUIRES_SKILL），DSL 步骤无法使用；观察覆盖由 ToolRuntime 每个步骤前后的 Observation 隐式提供。",
+  "timeout_seconds": 900,
+  "inputs": [
+    {
+      "name": "app_id",
+      "type": "string",
+      "required": true,
+      "max_length": 128,
+      "description": "目标应用包名，如 com.example.app"
+    },
+    {
+      "name": "duration_seconds",
+      "type": "integer",
+      "required": false,
+      "minimum": 1,
+      "maximum": 600,
+      "description": "请求的遍历时长预算（秒）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 600 秒，实际时间盒由任务 deadline_seconds 控制"
+    },
+    {
+      "name": "max_actions",
+      "type": "integer",
+      "required": false,
+      "minimum": 1,
+      "maximum": 200,
+      "description": "请求的遍历迭代预算（次）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 200 次"
+    }
+  ],
+  "steps": [
+    {
+      "type": "tool",
+      "step_id": "launch_target_app",
+      "tool_id": "app.launch",
+      "arguments": { "app_id": "$inputs.app_id" }
+    },
+    {
+      "type": "loop",
+      "step_id": "stress_traverse",
+      "max_duration_seconds": 600,
+      "max_iterations": 200,
+      "steps": [
+        {
+          "type": "tool",
+          "step_id": "swipe_up",
+          "tool_id": "input.swipe",
+          "arguments": { "direction": "up" }
+        },
+        {
+          "type": "tool",
+          "step_id": "swipe_down",
+          "tool_id": "input.swipe",
+          "arguments": { "direction": "down" }
+        },
+        {
+          "type": "tool",
+          "step_id": "navigate_back",
+          "tool_id": "navigation.back",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "type": "tool",
+      "step_id": "relaunch_target_app",
+      "tool_id": "app.launch",
+      "arguments": { "app_id": "$inputs.app_id" }
+    }
+  ]
+}

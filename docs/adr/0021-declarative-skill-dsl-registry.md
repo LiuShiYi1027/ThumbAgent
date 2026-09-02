@@ -1,7 +1,7 @@
 # ADR-0021: 声明式复合 Skill DSL 与 Skill Registry 持久化
 
-- Status: Proposed
-- Date: 2026-09-01
+- Status: Accepted
+- Date: 2026-09-01（2026-09-01 经项目负责人确认方向）
 - Deciders: Mobile Agent Team
 
 ## Context
