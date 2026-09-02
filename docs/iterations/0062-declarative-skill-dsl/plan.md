@@ -1,9 +1,10 @@
 # ITER-0062 Declarative Skill DSL & Registry（声明式复合 Skill 与注册表管理面）
 
-> 文档状态：Draft
-> 迭代状态：Planned
+> 文档状态：Final
+> 迭代状态：Completed
 > 创建日期：2026-09-01
-> 关联：[能力路线图 §4.4](../../product/capability-roadmap.md) · [ADR-0021](../../adr/0021-declarative-skill-dsl-registry.md)（Proposed，方向待负责人确认）· [ADR-0002](../../adr/0002-tool-skill-model.md) · [ITER-0061 复盘](../0061-agent-working-memory-and-results/retrospective.md)
+> 完成日期：2026-09-02
+> 关联：[能力路线图 §4.4](../../product/capability-roadmap.md) · [ADR-0021](../../adr/0021-declarative-skill-dsl-registry.md)（Accepted，2026-09-01 负责人确认方向）· [ADR-0002](../../adr/0002-tool-skill-model.md) · [ITER-0061 复盘](../0061-agent-working-memory-and-results/retrospective.md)
 
 ## 背景
 

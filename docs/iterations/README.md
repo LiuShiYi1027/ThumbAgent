@@ -66,7 +66,7 @@
 | [ITER-0059](./0059-unicode-text-input/plan.md) | Unicode Text Input Helper | Completed | 受控 IME helper 支持 CJK/Unicode 输入：UTF-7 编码复用 input text 管道、IME 切换恢复、追加语义读回验证 |
 | [ITER-0060](./0060-live-agent-cjk-task-loop/plan.md) | Live Agent CJK Task Loop | Completed | 本地模型驱动的真机中文任务闭环：hint 选择器策略、unicode 输入在线调用与 runtime acceptance 验收 |
 | [ITER-0061](./0061-agent-working-memory-and-results/plan.md) | Agent Working Memory & Task Results | Completed | Agent 内核前置：跨轮工作记忆（scratchpad）与结构化任务结果（finish 携带 answer），解锁比价/回填/带回类意图 |
-| [ITER-0062](./0062-declarative-skill-dsl/plan.md) | Declarative Skill DSL & Registry | Planned | 声明式复合 Skill DSL + Skill Registry 持久化与管理面；首驱动场景 app.stability_test（ADR-0021 待确认） |
+| [ITER-0062](./0062-declarative-skill-dsl/plan.md) | Declarative Skill DSL & Registry | Completed | 声明式复合 Skill DSL + Skill Registry 持久化与管理面；首驱动场景 app.stability_test（ADR-0021 待确认） |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

@@ -110,7 +110,7 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 | 候选 | 类型 | 真实场景 | 治理缺口 | 前置条件 |
 | --- | --- | --- | --- | --- |
 | 应用稳定性测试 Skill（`app.stability_test`） | 官方内置 Skill，纯编排既有能力，无新设备原语 | 「打开京东搜索 iPhone 17，再做 5 分钟稳定性测试」类复合意图：时间盒内确定性遍历交互 + 崩溃/ANR 判定 + 性能曲线采样 + 结构化报告 | 时长与动作频次上限、报告模板、任务取消语义；日志 PII 沿用 `logs.collect@1` 脱敏边界 | 普通迭代（B 档治理粒度），确定性遍历优先于 Monkey 随机 |
-| Skill 扩展与管理 | V2 平台元能力：agent 的技能生态与生命周期治理，「全能移动端操作 agent」的扩展形态 | 用户/第三方自定义复合技能（稳定性测试为首驱动场景），并对技能做注册/查看/启停/版本/卸载管理 | 双重信任边界：① 执行边界——禁止任意代码入 Runtime，声明式 DSL 由 Runtime 解释执行，只能引用已登记 Tool/Capability，风险等级从所编排能力派生，继承 Policy 授权与确认语义；② 管理边界——Skill Registry 从启动期装配改为持久化运行时状态，带审计与管理面 | 独立 ADR + DSL Contract Schema + Skill Registry 持久化与管理面（REST/Desktop）设计 |
+| ~~Skill 扩展与管理~~（V1 已交付核心：DSL + Registry + 管理面，ITER-0062；Desktop 管理页与 Skill 级引用为跟进项） | V2 平台元能力：agent 的技能生态与生命周期治理，「全能移动端操作 agent」的扩展形态 | 用户/第三方自定义复合技能（稳定性测试为首驱动场景），并对技能做注册/查看/启停/版本/卸载管理 | 双重信任边界：① 执行边界——禁止任意代码入 Runtime，声明式 DSL 由 Runtime 解释执行，只能引用已登记 Tool/Capability，风险等级从所编排能力派生，继承 Policy 授权与确认语义；② 管理边界——Skill Registry 从启动期装配改为持久化运行时状态，带审计与管理面 | 独立 ADR + DSL Contract Schema + Skill Registry 持久化与管理面（REST/Desktop）设计 |
 
 ## 5. 接入流程（每个候选的固定路径）
 
@@ -130,10 +130,9 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 - ~~ITER-0061~~：Agent 内核——跨轮工作记忆 + 结构化任务结果已交付（scratchpad 全量覆盖语义、
   finish answer 持久化与三端透出、捷径谓词守卫；真机验收见
   [ITER-0061 复盘](../iterations/0061-agent-working-memory-and-results/retrospective.md)）。
-- **ITER-0062**：Skill 扩展与管理（§4.4）已立项 Planned——ADR-0021（声明式 DSL +
-  Registry 持久化，双重信任边界）起草完成待负责人确认方向；首驱动场景
-  `app.stability_test`。迭代文档见
-  [0062-declarative-skill-dsl](../iterations/0062-declarative-skill-dsl/plan.md)。
+- ~~ITER-0062~~：Skill 扩展与管理已交付（声明式 DSL + Registry 持久化 + REST 管理面 +
+  `skill.dsl.run` 异步任务 + `app.stability_test` 官方 DSL Skill，ADR-0021 Accepted，
+  真机验收见 [ITER-0062 复盘](../iterations/0062-declarative-skill-dsl/retrospective.md)）。
 - 其后按真实任务暴露的需求拉动：候选池见 §4.1（A 档设备动作）；候选仅在真实场景
   重复出现时进入排期。
 - 每次迭代接入 1–2 个候选，保持评审粒度。
