@@ -205,3 +205,27 @@ def _to_record(row: StoredSkillRow) -> CustomSkillRecord:
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+_BUILTIN_DSL_DIR = Path(__file__).resolve().parent / "dsl_documents"
+
+
+def load_builtin_dsl_documents(registry: CustomSkillRegistry) -> int:
+    """Idempotently register shipped official DSL documents (source=builtin-dsl).
+
+    Already-registered (skill_id, version) pairs are skipped so a user's
+    enabled/disabled choice survives Runtime restarts; the audit trail only
+    records first-time registration.
+    """
+
+    loaded = 0
+    for path in sorted(_BUILTIN_DSL_DIR.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            registry.register(payload, source="builtin-dsl")
+        except MobileAgentError as error:
+            if error.code == "SKILL_VERSION_CONFLICT":
+                continue
+            raise
+        loaded += 1
+    return loaded

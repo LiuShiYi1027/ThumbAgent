@@ -91,7 +91,12 @@ from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkil
 from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
 from mobile_agent.skills.local_data import LocalDataCleanupSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
-from mobile_agent.skills.registry import CustomSkillRecord, CustomSkillRegistry, skill_not_found
+from mobile_agent.skills.registry import (
+    CustomSkillRecord,
+    CustomSkillRegistry,
+    load_builtin_dsl_documents,
+    skill_not_found,
+)
 from mobile_agent.storage.skills import SQLiteCustomSkillStore, SQLiteSkillAuditStore
 from mobile_agent.storage.sqlite import SQLiteTaskStore
 from mobile_agent.storage.execution import SQLiteTaskExecutionStore
@@ -471,6 +476,7 @@ class RuntimeService:
                         self._custom_skill_store,
                         emit_audit=self._skill_audit_store.append,
                     )
+                    load_builtin_dsl_documents(self._custom_skills_registry)
         return self._custom_skills_registry
 
     def _skill_audit(self) -> SQLiteSkillAuditStore:

@@ -11,6 +11,7 @@ from mobile_agent.domain.errors import MobileAgentError
 from mobile_agent.skills.registry import (
     CustomSkillRegistry,
     builtin_skill_ids,
+    load_builtin_dsl_documents,
 )
 from mobile_agent.storage.skills import SQLiteCustomSkillStore
 from mobile_agent.storage.sqlite import migrate_database
@@ -223,6 +224,38 @@ class CustomSkillRegistryTests(unittest.TestCase):
         with self.assertRaises(MobileAgentError) as caught_delete:
             self.registry.delete("app.ghost", "1.0.0")
         self.assertEqual("SKILL_NOT_FOUND", caught_delete.exception.code)
+
+
+class BuiltinDslLoadingTests(unittest.TestCase):
+    """官方 DSL 文档随 Runtime 装配幂等加载（ITER-0062 TASK-05 补齐）。"""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.database = Path(self.directory.name) / "mobile-agent.db"
+        self.audit_events: list[tuple[str, dict]] = []
+        self.registry = CustomSkillRegistry(
+            SQLiteCustomSkillStore(self.database),
+            emit_audit=lambda event, payload: self.audit_events.append((event, payload)),
+        )
+
+    def test_builtin_documents_load_once_and_preserve_user_state(self) -> None:
+        loaded = load_builtin_dsl_documents(self.registry)
+        self.assertGreaterEqual(loaded, 1)
+
+        record = self.registry.get("app.stability_test")
+        self.assertEqual("builtin-dsl", record.source)
+        self.assertTrue(record.enabled)
+        self.assertEqual("medium", record.derived_risk.value)
+
+        # 用户禁用后，重启（重新加载）不得覆盖启停状态
+        self.registry.set_enabled("app.stability_test", "1.0.0", False)
+        self.assertEqual(0, load_builtin_dsl_documents(self.registry))
+        self.assertFalse(self.registry.get("app.stability_test").enabled)
+
+        # 审计只记录首次注册
+        registered = [e for e in self.audit_events if e[0] == "skill.registered"]
+        self.assertEqual(loaded, len(registered))
 
 
 if __name__ == "__main__":
