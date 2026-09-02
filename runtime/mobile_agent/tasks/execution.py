@@ -56,6 +56,7 @@ _SUPPORTED_TASK_TYPES = frozenset(
         "app.stop",
         "app.data.clear",
         "local.data.cleanup",
+        "skill.dsl.run",
     }
 )
 

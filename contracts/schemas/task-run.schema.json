@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": { "const": "1.0.0" },
     "task_id": { "type": "string", "pattern": "^task_[a-f0-9]{32}$" },
-    "task_type": { "enum": ["settings.scroll_navigate", "agent.run", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup", "input.unicode_text"] },
+    "task_type": { "enum": ["settings.scroll_navigate", "agent.run", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup", "input.unicode_text", "skill.dsl.run"] },
     "device_id": { "type": "string", "minLength": 1 },
     "device_session_id": { "type": "string", "pattern": "^session_[a-f0-9]{32}$" },
     "goal": { "type": "string", "minLength": 1, "maxLength": 500 },
@@ -32,7 +32,7 @@
           "step_id": { "type": "string", "pattern": "^step_[a-f0-9]{32}$" },
           "sequence": { "type": "integer", "minimum": 1 },
           "kind": { "enum": ["skill", "agent_round", "diagnostic"] },
-          "name": { "enum": ["settings.scroll_navigate", "agent.round", "agent.shortcut", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup", "input.unicode_text"] },
+          "name": { "enum": ["settings.scroll_navigate", "agent.round", "agent.shortcut", "device.logs.collect", "device.performance.snapshot", "device.diagnostics.bundle", "app.install", "app.uninstall", "app.launch", "app.stop", "app.data.clear", "local.data.cleanup", "input.unicode_text", "skill.dsl.run"] },
           "status": { "enum": ["succeeded", "failed"] },
           "started_at": { "type": "string", "format": "date-time" },
           "completed_at": { "type": "string", "format": "date-time" },

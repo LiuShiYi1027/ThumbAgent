@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import math
+import threading
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -22,6 +23,7 @@ from mobile_agent.devices.lease import DeviceLeaseManager
 from mobile_agent.devices.session import SessionTrackingDeviceAdapter
 from mobile_agent.devices.unavailable import UnavailableDeviceAdapter
 from mobile_agent.domain.device import ConnectionState, Device
+from mobile_agent.domain.action import RiskLevel
 from mobile_agent.domain.apk import ApkInspector, ApkInstallApprovalStore
 from mobile_agent.domain.app_removal import AppRemovalApprovalStore
 from mobile_agent.domain.app_lifecycle import AppDataClearApprovalStore
@@ -89,6 +91,8 @@ from mobile_agent.skills.device_performance import DevicePerformanceSnapshotSkil
 from mobile_agent.skills.diagnostic_bundle import DiagnosticBundleSkill
 from mobile_agent.skills.local_data import LocalDataCleanupSkill
 from mobile_agent.skills.settings_navigate import SettingsNavigateSkill, SettingsScrollNavigateSkill
+from mobile_agent.skills.registry import CustomSkillRecord, CustomSkillRegistry, skill_not_found
+from mobile_agent.storage.skills import SQLiteCustomSkillStore, SQLiteSkillAuditStore
 from mobile_agent.storage.sqlite import SQLiteTaskStore
 from mobile_agent.storage.execution import SQLiteTaskExecutionStore
 from mobile_agent.tasks.execution import (
@@ -104,6 +108,7 @@ from mobile_agent.tasks.local_data import LocalDataCleanupTaskRunner
 from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
 from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
 from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
+from mobile_agent.tasks.dsl_skill import DslSkillTaskRunner
 from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
@@ -120,6 +125,23 @@ from mobile_agent.tools.local_data import LocalDataTool
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _custom_skill_summary(record: CustomSkillRecord) -> dict[str, Any]:
+    """Public view of one custom skill version; never carries the DSL source."""
+
+    return {
+        "skill_id": record.skill_id,
+        "skill_version": record.skill_version,
+        "name": record.document.name,
+        "description": record.document.description,
+        "derived_risk": record.derived_risk.value,
+        "enabled": record.enabled,
+        "source": record.source,
+        "document_sha256": record.document_sha256,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
 
 
 class RuntimeService:
@@ -147,6 +169,8 @@ class RuntimeService:
         artifact_retention_days: int = 7,
         wall_clock: Callable[[], float] = time.time,
         navigation_shortcuts_enabled: bool = True,
+        custom_skill_store: SQLiteCustomSkillStore | None = None,
+        skill_audit_store: SQLiteSkillAuditStore | None = None,
     ) -> None:
         self._adapter = (
             adapter
@@ -238,6 +262,13 @@ class RuntimeService:
             self._local_data_cleanup
         )
         self._settings_navigate = SettingsNavigateSkill(self._tools, self._open_app)
+        # 自定义 Skill 存储惰性装配：证据根目录只在真正使用管理面时才落库，
+        # 保持 ArtifactStore 根目录对纯执行任务淨空（诊断测试断言该不变量）。
+        self._custom_skill_store = custom_skill_store
+        self._skill_audit_store = skill_audit_store
+        self._custom_skills_registry: CustomSkillRegistry | None = None
+        self._custom_skills_lock = threading.Lock()
+        self._dsl_skill_task_runner = DslSkillTaskRunner(self._tools)
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
         self._app_navigate = AppNavigateSkill(self._tools)
         self._notifications_tool = DeviceNotificationsCaptureTool(
@@ -421,6 +452,257 @@ class RuntimeService:
             fingerprint,
             deadline_seconds,
             task_type="local.data.cleanup",
+        ).to_dict()
+
+    # ---- 自定义 DSL Skill 管理面与异步执行（ITER-0062 / ADR-0021）----
+
+    def _custom_skills(self) -> CustomSkillRegistry:
+        """Lazily assemble the custom skill registry and audit store."""
+
+        if self._custom_skills_registry is None:
+            with self._custom_skills_lock:
+                if self._custom_skills_registry is None:
+                    database = self._artifacts.root / "custom-skills.db"
+                    if self._custom_skill_store is None:
+                        self._custom_skill_store = SQLiteCustomSkillStore(database)
+                    if self._skill_audit_store is None:
+                        self._skill_audit_store = SQLiteSkillAuditStore(database)
+                    self._custom_skills_registry = CustomSkillRegistry(
+                        self._custom_skill_store,
+                        emit_audit=self._skill_audit_store.append,
+                    )
+        return self._custom_skills_registry
+
+    def _skill_audit(self) -> SQLiteSkillAuditStore:
+        """Return the initialized audit store (see _custom_skills)."""
+
+        self._custom_skills()
+        if self._skill_audit_store is None:  # pragma: no cover - 装配后必非 None
+            raise MobileAgentError(
+                "STORAGE_ERROR",
+                ErrorCategory.STORAGE,
+                "Skill 审计存储未初始化",
+            )
+        return self._skill_audit_store
+
+    def register_custom_skill(
+        self, document: dict[str, Any], confirmed: bool
+    ) -> dict[str, Any]:
+        """Validate, derive risk for, and register one immutable skill version."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "注册自定义 Skill 需要用户对派生风险进行明确确认",
+            )
+        record = self._custom_skills().register(document, source="rest")
+        return {"skill": _custom_skill_summary(record)}
+
+    def list_custom_skills(self) -> dict[str, Any]:
+        """List every custom skill version without DSL source text."""
+
+        return {
+            "skills": [
+                _custom_skill_summary(record) for record in self._custom_skills().list()
+            ]
+        }
+
+    def list_custom_skill_versions(self, skill_id: str) -> dict[str, Any]:
+        """List every registered version of one custom skill."""
+
+        records = [
+            record
+            for record in self._custom_skills().list()
+            if record.skill_id == skill_id
+        ]
+        if not records:
+            raise skill_not_found(skill_id, None)
+        return {
+            "skill_id": skill_id,
+            "versions": [_custom_skill_summary(record) for record in records],
+        }
+
+    def get_custom_skill_version(
+        self, skill_id: str, skill_version: str
+    ) -> dict[str, Any]:
+        """Return one version's detail, including the DSL document source."""
+
+        record = self._custom_skills().get(skill_id, skill_version)
+        return {
+            "skill": {
+                **_custom_skill_summary(record),
+                "document": json.loads(record.document_json),
+            }
+        }
+
+    def set_custom_skill_enabled(
+        self, skill_id: str, skill_version: str, enabled: bool
+    ) -> dict[str, Any]:
+        """Enable or disable one custom skill version durably."""
+
+        record = self._custom_skills().set_enabled(skill_id, skill_version, enabled)
+        return {"skill": _custom_skill_summary(record)}
+
+    def delete_custom_skill_version(
+        self, skill_id: str, skill_version: str, confirmed: bool
+    ) -> dict[str, Any]:
+        """Delete one custom skill version permanently; audit event is retained."""
+
+        if not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "删除自定义 Skill 版本需要用户明确确认",
+            )
+        self._custom_skills().delete(skill_id, skill_version)
+        return {
+            "deleted": True,
+            "skill_id": skill_id,
+            "skill_version": skill_version,
+        }
+
+    def list_custom_skill_audit(self, skill_id: str) -> dict[str, Any]:
+        """Return one skill's persisted lifecycle audit events in append order."""
+
+        rows = self._skill_audit().list_by_skill(skill_id)
+        if not rows:
+            # 无审计事件且从未注册过的 skill 视为不存在。
+            self._custom_skills().get(skill_id)
+        return {
+            "skill_id": skill_id,
+            "audit": [
+                {
+                    "id": row.audit_id,
+                    "event_type": row.event_type,
+                    "skill_id": row.skill_id,
+                    "skill_version": row.skill_version,
+                    "document_sha256": row.document_sha256,
+                    "payload": json.loads(row.payload_json),
+                    "created_at": row.created_at,
+                }
+                for row in rows
+            ],
+        }
+
+    def submit_dsl_skill_task(
+        self,
+        device_id: str,
+        skill_id: str,
+        skill_version: str | None,
+        inputs: dict[str, Any],
+        confirmed: bool,
+        idempotency_key: str | None,
+        deadline_seconds: float = 600.0,
+    ) -> dict[str, Any]:
+        """Validate and enqueue one custom DSL skill execution.
+
+        派生风险在提交时fail-fast：Medium 需要 confirmed，High/Prohibited
+        直接拒绝（解释器执行前还会再检查一次）。取消/暂停/deadline 由执行器
+        控制探针在每个 DSL 步骤边界生效。
+        """
+
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise MobileAgentError(
+                "INVALID_ARGUMENT",
+                ErrorCategory.VALIDATION,
+                "自定义 DSL Skill 任务必须提供 Idempotency-Key",
+            )
+        deadline_seconds = self._validated_deadline(deadline_seconds)
+        record = self._custom_skills().get(skill_id, skill_version)
+        if not record.enabled:
+            raise MobileAgentError(
+                "SKILL_DISABLED",
+                ErrorCategory.VALIDATION,
+                "自定义 Skill 版本已禁用，不能执行",
+                details={
+                    "skill_id": record.skill_id,
+                    "skill_version": record.skill_version,
+                },
+            )
+        if record.derived_risk in (RiskLevel.HIGH, RiskLevel.PROHIBITED):
+            raise MobileAgentError(
+                "ACTION_REJECTED_BY_POLICY",
+                ErrorCategory.POLICY,
+                "自定义 DSL 技能不支持 High/Prohibited 风险能力（无授权流）",
+                details={"derived_risk": record.derived_risk.value},
+            )
+        if record.derived_risk is RiskLevel.MEDIUM and not confirmed:
+            raise MobileAgentError(
+                "CONFIRMATION_REQUIRED",
+                ErrorCategory.POLICY,
+                "该 DSL 技能派生风险为 Medium，需要用户明确确认",
+                details={"derived_risk": record.derived_risk.value},
+            )
+        document = record.document
+        document_sha256 = record.document_sha256
+        goal = f"{record.skill_id}@{record.skill_version}"
+
+        async def run_factory(
+            task_id: str,
+            on_step: Any,
+            is_cancelled: Any,
+            deadline_exceeded: Any,
+        ) -> TaskRun:
+            try:
+                session_id = await self._adapter.require_online_session(device_id)
+                with self._device_leases.hold(
+                    device_id, task_id, deadline_seconds + 30.0, session_id
+                ), self._adapter.bind_session(device_id, session_id):
+                    self._task_executor.bind_device_session(task_id, session_id)
+                    task = await self._dsl_skill_task_runner.run(
+                        task_id,
+                        device_id,
+                        document,
+                        document_sha256=document_sha256,
+                        inputs=inputs,
+                        confirmed=confirmed,
+                        deadline_seconds=deadline_seconds,
+                        on_step=on_step,
+                        cancellation_requested=is_cancelled,
+                        deadline_exceeded=deadline_exceeded,
+                    )
+                    return replace(task, device_session_id=session_id)
+            except MobileAgentError as error:
+                now = _utc_now()
+                return TaskRun(
+                    task_id=task_id,
+                    task_type="skill.dsl.run",
+                    device_id=device_id,
+                    goal=goal,
+                    status=TaskStatus.FAILED,
+                    started_at=now,
+                    completed_at=now,
+                    steps=(),
+                    evidence_summary={},
+                    error=error.to_dict(),
+                    deadline_seconds=deadline_seconds,
+                )
+
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_type": "skill.dsl.run",
+                    "device_id": device_id,
+                    "skill_id": record.skill_id,
+                    "skill_version": record.skill_version,
+                    "inputs": inputs,
+                    "confirmed": confirmed,
+                    "deadline_seconds": deadline_seconds,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return self._task_executor.submit(
+            device_id,
+            goal,
+            run_factory,
+            self._task_store.save,
+            idempotency_key,
+            fingerprint,
+            deadline_seconds,
+            task_type="skill.dsl.run",
         ).to_dict()
 
     async def list_devices(self) -> list[dict[str, Any]]:
@@ -2389,11 +2671,96 @@ class RuntimeService:
         except MobileAgentError as error:
             return self._error_response(error)
 
+    def register_custom_skill_sync(
+        self, document: dict[str, Any], confirmed: bool
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous interface wrapper for custom skill registration."""
+
+        try:
+            return HTTPStatus.OK, self.register_custom_skill(document, confirmed)
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def list_custom_skills_sync(self) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.list_custom_skills()
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def list_custom_skill_versions_sync(
+        self, skill_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.list_custom_skill_versions(skill_id)
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def get_custom_skill_version_sync(
+        self, skill_id: str, skill_version: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.get_custom_skill_version(skill_id, skill_version)
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def set_custom_skill_enabled_sync(
+        self, skill_id: str, skill_version: str, enabled: bool
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.set_custom_skill_enabled(
+                skill_id, skill_version, enabled
+            )
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def delete_custom_skill_version_sync(
+        self, skill_id: str, skill_version: str, confirmed: bool
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.delete_custom_skill_version(
+                skill_id, skill_version, confirmed
+            )
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def list_custom_skill_audit_sync(
+        self, skill_id: str
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            return HTTPStatus.OK, self.list_custom_skill_audit(skill_id)
+        except MobileAgentError as error:
+            return self._error_response(error)
+
+    def submit_dsl_skill_task_sync(
+        self,
+        device_id: str,
+        skill_id: str,
+        skill_version: str | None,
+        inputs: dict[str, Any],
+        confirmed: bool,
+        idempotency_key: str | None,
+        deadline_seconds: float = 600.0,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        """Synchronous submission wrapper for asynchronous DSL skill tasks."""
+
+        try:
+            execution = self.submit_dsl_skill_task(
+                device_id,
+                skill_id,
+                skill_version,
+                inputs,
+                confirmed,
+                idempotency_key,
+                deadline_seconds,
+            )
+            return HTTPStatus.ACCEPTED, {"execution": execution}
+        except MobileAgentError as error:
+            return self._error_response(error)
+
     def get_task_execution_sync(
         self, task_id: str
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        try:
-            return HTTPStatus.OK, {"execution": self.get_task_execution(task_id)}
+        try:            return HTTPStatus.OK, {"execution": self.get_task_execution(task_id)}
         except MobileAgentError as error:
             return self._error_response(error)
 
@@ -2522,11 +2889,13 @@ class RuntimeService:
             "TOOL_NOT_FOUND",
             "TASK_NOT_FOUND",
             "ARTIFACT_NOT_FOUND",
+            "SKILL_NOT_FOUND",
         }:
             status = HTTPStatus.NOT_FOUND
         elif error.code in {
             "INVALID_ARGUMENT", "APK_INVALID", "APK_PACKAGE_MISMATCH",
             "APP_ALREADY_INSTALLED", "NAVIGATION_ACTION_UNKNOWN",
+            "SKILL_DSL_INVALID", "SKILL_INPUT_INVALID",
         }:
             status = HTTPStatus.BAD_REQUEST
         elif error.code in {
@@ -2534,12 +2903,15 @@ class RuntimeService:
             "ACTION_REJECTED_BY_POLICY",
             "APPROVAL_INVALID",
             "SYSTEM_APP_PROTECTED",
+            "SKILL_BUILTIN_PROTECTED",
         }:
             status = HTTPStatus.FORBIDDEN
         elif error.code in {
             "TASK_STATE_CONFLICT",
             "IDEMPOTENCY_CONFLICT",
             "DEVICE_LOCKED",
+            "SKILL_VERSION_CONFLICT",
+            "SKILL_DISABLED",
         }:
             status = HTTPStatus.CONFLICT
         elif error.code in {"MODEL_OUTPUT_INVALID", "TOOL_REQUIRES_SKILL"}:
@@ -2591,6 +2963,12 @@ def build_default_runtime() -> RuntimeService:
         model_provider_error=model_error,
         goal_compiler=goal_compiler,
         task_execution_store=SQLiteTaskExecutionStore(
+            artifact_root.parent / "mobile-agent.db"
+        ),
+        custom_skill_store=SQLiteCustomSkillStore(
+            artifact_root.parent / "mobile-agent.db"
+        ),
+        skill_audit_store=SQLiteSkillAuditStore(
             artifact_root.parent / "mobile-agent.db"
         ),
         device_gateway_error=device_gateway_error,

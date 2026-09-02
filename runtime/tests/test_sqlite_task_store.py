@@ -100,7 +100,13 @@ class SQLiteTaskStoreTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
 
         self.assertEqual(
-            [("0001_task_store",), ("0002_task_executions",)], revisions
+            [
+                ("0001_task_store",),
+                ("0002_task_executions",),
+                ("0003_custom_skills",),
+                ("0004_skill_audit",),
+            ],
+            revisions,
         )
         self.assertEqual(("tasks",), task_table)
 

@@ -7,7 +7,7 @@
 export interface TaskExecution {
   schema_version: "1.0.0";
   task_id: string;
-  task_type: "agent.run" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup";
+  task_type: "agent.run" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup" | "skill.dsl.run";
   device_id: string;
   device_session_id: string | null;
   goal: string;

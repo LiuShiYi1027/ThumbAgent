@@ -23,6 +23,8 @@ from mobile_agent.web import TASK_UI_HTML
 
 _TOOL_INVOKE_ROUTE = r"/v1/tools/([a-z0-9._]+)/invoke"
 _LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+_SKILL_ID_PATTERN = r"[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+"
+_SKILL_VERSION_PATTERN = r"[0-9]+\.[0-9]+\.[0-9]+"
 
 
 def _interface_error(
@@ -237,6 +239,39 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
             status, payload = self._runtime().get_task_sync(task_match.group(1))
             self._write_json(status, payload)
             return
+        if path == "/v1/skills/custom":
+            status, payload = self._runtime().list_custom_skills_sync()
+            self._write_json(status, payload)
+            return
+        custom_skill_audit_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})/audit", path
+        )
+        if custom_skill_audit_match:
+            status, payload = self._runtime().list_custom_skill_audit_sync(
+                custom_skill_audit_match.group(1)
+            )
+            self._write_json(status, payload)
+            return
+        custom_skill_version_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})/versions/({_SKILL_VERSION_PATTERN})",
+            path,
+        )
+        if custom_skill_version_match:
+            status, payload = self._runtime().get_custom_skill_version_sync(
+                custom_skill_version_match.group(1),
+                custom_skill_version_match.group(2),
+            )
+            self._write_json(status, payload)
+            return
+        custom_skill_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})", path
+        )
+        if custom_skill_match:
+            status, payload = self._runtime().list_custom_skill_versions_sync(
+                custom_skill_match.group(1)
+            )
+            self._write_json(status, payload)
+            return
         self._write_json(
             HTTPStatus.NOT_FOUND,
             _interface_error("RESOURCE_NOT_FOUND", "请求的本地资源不存在"),
@@ -324,6 +359,22 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
         )
         execution_resume_match = re.fullmatch(
             r"/v1/task-executions/(task_[a-f0-9]{32})/resume", self.path
+        )
+        custom_skill_register_match = re.fullmatch(r"/v1/skills/custom", self.path)
+        custom_skill_enable_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})/versions/({_SKILL_VERSION_PATTERN})/enable",
+            self.path,
+        )
+        custom_skill_disable_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})/versions/({_SKILL_VERSION_PATTERN})/disable",
+            self.path,
+        )
+        custom_skill_delete_match = re.fullmatch(
+            rf"/v1/skills/custom/({_SKILL_ID_PATTERN})/versions/({_SKILL_VERSION_PATTERN})/delete",
+            self.path,
+        )
+        async_dsl_skill_match = re.fullmatch(
+            r"/v1/tasks/skill\.dsl\.run/async", self.path
         )
         goal_compile_match = re.fullmatch(r"/v1/goals/compile", self.path)
         evaluation_match = re.fullmatch(
@@ -541,6 +592,92 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("empty body")
                 status, payload = self._runtime().resume_task_execution_sync(
                     execution_resume_match.group(1)
+                )
+                self._write_json(status, payload)
+                return
+            if custom_skill_register_match:
+                if set(body) - {"document", "confirmed"}:
+                    raise ValueError("custom skill register fields")
+                document = body.get("document")
+                confirmed = body.get("confirmed", False)
+                if not isinstance(document, dict) or not isinstance(confirmed, bool):
+                    raise ValueError("custom skill register")
+                status, payload = self._runtime().register_custom_skill_sync(
+                    document, confirmed
+                )
+                self._write_json(status, payload)
+                return
+            if custom_skill_enable_match or custom_skill_disable_match:
+                if body:
+                    raise ValueError("empty body")
+                toggle_match = custom_skill_enable_match or custom_skill_disable_match
+                status, payload = self._runtime().set_custom_skill_enabled_sync(
+                    toggle_match.group(1),
+                    toggle_match.group(2),
+                    custom_skill_enable_match is not None,
+                )
+                self._write_json(status, payload)
+                return
+            if custom_skill_delete_match:
+                if set(body) - {"confirmed"}:
+                    raise ValueError("custom skill delete fields")
+                confirmed = body.get("confirmed", False)
+                if not isinstance(confirmed, bool):
+                    raise ValueError("custom skill delete")
+                status, payload = self._runtime().delete_custom_skill_version_sync(
+                    custom_skill_delete_match.group(1),
+                    custom_skill_delete_match.group(2),
+                    confirmed,
+                )
+                self._write_json(status, payload)
+                return
+            if async_dsl_skill_match:
+                if set(body) - {
+                    "device_id",
+                    "skill_id",
+                    "skill_version",
+                    "inputs",
+                    "confirmed",
+                    "deadline_seconds",
+                }:
+                    raise ValueError("dsl skill run fields")
+                device_id = body.get("device_id")
+                skill_id = body.get("skill_id")
+                skill_version = body.get("skill_version")
+                inputs = body.get("inputs", {})
+                confirmed = body.get("confirmed", False)
+                deadline_seconds = _body_float(
+                    body, "deadline_seconds", 600.0, 1.0, 1800.0
+                )
+                if (
+                    not isinstance(device_id, str)
+                    or not isinstance(skill_id, str)
+                    or re.fullmatch(_SKILL_ID_PATTERN, skill_id) is None
+                    or (
+                        skill_version is not None
+                        and (
+                            not isinstance(skill_version, str)
+                            or re.fullmatch(_SKILL_VERSION_PATTERN, skill_version)
+                            is None
+                        )
+                    )
+                    or not isinstance(inputs, dict)
+                    or not isinstance(confirmed, bool)
+                ):
+                    raise ValueError("dsl skill run arguments")
+                idempotency_key = _idempotency_key(
+                    self.headers.get("Idempotency-Key")
+                )
+                if idempotency_key is None:
+                    raise ValueError("Idempotency-Key")
+                status, payload = self._runtime().submit_dsl_skill_task_sync(
+                    device_id,
+                    skill_id,
+                    skill_version,
+                    inputs,
+                    confirmed,
+                    idempotency_key,
+                    deadline_seconds,
                 )
                 self._write_json(status, payload)
                 return

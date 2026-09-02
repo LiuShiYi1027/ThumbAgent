@@ -20,7 +20,7 @@ import type { UnicodeInputResult } from "./unicode-input-result";
 export interface TaskRun {
   schema_version: "1.0.0";
   task_id: string;
-  task_type: "settings.scroll_navigate" | "agent.run" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup" | "input.unicode_text";
+  task_type: "settings.scroll_navigate" | "agent.run" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup" | "input.unicode_text" | "skill.dsl.run";
   device_id: string;
   device_session_id?: string;
   goal: string;
@@ -35,7 +35,7 @@ export interface TaskRun {
     step_id: string;
     sequence: number;
     kind: "skill" | "agent_round" | "diagnostic";
-    name: "settings.scroll_navigate" | "agent.round" | "agent.shortcut" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup" | "input.unicode_text";
+    name: "settings.scroll_navigate" | "agent.round" | "agent.shortcut" | "device.logs.collect" | "device.performance.snapshot" | "device.diagnostics.bundle" | "app.install" | "app.uninstall" | "app.launch" | "app.stop" | "app.data.clear" | "local.data.cleanup" | "input.unicode_text" | "skill.dsl.run";
     status: "succeeded" | "failed";
     started_at: string;
     completed_at: string;
