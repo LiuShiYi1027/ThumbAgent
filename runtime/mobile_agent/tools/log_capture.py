@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.domain.artifact import Artifact, ArtifactKind
@@ -10,7 +11,7 @@ from mobile_agent.domain.device import ConnectionState
 from mobile_agent.domain.device_log import DeviceLogLevel
 from mobile_agent.domain.errors import ErrorCategory, MobileAgentError
 from mobile_agent.evidence.artifacts import ArtifactStore
-from mobile_agent.evidence.log_redaction import redact_device_log
+from mobile_agent.evidence.log_redaction import redact_device_log, scan_crash_signatures
 from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.tools.runtime import ToolRegistry
 
@@ -26,6 +27,7 @@ class CapturedDeviceLog:
     captured_bytes: int
     truncated: bool
     redaction_count: int
+    crash_check: dict[str, Any]
 
 
 class DeviceLogCaptureTool:
@@ -97,6 +99,7 @@ class DeviceLogCaptureTool:
                 message="设备没有返回可保存的日志",
                 retryable=True,
             )
+        crash_check = scan_crash_signatures(redacted.decode("utf-8", errors="replace"))
         artifact = self._artifacts.write(
             ArtifactKind.DEVICE_LOG,
             "text/plain",
@@ -108,6 +111,7 @@ class DeviceLogCaptureTool:
             captured_bytes=artifact.size_bytes,
             truncated=truncated,
             redaction_count=redaction_count,
+            crash_check=crash_check,
         )
 
     @staticmethod

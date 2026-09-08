@@ -22,6 +22,13 @@ export interface DeviceLogCaptureResult {
   redaction_count: number;
   evidence_refs: string[];
   artifact: Artifact;
+  crash_check?: {
+    checked_lines: number;
+    signatures: Array<{
+      kind: "crash" | "anr";
+      summary: string;
+    }>;
+  };
   started_at: string;
   completed_at: string;
 }

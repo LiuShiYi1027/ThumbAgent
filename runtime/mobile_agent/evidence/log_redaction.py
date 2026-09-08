@@ -3,6 +3,17 @@
 from __future__ import annotations
 
 import re
+from typing import Any
+
+# 崩溃/ANR 判定只认保守的 AOSP 标准签名子集；未命中不等于无崩溃。
+CRASH_SIGNATURE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("crash", "FATAL EXCEPTION"),
+    ("anr", "ANR in "),
+)
+
+# 与 device-log-capture-result.schema.json 的 crash_check 上限保持一致。
+MAX_CRASH_SIGNATURES = 20
+MAX_CRASH_SUMMARY_LENGTH = 120
 
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -39,3 +50,23 @@ def redact_device_log(data: bytes) -> tuple[bytes, int]:
         text, count = pattern.subn(replacement, text)
         replacements += count
     return text.encode("utf-8"), replacements
+
+
+def scan_crash_signatures(text: str) -> dict[str, Any]:
+    """Scan redacted log text for the fixed AOSP crash/ANR signature markers.
+
+    只能传入脱敏后的文本：summary 直接取自命中行，绝不携带原始日志。
+    """
+
+    lines = text.splitlines()
+    signatures: list[dict[str, str]] = []
+    for line in lines:
+        for kind, marker in CRASH_SIGNATURE_MARKERS:
+            if marker in line:
+                signatures.append(
+                    {"kind": kind, "summary": line.strip()[:MAX_CRASH_SUMMARY_LENGTH]}
+                )
+                break
+        if len(signatures) >= MAX_CRASH_SIGNATURES:
+            break
+    return {"checked_lines": len(lines), "signatures": signatures}

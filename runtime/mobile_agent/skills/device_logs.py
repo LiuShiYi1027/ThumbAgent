@@ -49,4 +49,5 @@ class DeviceLogsCollectSkill:
             artifact=captured.artifact,
             started_at=started_at,
             completed_at=_now(),
+            crash_check=captured.crash_check,
         )

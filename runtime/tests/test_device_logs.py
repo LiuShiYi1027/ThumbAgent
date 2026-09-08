@@ -149,6 +149,50 @@ class DeviceLogSkillTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
 
+    async def test_crash_check_reports_signatures_from_redacted_lines(self) -> None:
+        adapter = CrashLogAdapter()
+        runtime = RuntimeService(adapter, self.artifacts)
+
+        result = await runtime.collect_device_logs(
+            "fake:android-001", 100, "info", confirmed=True
+        )
+
+        crash_check = result["crash_check"]
+        self.assertEqual(3, crash_check["checked_lines"])
+        self.assertEqual(
+            ["crash", "anr"],
+            [signature["kind"] for signature in crash_check["signatures"]],
+        )
+        summaries = [s["summary"] for s in crash_check["signatures"]]
+        self.assertIn("FATAL EXCEPTION", summaries[0])
+        self.assertIn("[REDACTED_EMAIL]", summaries[0])
+        self.assertIn("ANR in com.example.app", summaries[1])
+        self.assertNotIn("user@example.com", str(result))
+        content = self.artifacts.resolve(result["artifact"]["relative_path"]).read_text()
+        self.assertNotIn("user@example.com", content)
+
+    async def test_crash_check_present_with_empty_signatures_without_match(self) -> None:
+        adapter = FakeDeviceAdapter()
+        runtime = RuntimeService(adapter, self.artifacts)
+
+        result = await runtime.collect_device_logs(
+            "fake:android-001", 100, "info", confirmed=True
+        )
+
+        self.assertEqual([], result["crash_check"]["signatures"])
+        self.assertEqual(2, result["crash_check"]["checked_lines"])
+
+    async def test_crash_check_caps_signatures_at_schema_bound(self) -> None:
+        adapter = ManyCrashLogAdapter()
+        runtime = RuntimeService(adapter, self.artifacts)
+
+        result = await runtime.collect_device_logs(
+            "fake:android-001", 100, "info", confirmed=True
+        )
+
+        self.assertEqual(20, len(result["crash_check"]["signatures"]))
+        self.assertEqual(25, result["crash_check"]["checked_lines"])
+
     async def test_output_is_truncated_to_artifact_limit(self) -> None:
         adapter = LargeLogAdapter()
         runtime = RuntimeService(adapter, self.artifacts)
@@ -219,6 +263,26 @@ class BlockingLogAdapter(FakeDeviceAdapter):
         self.started.set()
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
+
+
+class CrashLogAdapter(FakeDeviceAdapter):
+    async def collect_logs(
+        self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
+    ) -> bytes:
+        return (
+            b"07-15 10:00:00.000  100  100 I MobileAgent: ready\n"
+            b"07-15 10:00:01.000  100  100 E AndroidRuntime: FATAL EXCEPTION: main"
+            b" (contact user@example.com)\n"
+            b"07-15 10:00:02.000  100  100 E ActivityManager: ANR in com.example.app\n"
+        )
+
+
+class ManyCrashLogAdapter(FakeDeviceAdapter):
+    async def collect_logs(
+        self, device_id: str, max_lines: int, minimum_level: DeviceLogLevel
+    ) -> bytes:
+        line = b"07-15 10:00:00.000  100  100 E AndroidRuntime: FATAL EXCEPTION: main"
+        return b"\n".join([line] * 25) + b"\n"
 
 
 class LargeLogAdapter(FakeDeviceAdapter):

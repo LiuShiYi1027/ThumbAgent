@@ -46,6 +46,27 @@
       "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" }
     },
     "artifact": { "$ref": "artifact.schema.json" },
+    "crash_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checked_lines", "signatures"],
+      "properties": {
+        "checked_lines": { "type": "integer", "minimum": 0 },
+        "signatures": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "summary"],
+            "properties": {
+              "kind": { "enum": ["crash", "anr"] },
+              "summary": { "type": "string", "maxLength": 120 }
+            }
+          }
+        }
+      }
+    },
     "started_at": { "type": "string", "format": "date-time" },
     "completed_at": { "type": "string", "format": "date-time" }
   }

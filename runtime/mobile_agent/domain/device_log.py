@@ -34,12 +34,13 @@ class DeviceLogCaptureResult:
     artifact: Artifact
     started_at: str
     completed_at: str
+    crash_check: dict[str, Any] | None = None
     schema_version: str = "1.0.0"
     skill_id: str = "device.logs.collect"
     skill_version: str = "1.0.0"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "schema_version": self.schema_version,
             "skill_call_id": self.skill_call_id,
             "skill_id": self.skill_id,
@@ -59,3 +60,6 @@ class DeviceLogCaptureResult:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
         }
+        if self.crash_check is not None:
+            payload["crash_check"] = self.crash_check
+        return payload
