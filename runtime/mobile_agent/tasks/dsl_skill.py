@@ -4,6 +4,11 @@ Binds one registered SkillDslDocument to the shared asynchronous lifecycle:
 the interpreter executes step by step while the executor's control probe is
 consulted at every step boundary (cancel/pause/deadline), and each settled
 DslStepRecord is mirrored to a TaskStep so progress events stream in real time.
+
+ITER-0063 (ADR-0021 Amendment 1): documents may reference whitelisted built-in
+observation skills (skill steps). build_dsl_skill_invoker assembles the
+execution closures for exactly those two ids; the task runner forwards the
+invoker to the interpreter.
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from mobile_agent.domain.errors import ErrorCategory, ErrorOutcome, MobileAgentError
 from mobile_agent.domain.skill_dsl import SkillDslDocument
@@ -19,9 +24,15 @@ from mobile_agent.domain.task import TaskRun, TaskStatus, TaskStep
 from mobile_agent.skills.dsl_interpreter import (
     DslSkillResult,
     DslStepRecord,
+    SkillInvoker,
     run_dsl_skill,
 )
+from mobile_agent.skills.dsl_risk import skill_reference_not_allowed
+from mobile_agent.tools.log_capture import DeviceLogCaptureTool
 from mobile_agent.tools.runtime import ToolRuntime
+
+if TYPE_CHECKING:
+    from mobile_agent.runtime import RuntimeService
 
 
 def _now() -> str:
@@ -46,13 +57,70 @@ def _deadline_error() -> dict[str, Any]:
     ).to_dict()
 
 
+def _skill_input_invalid(skill_id: str, message: str) -> MobileAgentError:
+    return MobileAgentError(
+        code="SKILL_INPUT_INVALID",
+        category=ErrorCategory.VALIDATION,
+        message=message,
+        outcome=ErrorOutcome.REJECTED,
+        details={"skill_id": skill_id},
+    )
+
+
+def build_dsl_skill_invoker(runtime: RuntimeService) -> SkillInvoker:
+    """装配白名单内置观察 Skill 的执行闭包（ADR-0021 修订一）。
+
+    只映射 DSL_SKILL_REFERENCE_WHITELIST 中的两个 id；arguments 在触碰
+    设备前严格校验（不合法即 SKILL_INPUT_INVALID/INVALID_ARGUMENT，零
+    设备动作）。闭包复用 RuntimeService 的 *_under_task_lease 薄封装：
+    DSL 任务的 run_factory 已持有不可重入的设备租约与 Session 绑定，
+    嵌套的内置 Skill 必须复用该上下文而不是再次申请租约。
+    """
+
+    async def invoke(
+        skill_id: str, device_id: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        if skill_id == "device.performance.snapshot":
+            if arguments:
+                raise _skill_input_invalid(
+                    skill_id, "device.performance.snapshot 不接受 arguments"
+                )
+            return await runtime.capture_device_performance_under_task_lease(
+                device_id
+            )
+        if skill_id == "device.logs.collect":
+            unknown = sorted(set(arguments) - {"max_lines", "minimum_level"})
+            if unknown:
+                raise _skill_input_invalid(
+                    skill_id,
+                    f"device.logs.collect 只接受 max_lines/minimum_level，收到 {unknown}",
+                )
+            max_lines = arguments.get("max_lines", 500)
+            minimum_level = arguments.get("minimum_level", "info")
+            # 边界校验与直连入口一致（不合法抛 INVALID_ARGUMENT）。
+            DeviceLogCaptureTool.validate_request(max_lines, minimum_level)
+            return await runtime.collect_device_logs_under_task_lease(
+                device_id,
+                max_lines=max_lines,
+                minimum_level=minimum_level,
+                confirmed=True,
+            )
+        # preflight 已强制白名单；此行是防御性兜底。
+        raise skill_reference_not_allowed(skill_id)
+
+    return invoke
+
+
 class DslSkillTaskRunner:
     """Run one custom DSL skill document under the async task lifecycle."""
 
     task_type = "skill.dsl.run"
 
-    def __init__(self, tools: ToolRuntime) -> None:
+    def __init__(
+        self, tools: ToolRuntime, skill_invoker: SkillInvoker | None = None
+    ) -> None:
         self._tools = tools
+        self._skill_invoker = skill_invoker
 
     async def run(
         self,
@@ -127,6 +195,7 @@ class DslSkillTaskRunner:
             tools=self._tools,
             step_boundary=boundary,
             on_step=emit,
+            skill_invoker=self._skill_invoker,
         )
 
         completed_at = _now()
@@ -208,6 +277,7 @@ class DslSkillTaskRunner:
             {
                 "step_id": record.step_id,
                 "tool_id": record.tool_id,
+                "skill_id": record.skill_id,
                 "status": record.status,
                 "error_code": record.error_code,
             }

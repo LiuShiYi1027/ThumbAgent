@@ -248,10 +248,13 @@ class BuiltinDslLoadingTests(unittest.TestCase):
         self.assertTrue(record.enabled)
         self.assertEqual("medium", record.derived_risk.value)
 
-        # 用户禁用后，重启（重新加载）不得覆盖启停状态
+        # 用户禁用后，重启（重新加载）不得覆盖启停状态。
+        # 钉到显式版本：latest 解析随 1.1.0 共存文档而变化（ITER-0063）。
         self.registry.set_enabled("app.stability_test", "1.0.0", False)
         self.assertEqual(0, load_builtin_dsl_documents(self.registry))
-        self.assertFalse(self.registry.get("app.stability_test").enabled)
+        self.assertFalse(
+            self.registry.get("app.stability_test", "1.0.0").enabled
+        )
 
         # 审计只记录首次注册
         registered = [e for e in self.audit_events if e[0] == "skill.registered"]

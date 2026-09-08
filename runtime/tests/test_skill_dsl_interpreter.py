@@ -8,15 +8,22 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.action import RiskLevel
+from mobile_agent.domain.errors import ErrorCategory, ErrorOutcome, MobileAgentError
 from mobile_agent.domain.skill_dsl import SkillDslDocument, parse_skill_dsl_document
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.policy.engine import PolicyEngine
-from mobile_agent.skills.dsl_interpreter import run_dsl_skill
+from mobile_agent.skills.dsl_interpreter import (
+    DslStepRecord,
+    SkillInvoker,
+    run_dsl_skill,
+)
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 
 DEVICE_ID = "fake:android-001"
@@ -31,6 +38,42 @@ def _tool_step(
         "tool_id": tool_id,
         "arguments": arguments or {},
     }
+
+
+def _skill_step(
+    step_id: str, skill_id: str, arguments: dict | None = None
+) -> dict:
+    return {
+        "type": "skill",
+        "step_id": step_id,
+        "skill_id": skill_id,
+        "arguments": arguments or {},
+    }
+
+
+class _RecordingInvoker:
+    """记录调用的 SkillInvoker 假实现；可配置每次调用抛出同一个错误。"""
+
+    def __init__(self, error: MobileAgentError | None = None) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+        self.error = error
+
+    async def __call__(
+        self, skill_id: str, device_id: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        self.calls.append((skill_id, device_id, dict(arguments)))
+        if self.error is not None:
+            raise self.error
+        return {"status": "ok"}
+
+
+def _invoker_error(code: str = "DEVICE_LOST") -> MobileAgentError:
+    return MobileAgentError(
+        code=code,
+        category=ErrorCategory.DEVICE,
+        message="设备连接丢失",
+        outcome=ErrorOutcome.KNOWN_FAILURE,
+    )
 
 
 def _document(steps: list[dict], inputs: list[dict] | None = None) -> SkillDslDocument:
@@ -322,6 +365,230 @@ class DslInterpreterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("failed", result.step_records[0].status)
         # 后续步骤未执行；越界 tap 也未派发：零设备动作。
         self.assertEqual([], self.adapter.actions)
+
+
+class DslInterpreterSkillStepTests(unittest.IsolatedAsyncioTestCase):
+    """Skill 引用步骤（ADR-0021 修订一）的解释器语义。"""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.adapter = FakeDeviceAdapter()
+        self.runtime = ToolRuntime(
+            self.adapter,
+            ArtifactStore(Path(self.directory.name)),
+            ToolRegistry(),
+            PolicyEngine(),
+        )
+        self.on_step_records: list[DslStepRecord] = []
+
+    async def _run(
+        self,
+        document: SkillDslDocument,
+        inputs: dict | None = None,
+        confirmed: bool = True,
+        skill_invoker: SkillInvoker | None = None,
+        on_step: Callable[[DslStepRecord], None] | None = None,
+    ):
+        return await run_dsl_skill(
+            document,
+            device_id=DEVICE_ID,
+            inputs=inputs or {},
+            confirmed=confirmed,
+            tools=self.runtime,
+            skill_invoker=skill_invoker,
+            on_step=on_step,
+        )
+
+    # ---- 负向 ----
+
+    async def test_skill_step_without_invoker_fails_preflight_zero_device_actions(
+        self,
+    ) -> None:
+        document = _document(
+            [_skill_step("snap", "device.performance.snapshot")]
+        )
+        result = await self._run(document, skill_invoker=None)
+
+        self.assertEqual("failed", result.status)
+        self.assertEqual((), result.step_records)
+        self.assertIsNotNone(result.error)
+        self.assertEqual("SKILL_DSL_INVALID", result.error.code)
+        self.assertEqual([], self.adapter.actions)
+
+    async def test_non_whitelisted_skill_rejected_end_to_end(self) -> None:
+        invoker = _RecordingInvoker()
+        document = _document(
+            [_skill_step("record_screen", "device.screen.record")]
+        )
+        result = await self._run(document, skill_invoker=invoker)
+
+        self.assertEqual("failed", result.status)
+        self.assertEqual((), result.step_records)
+        self.assertIsNotNone(result.error)
+        self.assertEqual("SKILL_REFERENCE_NOT_ALLOWED", result.error.code)
+        # 白名单拒绝发生在任何派发之前：invoker 与设备都未被触碰。
+        self.assertEqual([], invoker.calls)
+        self.assertEqual([], self.adapter.actions)
+
+    async def test_skill_invoker_error_at_top_level_aborts_run(self) -> None:
+        invoker = _RecordingInvoker(error=_invoker_error())
+        document = _document(
+            [
+                _skill_step("snap", "device.performance.snapshot"),
+                _tool_step("home", "navigation.home"),
+            ]
+        )
+        result = await self._run(document, skill_invoker=invoker)
+
+        self.assertEqual("failed", result.status)
+        self.assertIsNotNone(result.error)
+        self.assertEqual("DEVICE_LOST", result.error.code)
+        self.assertEqual(1, len(result.step_records))
+        record = result.step_records[0]
+        self.assertEqual("snap", record.step_id)
+        self.assertIsNone(record.tool_id)
+        self.assertEqual("device.performance.snapshot", record.skill_id)
+        self.assertEqual("failed", record.status)
+        self.assertEqual("DEVICE_LOST", record.error_code)
+        # 顶层失败中止：后续 tool 步骤未执行。
+        self.assertEqual([], self.adapter.actions)
+
+    async def test_skill_invoker_error_inside_loop_body_is_recorded_and_continues(
+        self,
+    ) -> None:
+        invoker = _RecordingInvoker(error=_invoker_error())
+        document = _document(
+            [
+                {
+                    "type": "loop",
+                    "step_id": "repeat",
+                    "max_duration_seconds": 600,
+                    "max_iterations": 2,
+                    "steps": [_skill_step("snap", "device.performance.snapshot")],
+                }
+            ]
+        )
+        result = await self._run(document, skill_invoker=invoker)
+
+        # 与 tool 步骤一致：循环体失败被容忍，跑满迭代上限后整体成功。
+        self.assertEqual("succeeded", result.status)
+        self.assertEqual(2, len(invoker.calls))
+        body_records = [r for r in result.step_records if r.step_id == "snap"]
+        self.assertEqual(2, len(body_records))
+        for record in body_records:
+            self.assertIsNone(record.tool_id)
+            self.assertEqual("device.performance.snapshot", record.skill_id)
+            self.assertEqual("failed", record.status)
+            self.assertEqual("DEVICE_LOST", record.error_code)
+        loop_record = result.step_records[-1]
+        self.assertEqual("repeat", loop_record.step_id)
+        self.assertIsNone(loop_record.tool_id)
+        self.assertIsNone(loop_record.skill_id)
+        self.assertEqual("succeeded", loop_record.status)
+
+    async def test_skill_step_with_undeclared_input_reference_rejected(self) -> None:
+        invoker = _RecordingInvoker()
+        document = _document(
+            [
+                _skill_step(
+                    "collect",
+                    "device.logs.collect",
+                    {"max_lines": "$inputs.missing"},
+                )
+            ]
+        )
+        result = await self._run(document, skill_invoker=invoker)
+
+        self.assertEqual("failed", result.status)
+        self.assertIsNotNone(result.error)
+        self.assertEqual("SKILL_INPUT_INVALID", result.error.code)
+        self.assertEqual([], invoker.calls)
+        self.assertEqual([], self.adapter.actions)
+
+    # ---- 正向 ----
+
+    async def test_skill_step_executes_with_resolved_arguments_and_on_step(self) -> None:
+        invoker = _RecordingInvoker()
+        document = _document(
+            [
+                _skill_step(
+                    "collect",
+                    "device.logs.collect",
+                    {
+                        "max_lines": "$inputs.max_lines",
+                        "minimum_level": "warning",
+                    },
+                )
+            ],
+            inputs=[{"name": "max_lines", "type": "integer", "required": True}],
+        )
+        result = await self._run(
+            document,
+            inputs={"max_lines": 100},
+            skill_invoker=invoker,
+            on_step=self.on_step_records.append,
+        )
+
+        self.assertEqual("succeeded", result.status)
+        self.assertIsNone(result.error)
+        self.assertEqual(RiskLevel.MEDIUM, result.derived_risk)
+        # $inputs 引用已解析后传给 invoker。
+        self.assertEqual(
+            [
+                (
+                    "device.logs.collect",
+                    DEVICE_ID,
+                    {"max_lines": 100, "minimum_level": "warning"},
+                )
+            ],
+            invoker.calls,
+        )
+        self.assertEqual(1, len(result.step_records))
+        record = result.step_records[0]
+        self.assertEqual("collect", record.step_id)
+        self.assertIsNone(record.tool_id)
+        self.assertEqual("device.logs.collect", record.skill_id)
+        self.assertEqual("succeeded", record.status)
+        # on_step 对 skill 步骤同样触发，且与结果中的记录一致。
+        self.assertEqual(list(result.step_records), self.on_step_records)
+
+    async def test_skill_step_inside_loop_body_executes_each_iteration(self) -> None:
+        invoker = _RecordingInvoker()
+        document = _document(
+            [
+                {
+                    "type": "loop",
+                    "step_id": "repeat",
+                    "max_duration_seconds": 600,
+                    "max_iterations": 3,
+                    "steps": [_skill_step("snap", "device.performance.snapshot")],
+                }
+            ]
+        )
+        result = await self._run(
+            document,
+            skill_invoker=invoker,
+            on_step=self.on_step_records.append,
+        )
+
+        self.assertEqual("succeeded", result.status)
+        self.assertEqual(
+            [("device.performance.snapshot", DEVICE_ID, {})] * 3, invoker.calls
+        )
+        body_records = [r for r in result.step_records if r.step_id == "snap"]
+        self.assertEqual(3, len(body_records))
+        self.assertTrue(
+            all(
+                r.status == "succeeded"
+                and r.tool_id is None
+                and r.skill_id == "device.performance.snapshot"
+                for r in body_records
+            )
+        )
+        # 3 条体内记录 + 1 条循环容器记录，on_step 全覆盖。
+        self.assertEqual(4, len(self.on_step_records))
+        self.assertEqual(list(result.step_records), self.on_step_records)
 
 
 if __name__ == "__main__":

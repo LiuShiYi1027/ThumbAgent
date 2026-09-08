@@ -113,7 +113,7 @@ from mobile_agent.tasks.local_data import LocalDataCleanupTaskRunner
 from mobile_agent.tasks.apk_install import ApkInstallTaskRunner
 from mobile_agent.tasks.app_removal import AppRemovalTaskRunner
 from mobile_agent.tasks.app_lifecycle import AppLifecycleTaskRunner
-from mobile_agent.tasks.dsl_skill import DslSkillTaskRunner
+from mobile_agent.tasks.dsl_skill import DslSkillTaskRunner, build_dsl_skill_invoker
 from mobile_agent.tasks.store import InMemoryTaskStore, TaskStore
 from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 from mobile_agent.tools.log_capture import DeviceLogCaptureTool
@@ -273,7 +273,9 @@ class RuntimeService:
         self._skill_audit_store = skill_audit_store
         self._custom_skills_registry: CustomSkillRegistry | None = None
         self._custom_skills_lock = threading.Lock()
-        self._dsl_skill_task_runner = DslSkillTaskRunner(self._tools)
+        self._dsl_skill_task_runner = DslSkillTaskRunner(
+            self._tools, skill_invoker=build_dsl_skill_invoker(self)
+        )
         self._settings_scroll_navigate = SettingsScrollNavigateSkill(self._tools, self._open_app)
         self._app_navigate = AppNavigateSkill(self._tools)
         self._notifications_tool = DeviceNotificationsCaptureTool(
@@ -1436,6 +1438,33 @@ class RuntimeService:
             session_id,
         ), self._adapter.bind_session(device_id, session_id):
             return (await self._device_performance.invoke(device_id)).to_dict()
+
+    async def collect_device_logs_under_task_lease(
+        self,
+        device_id: str,
+        max_lines: int = 500,
+        minimum_level: str = "info",
+        confirmed: bool = True,
+    ) -> dict[str, Any]:
+        """Bounded log snapshot without a new lease or session binding.
+
+        DSL skill 引用步骤专用（ITER-0063，ADR-0021 修订一）：调用方
+        （skill.dsl.run 任务的 run_factory）已持有不可重入的设备租约与
+        Session 绑定，嵌套采集必须复用该上下文，否则触发 DEVICE_LOCKED。
+        """
+
+        return (
+            await self._device_logs.invoke(
+                device_id, max_lines, minimum_level, confirmed
+            )
+        ).to_dict()
+
+    async def capture_device_performance_under_task_lease(
+        self, device_id: str
+    ) -> dict[str, Any]:
+        """Aggregate performance snapshot without a new lease (same rationale)."""
+
+        return (await self._device_performance.invoke(device_id)).to_dict()
 
     async def navigate_settings(
         self,

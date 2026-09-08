@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0.0",
+  "skill_id": "app.stability_test",
+  "skill_version": "1.1.0",
+  "name": "应用稳定性遍历压测（显式采样版）",
+  "description": "启动目标应用后在时间盒内确定性遍历（上滑/下滑/返回），每次迭代末尾经白名单 skill 引用显式采集一次 device.performance.snapshot（采样节奏=每迭代一次，上限 200 个采样点）；循环结束后采集 device.logs.collect（max_lines=500）作为崩溃/ANR 判定证据，最后重新拉起目标应用收尾。与 0062 的 1.0.0 差异：1.0.0 观察仅靠 ToolRuntime 隐式 Observation（device.performance.capture 为 direct_invocation=false 不可经 DSL 调用）；1.1.0 经 ADR-0021 修订一白名单 skill 引用获得显式性能采样与收尾日志。duration_seconds/max_actions 为调用方声明的遍历预算；loop 固定 600 秒/200 次双上限为绝对天花板，实际时间盒由任务 deadline_seconds 控制。",
+  "timeout_seconds": 900,
+  "inputs": [
+    {
+      "name": "app_id",
+      "type": "string",
+      "required": true,
+      "max_length": 128,
+      "description": "目标应用包名，如 com.example.app"
+    },
+    {
+      "name": "duration_seconds",
+      "type": "integer",
+      "required": false,
+      "minimum": 1,
+      "maximum": 600,
+      "description": "请求的遍历时长预算（秒）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 600 秒，实际时间盒由任务 deadline_seconds 控制"
+    },
+    {
+      "name": "max_actions",
+      "type": "integer",
+      "required": false,
+      "minimum": 1,
+      "maximum": 200,
+      "description": "请求的遍历迭代预算（次）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 200 次"
+    }
+  ],
+  "steps": [
+    {
+      "type": "tool",
+      "step_id": "launch_target_app",
+      "tool_id": "app.launch",
+      "arguments": { "app_id": "$inputs.app_id" }
+    },
+    {
+      "type": "loop",
+      "step_id": "stress_traverse",
+      "max_duration_seconds": 600,
+      "max_iterations": 200,
+      "steps": [
+        {
+          "type": "tool",
+          "step_id": "swipe_up",
+          "tool_id": "input.swipe",
+          "arguments": { "direction": "up" }
+        },
+        {
+          "type": "tool",
+          "step_id": "swipe_down",
+          "tool_id": "input.swipe",
+          "arguments": { "direction": "down" }
+        },
+        {
+          "type": "tool",
+          "step_id": "navigate_back",
+          "tool_id": "navigation.back",
+          "arguments": {}
+        },
+        {
+          "type": "skill",
+          "step_id": "sample_performance",
+          "skill_id": "device.performance.snapshot",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "step_id": "collect_logs",
+      "skill_id": "device.logs.collect",
+      "arguments": { "max_lines": 500, "minimum_level": "info" }
+    },
+    {
+      "type": "tool",
+      "step_id": "relaunch_target_app",
+      "tool_id": "app.launch",
+      "arguments": { "app_id": "$inputs.app_id" }
+    }
+  ]
+}

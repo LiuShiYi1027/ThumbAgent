@@ -19,6 +19,12 @@ semantics are locked by the iteration contract:
 - If-steps pick then/else by comparing the referenced step's latest status
   against condition_equals; a failing branch step propagates like a failure
   at the if-step's own level.
+- Skill steps (ADR-0021 Amendment 1) reference whitelisted built-in skills and
+  are dispatched through the caller-provided skill_invoker. A document that
+  contains skill steps but no invoker fails preflight with SKILL_DSL_INVALID
+  before any device action. At runtime a skill step behaves exactly like a
+  tool step at its level: invoker MobileAgentError → failed step record,
+  top-level abort, loop-body tolerance.
 
 run_dsl_skill never raises MobileAgentError for expected failures: they are
 returned as DslSkillResult(status="failed", error=...). On a preflight
@@ -41,25 +47,35 @@ from mobile_agent.domain.skill_dsl import (
     LoopStep,
     SkillDslDocument,
     SkillDslInput,
+    SkillStep,
     Step,
     ToolStep,
 )
-from mobile_agent.skills.dsl_risk import derive_skill_risk
+from mobile_agent.skills.dsl_risk import derive_skill_risk, iter_skill_ids
 from mobile_agent.tools.runtime import ToolRuntime
 
 _INPUT_REF_RE = re.compile(r"^\$inputs\.([a-z][a-z0-9_]*)$")
 
 StepStatus = Literal["succeeded", "failed"]
 
+# (skill_id, device_id, resolved_arguments) -> 结果 dict。由调用方装配白名单
+# 内内置 Skill 的真实执行；解释器只负责解析参数、派发与记录。
+SkillInvoker = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
 
 @dataclass(frozen=True, slots=True)
 class DslStepRecord:
-    """One executed step's outcome. tool_id is None for loop/if containers."""
+    """One executed step's outcome.
+
+    tool_id 为 None 表示 loop/if 容器或 skill 引用步骤；skill 步骤时
+    tool_id=None 且 skill_id 有值，容器记录两者均为 None。
+    """
 
     step_id: str
     tool_id: str | None
     status: StepStatus
     error_code: str | None = None
+    skill_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,12 +147,12 @@ def _check_input_value(declaration: SkillDslInput, value: Any) -> None:
         )
 
 
-def _iter_tool_steps(document: SkillDslDocument) -> tuple[ToolStep, ...]:
-    collected: list[ToolStep] = []
+def _iter_action_steps(document: SkillDslDocument) -> tuple[ToolStep | SkillStep, ...]:
+    collected: list[ToolStep | SkillStep] = []
 
-    def _walk(steps: tuple[Step, ...] | tuple[ToolStep, ...]) -> None:
+    def _walk(steps: tuple[Step, ...] | tuple[ToolStep | SkillStep, ...]) -> None:
         for step in steps:
-            if isinstance(step, ToolStep):
+            if isinstance(step, ToolStep | SkillStep):
                 collected.append(step)
             elif isinstance(step, LoopStep):
                 _walk(step.steps)
@@ -152,7 +168,7 @@ def _validate_input_references(document: SkillDslDocument) -> None:
     """Every $inputs.<name> reference must name a declared input."""
 
     declared = document.input_names()
-    for step in _iter_tool_steps(document):
+    for step in _iter_action_steps(document):
         for key, value in step.arguments.items():
             if not isinstance(value, str):
                 continue
@@ -210,6 +226,7 @@ async def run_dsl_skill(
     tools: ToolRuntime,
     step_boundary: Callable[[], bool] | None = None,
     on_step: Callable[[DslStepRecord], None] | None = None,
+    skill_invoker: SkillInvoker | None = None,
 ) -> DslSkillResult:
     """Preflight then execute the document; expected failures return a result.
 
@@ -217,16 +234,27 @@ async def run_dsl_skill(
     调用；返回 True 即中止：不再触发任何设备动作，结果 status=failed 且
     error.code=TASK_CANCELLED，由异步任务层映射为 cancelled/timed_out。
     on_step（可选）在每条 DslStepRecord 落定时回调，用于实时进度事件。
-    两者默认 None 时行为与原契约完全一致。
+    skill_invoker（可选）是 skill 引用步骤的执行入口；文档含 skill 步骤而
+    未提供 invoker 时 preflight 以 SKILL_DSL_INVALID 失败（零设备动作）。
+    三者默认 None 时行为与原契约完全一致。
     """
 
     derived_risk = RiskLevel.LOW
     try:
         bound_inputs = _bind_inputs(document, inputs)
         _validate_input_references(document)
-        # 顺带完成全部 tool_id 的注册检查：未注册工具在此抛出 TOOL_NOT_FOUND。
+        # 顺带完成全部 tool_id 的注册检查与 skill_id 白名单检查：未注册工具在
+        # 此抛出 TOOL_NOT_FOUND，非白名单 Skill 抛出 SKILL_REFERENCE_NOT_ALLOWED。
         derived_risk = derive_skill_risk(document)
         _enforce_policy_gate(derived_risk, confirmed)
+        if skill_invoker is None and iter_skill_ids(document):
+            raise MobileAgentError(
+                code="SKILL_DSL_INVALID",
+                category=ErrorCategory.VALIDATION,
+                message="文档包含 skill 引用步骤，但未提供 skill_invoker",
+                outcome=ErrorOutcome.REJECTED,
+                details={"field": "skill_invoker"},
+            )
     except MobileAgentError as error:
         return DslSkillResult(
             status="failed",
@@ -246,17 +274,35 @@ async def run_dsl_skill(
     def aborted() -> bool:
         return step_boundary is not None and step_boundary()
 
-    async def run_tool_step(step: ToolStep) -> tuple[DslStepRecord, MobileAgentError | None]:
+    async def run_action_step(
+        step: ToolStep | SkillStep,
+    ) -> tuple[DslStepRecord, MobileAgentError | None]:
         arguments = _resolve_arguments(step.arguments, bound_inputs)
+        if isinstance(step, ToolStep):
+            try:
+                # preflight 已过派生风险策略门；confirmed=True 是文档级授权传递。
+                await tools.execute(step.tool_id, device_id, arguments, confirmed=True)
+            except MobileAgentError as error:
+                return (
+                    DslStepRecord(step.step_id, step.tool_id, "failed", error.code),
+                    error,
+                )
+            return DslStepRecord(step.step_id, step.tool_id, "succeeded"), None
+        # Skill 引用步骤：preflight 已保证 invoker 存在且 skill_id 在白名单内。
+        assert skill_invoker is not None
         try:
-            # preflight 已过派生风险策略门；confirmed=True 是文档级授权传递。
-            await tools.execute(step.tool_id, device_id, arguments, confirmed=True)
+            await skill_invoker(step.skill_id, device_id, arguments)
         except MobileAgentError as error:
             return (
-                DslStepRecord(step.step_id, step.tool_id, "failed", error.code),
+                DslStepRecord(
+                    step.step_id, None, "failed", error.code, skill_id=step.skill_id
+                ),
                 error,
             )
-        return DslStepRecord(step.step_id, step.tool_id, "succeeded"), None
+        return (
+            DslStepRecord(step.step_id, None, "succeeded", skill_id=step.skill_id),
+            None,
+        )
 
     def failed_result(error: MobileAgentError) -> DslSkillResult:
         return DslSkillResult(
@@ -269,14 +315,14 @@ async def run_dsl_skill(
     for step in document.steps:
         if aborted():
             return failed_result(_boundary_aborted_error())
-        if isinstance(step, ToolStep):
-            record, error = await run_tool_step(step)
+        if isinstance(step, ToolStep | SkillStep):
+            record, error = await run_action_step(step)
             emit(record)
             top_level_status[step.step_id] = record.status
             if error is not None:
                 return failed_result(error)
         elif isinstance(step, LoopStep):
-            if await _run_loop(step, run_tool_step, emit, aborted):
+            if await _run_loop(step, run_action_step, emit, aborted):
                 return failed_result(_boundary_aborted_error())
             # 循环体失败按契约被容忍；循环到达任一上限即视为成功完成。
             emit(DslStepRecord(step.step_id, None, "succeeded"))
@@ -291,7 +337,7 @@ async def run_dsl_skill(
             for branch_step in branch:
                 if aborted():
                     return failed_result(_boundary_aborted_error())
-                record, error = await run_tool_step(branch_step)
+                record, error = await run_action_step(branch_step)
                 emit(record)
                 if error is not None:
                     branch_error = error
@@ -330,14 +376,14 @@ def _boundary_aborted_error() -> MobileAgentError:
     )
 
 
-ToolStepRunner = Callable[
-    [ToolStep], Awaitable[tuple[DslStepRecord, MobileAgentError | None]]
+ActionStepRunner = Callable[
+    [ToolStep | SkillStep], Awaitable[tuple[DslStepRecord, MobileAgentError | None]]
 ]
 
 
 async def _run_loop(
     step: LoopStep,
-    run_tool_step: ToolStepRunner,
+    run_action_step: ActionStepRunner,
     emit: Callable[[DslStepRecord], None],
     aborted: Callable[[], bool],
 ) -> bool:
@@ -352,6 +398,6 @@ async def _run_loop(
         for body_step in step.steps:
             if aborted():
                 return True
-            record, _ = await run_tool_step(body_step)
+            record, _ = await run_action_step(body_step)
             emit(record)
     return False
