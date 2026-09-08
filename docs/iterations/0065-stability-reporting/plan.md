@@ -1,8 +1,9 @@
 # ITER-0065 Stability Reporting（稳定性报告呈现与崩溃判定）
 
-> 文档状态：Draft
-> 迭代状态：Planned
+> 文档状态：Final
+> 迭代状态：Completed
 > 创建日期：2026-09-08
+> 完成日期：2026-09-08
 > 关联：[ITER-0063 复盘（跟进项 2/3）](../0063-dsl-observation-skills/retrospective.md) · [ITER-0062 复盘](../0062-declarative-skill-dsl/retrospective.md)
 
 ## 背景
