@@ -16,7 +16,7 @@ _NAVIGATION_TARGET_IDS = frozenset(target.value for target in NavigationTarget)
 
 # 轮次预算唯一真源：Runner / REST / 评测统一引用本常量，
 # 任何 Planner 不再各自硬编码预算上限（ITER-0061 收口）。
-MAX_AGENT_ROUNDS = 12
+MAX_AGENT_ROUNDS = 50
 
 # 与 contracts/schemas 中 agent-decision / agent-finish-criteria 的上限保持一致。
 _SCRATCHPAD_MAX_CHARS = 1024

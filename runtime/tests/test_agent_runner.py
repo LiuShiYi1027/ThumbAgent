@@ -1124,13 +1124,13 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("succeeded", task["status"])
 
-    async def test_agent_runner_rejects_max_rounds_outside_one_to_twelve(self) -> None:
+    async def test_agent_runner_rejects_max_rounds_outside_budget(self) -> None:
         runtime = RuntimeService(
             FakeDeviceAdapter(),
             ArtifactStore(Path(self.directory.name)),
         )
 
-        for invalid in (0, 13):
+        for invalid in (0, 51):
             task = await runtime.run_agent_task(
                 "fake:android-001",
                 "open display settings",

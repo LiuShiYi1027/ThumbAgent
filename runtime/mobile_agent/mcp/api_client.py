@@ -146,7 +146,7 @@ class RuntimeApiClient:
             "device_id": arguments["device_id"],
             "goal": arguments["goal"],
             "confirmed": arguments["confirmed"],
-            "max_rounds": arguments.get("max_rounds", 6),
+            "max_rounds": arguments.get("max_rounds", 12),
             "deadline_seconds": arguments.get("deadline_seconds", 600),
         }
         return self._request(

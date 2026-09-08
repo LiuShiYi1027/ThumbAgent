@@ -7,6 +7,8 @@ import type { DeviceAvailability } from '@contracts/runtime-readiness'
 export interface TaskIntent {
   deviceId: string
   goal: string
+  /** Per-task round budget (1–50); the Runtime deadline remains the time fuse. */
+  maxRounds: number
   /**
    * Minted when the intent leaves the composer (i.e. when the confirmation
    * dialog opens). Every submit retry inside that one confirmation flow
@@ -31,6 +33,7 @@ export function TaskComposer({
   )
   const [deviceId, setDeviceId] = useState('')
   const [goal, setGoal] = useState('')
+  const [maxRounds, setMaxRounds] = useState(12)
   const selected = readyDevices.some((device) => device.device_id === deviceId)
     ? deviceId
     : (readyDevices[0]?.device_id ?? '')
@@ -53,6 +56,7 @@ export function TaskComposer({
               onSubmit({
                 deviceId: selected,
                 goal: trimmed,
+                maxRounds,
                 idempotencyKey: crypto.randomUUID(),
               })
             }
@@ -85,6 +89,24 @@ export function TaskComposer({
               value={goal}
               disabled={busy}
               onChange={(event) => setGoal(event.target.value)}
+            />
+          </label>
+          <label className="composer-field">
+            <span className="composer-label">轮次预算</span>
+            <input
+              className="composer-select"
+              type="number"
+              name="max_rounds"
+              min={1}
+              max={50}
+              value={maxRounds}
+              disabled={busy}
+              onChange={(event) => {
+                const value = Math.floor(Number(event.target.value))
+                if (Number.isFinite(value)) {
+                  setMaxRounds(Math.min(50, Math.max(1, value)))
+                }
+              }}
             />
           </label>
           <div className="composer-actions">

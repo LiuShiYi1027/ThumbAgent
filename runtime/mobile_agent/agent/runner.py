@@ -88,7 +88,7 @@ class AgentRunner:
         device_id: str,
         goal: str,
         confirmed: bool = False,
-        max_rounds: int = 6,
+        max_rounds: int = 12,
         acceptance: AgentGoalAcceptance | None = None,
         execution_goal: str | None = None,
         goal_spec: dict[str, Any] | None = None,

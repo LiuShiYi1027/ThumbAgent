@@ -570,7 +570,7 @@ TASK_UI_HTML = """<!doctype html>
           device_id: deviceId,
           goal,
           confirmed: true,
-          max_rounds: 6,
+          max_rounds: 12,
           deadline_seconds: 600
         };
         if (goalSpec) {

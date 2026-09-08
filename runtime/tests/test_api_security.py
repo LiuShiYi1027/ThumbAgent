@@ -71,7 +71,7 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertRegex(payload["execution"]["task_id"], r"^task_[a-f0-9]{32}$")
 
     def test_post_async_agent_run_max_rounds_boundary(self) -> None:
-        """max_rounds 接受 1–12（含 12），拒绝 0 与 13。"""
+        """max_rounds 接受 1–50（含 50），拒绝 0 与 51。"""
 
         def post(max_rounds: object) -> tuple[HTTPStatus, dict[str, object], bool]:
             store = _ApiExecutionStore()
@@ -110,11 +110,11 @@ class ApiSecurityTests(unittest.TestCase):
 
             return captured["status"], captured["payload"], finished
 
-        status, payload, finished = post(12)
+        status, payload, finished = post(50)
         self.assertEqual(HTTPStatus.ACCEPTED, status)
-        self.assertTrue(finished, "max_rounds=12 的异步任务未完成")
+        self.assertTrue(finished, "max_rounds=50 的异步任务未完成")
 
-        for invalid in (0, 13):
+        for invalid in (0, 51):
             status, payload, _ = post(invalid)
             self.assertEqual(HTTPStatus.BAD_REQUEST, status)
             self.assertEqual("INVALID_ARGUMENT", payload["error"]["code"])

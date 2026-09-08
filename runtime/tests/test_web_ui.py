@@ -85,7 +85,7 @@ class WebUiTests(unittest.TestCase):
         self.assertIn("确认前不会操作设备", TASK_UI_HTML)
         self.assertIn("运行 Agent Preview", TASK_UI_HTML)
         self.assertIn("请选择设备并输入目标", TASK_UI_HTML)
-        self.assertIn("max_rounds: 6", TASK_UI_HTML)
+        self.assertIn("max_rounds: 12", TASK_UI_HTML)
         self.assertIn("Authorization", TASK_UI_HTML)
         self.assertIn("显示/亮度", TASK_UI_HTML)
         self.assertIn('value: "亮度"', TASK_UI_HTML)

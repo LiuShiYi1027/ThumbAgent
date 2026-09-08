@@ -1024,7 +1024,7 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("agent run fields")
                 goal = body.get("goal")
                 confirmed = body.get("confirmed", False)
-                max_rounds = body.get("max_rounds", 6)
+                max_rounds = body.get("max_rounds", 12)
                 acceptance = body.get("acceptance")
                 goal_spec = body.get("goal_spec")
                 goal_spec_confirmed = body.get("goal_spec_confirmed", False)

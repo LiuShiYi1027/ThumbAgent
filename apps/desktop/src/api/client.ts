@@ -36,7 +36,7 @@ export function getDevices(): Promise<DeviceListResponse> {
 
 const AGENT_RUN_ASYNC_PATH = '/v1/tasks/agent.run/async'
 // Fixed V1 submission budget, matching the /ui prototype defaults.
-const AGENT_MAX_ROUNDS = 6
+const AGENT_MAX_ROUNDS = 12
 const AGENT_DEADLINE_SECONDS = 600
 
 interface ExecutionResponse {
@@ -64,6 +64,7 @@ export async function submitAgentTask(
   deviceId: string,
   goal: string,
   idempotencyKey: string,
+  maxRounds: number = AGENT_MAX_ROUNDS,
 ): Promise<TaskExecution> {
   const payload = await runtimeApiPost<ExecutionResponse>(
     AGENT_RUN_ASYNC_PATH,
@@ -71,7 +72,7 @@ export async function submitAgentTask(
       device_id: deviceId,
       goal,
       confirmed: true,
-      max_rounds: AGENT_MAX_ROUNDS,
+      max_rounds: maxRounds,
       deadline_seconds: AGENT_DEADLINE_SECONDS,
     },
     idempotencyKey,
