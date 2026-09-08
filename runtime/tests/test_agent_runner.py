@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -1380,6 +1382,166 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({"answer": "当前亮度值为 50%"}, task.result)
         self.assertFalse(any(action[0] == "app.navigate" for action in adapter.actions))
 
+    async def test_cancellation_during_blocking_model_call_responds_promptly(self) -> None:
+        """M4：阻塞式模型调用进行中发起取消，2s 内到达 cancelled，不等 Provider 返回。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        release = threading.Event()
+        self.addCleanup(release.set)
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            _SlowPlanner(release, delay_seconds=30.0),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+        started_at = time.monotonic()
+
+        task = await runner.run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            cancellation_requested=lambda: time.monotonic() - started_at > 0.5,
+        )
+        elapsed = time.monotonic() - started_at
+
+        self.assertEqual("cancelled", task.status.value)
+        assert task.error is not None
+        self.assertEqual("TASK_CANCELLED", task.error["code"])
+        self.assertLess(elapsed, 2.0)
+        # 取消时无任何已完成模型轮次；被放弃线程的迟到结果不落地。
+        self.assertEqual((), task.steps)
+
+    async def test_deadline_during_blocking_model_call_times_out_promptly(self) -> None:
+        """M4：Deadline 在阻塞式模型调用期间到期即 timed_out，不等 Provider 返回。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        release = threading.Event()
+        self.addCleanup(release.set)
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            _SlowPlanner(release, delay_seconds=30.0),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+        started_at = time.monotonic()
+
+        task = await runner.run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            deadline_exceeded=lambda: time.monotonic() - started_at > 0.5,
+        )
+        elapsed = time.monotonic() - started_at
+
+        self.assertEqual("timed_out", task.status.value)
+        assert task.error is not None
+        self.assertEqual("TASK_DEADLINE_EXCEEDED", task.error["code"])
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual((), task.steps)
+
+    async def test_shortcut_acceptance_failure_falls_back_to_model_loop(self) -> None:
+        """M5：捷径导航成功但验收失败时，shortcut_step 先落盘，任务回退模型主循环继续。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(
+                [
+                    {
+                        "decision_type": "run_tool",
+                        "tool_id": "app.launch",
+                        "arguments": {"app_id": "com.android.settings"},
+                        "reason": "Open the settings main page.",
+                    },
+                    {
+                        "decision_type": "finish",
+                        "arguments": {
+                            "expected_selector": {
+                                "strategy": "text",
+                                "value": "Display",
+                                "match": "exact",
+                                "package": "com.android.settings",
+                            }
+                        },
+                        "reason": "The goal is complete.",
+                    },
+                ]
+            ),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 捷径保持默认开启：验收失败应回退到模型主循环而非终结。
+        )
+        # 捷径到达 .DisplaySettings，与验收要求的 .MainActivity 不符 → TARGET_NOT_FOUND。
+        acceptance = AgentGoalAcceptance(
+            foreground_app_id="com.android.settings",
+            foreground_activity=".MainActivity",
+        )
+
+        task = await runner.run(
+            "fake:android-001", "打开显示设置", confirmed=True, acceptance=acceptance
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("runtime_acceptance", task.completion_source)
+        self.assertEqual(3, len(task.steps))
+        shortcut_step = task.steps[0]
+        self.assertEqual("agent.shortcut", shortcut_step.name)
+        self.assertEqual("succeeded", shortcut_step.status.value)
+        assert shortcut_step.result is not None
+        self.assertEqual("app.navigate", shortcut_step.result["skill_id"])
+        # 步骤序号在捷径回退后仍单调唯一，不与模型轮次冲突。
+        self.assertEqual([1, 2, 3], [step.sequence for step in task.steps])
+        self.assertEqual(2, task.evidence_summary["rounds"])
+        self.assertTrue(any(action[0] == "app.navigate" for action in adapter.actions))
+        self.assertTrue(any(action[0] == "app.launch" for action in adapter.actions))
+
+    async def test_shortcut_step_preserved_when_fallback_task_fails(self) -> None:
+        """M5：回退后模型循环仍失败时，报告保留 shortcut_step 作为设备副作用证据。"""
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            UnavailablePlanner(
+                MobileAgentError(
+                    code="MODEL_UNAVAILABLE",
+                    category=ErrorCategory.EXECUTION,
+                    message="模型不可用",
+                )
+            ),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            # 捷径保持默认开启：验收失败回退后模型不可用，任务失败但证据保留。
+        )
+        acceptance = AgentGoalAcceptance(
+            foreground_app_id="com.android.settings",
+            foreground_activity=".MainActivity",
+        )
+
+        task = await runner.run(
+            "fake:android-001", "打开显示设置", confirmed=True, acceptance=acceptance
+        )
+
+        self.assertEqual("failed", task.status.value)
+        assert task.error is not None
+        self.assertEqual("MODEL_UNAVAILABLE", task.error["code"])
+        self.assertEqual(2, len(task.steps))
+        shortcut_step = task.steps[0]
+        self.assertEqual("agent.shortcut", shortcut_step.name)
+        self.assertEqual("succeeded", shortcut_step.status.value)
+        assert shortcut_step.result is not None
+        self.assertEqual("app.navigate", shortcut_step.result["skill_id"])
+        self.assertTrue(any(action[0] == "app.navigate" for action in adapter.actions))
+
     def test_rule_planner_reverses_swipe_after_unchanged_feedback(self) -> None:
         planner = RuleBasedPlanner()
         summary = AgentObservationSummary(
@@ -1505,6 +1667,43 @@ class _FailOnObserveCallsAdapter:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
+
+
+class _SlowPlanner:
+    """模拟慢速 Provider 的阻塞式 Planner：decide 在 release 前挂起，纯等待无副作用。
+
+    用于复现 M4：取消/Deadline 在模型调用进行中到达时，不应等到调用返回才生效。
+    """
+
+    planner_id = "slow.preview"
+
+    def __init__(self, release: threading.Event, delay_seconds: float) -> None:
+        self._release = release
+        self._delay_seconds = delay_seconds
+
+    def decide(
+        self, goal: str, observation: AgentObservationSummary, round_index: int
+    ) -> AgentDecision:
+        """Block until released or the delay elapses, then return a finish decision."""
+
+        self._release.wait(self._delay_seconds)
+        return AgentDecision(
+            decision_id="decision_slow",
+            decision_type=AgentDecisionType.FINISH,
+            skill_id="",
+            tool_id="",
+            arguments={
+                "expected_selector": {
+                    "strategy": "text",
+                    "value": "Fake home",
+                    "match": "contains",
+                }
+            },
+            reason="The slow provider finally responded.",
+            planner_id=self.planner_id,
+            confidence=1.0,
+            source="llm",
+        )
 
 
 class UnsafePlanner:

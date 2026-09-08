@@ -213,10 +213,30 @@ TASK_UI_HTML = """<!doctype html>
       return payload;
     }
 
-    function newIdempotencyKey() {
-      if (globalThis.crypto?.randomUUID) return `web-${globalThis.crypto.randomUUID()}`;
-      return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    // idempotency-key-derivation:start
+    // 与服务端 mobile_agent.api.idempotency.stable_idempotency_key 同算法：
+    // SHA-256(endpoint + "\\n" + 规范化参数 JSON) 取 hex 前 32，加 webui- 前缀。
+    // 规范化 = 对象键递归排序 + 紧凑分隔符（对应 Python sort_keys + separators）。
+    function canonicalJson(value) {
+      if (value === null || typeof value !== "object") return JSON.stringify(value);
+      if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+      return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
     }
+
+    async function stableIdempotencyKey(endpoint, params) {
+      if (!globalThis.crypto?.subtle) {
+        // 非安全上下文无 WebCrypto：退化为随机键，提交能力不受影响。
+        return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+      const canonical = canonicalJson(params);
+      const digest = await globalThis.crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(`${endpoint}\\n${canonical}`)
+      );
+      const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      return `webui-${hex.slice(0, 32)}`;
+    }
+    // idempotency-key-derivation:end
 
     async function loadLocalStorage() {
       try {
@@ -248,19 +268,20 @@ TASK_UI_HTML = """<!doctype html>
           cleanupStatusEl.textContent += " · 用户已取消";
           return;
         }
+        const cleanupRequest = {
+          approval_id: approval.approval_id,
+          confirmed: true,
+          deadline_seconds: 120
+        };
         const response = await fetch("/v1/tasks/local.data.cleanup/async", {
           method: "POST",
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": `Bearer ${API_TOKEN}`,
-            "Idempotency-Key": newIdempotencyKey()
+            "Idempotency-Key": await stableIdempotencyKey("/v1/tasks/local.data.cleanup/async", cleanupRequest)
           },
-          body: JSON.stringify({
-            approval_id: approval.approval_id,
-            confirmed: true,
-            deadline_seconds: 120
-          })
+          body: JSON.stringify(cleanupRequest)
         });
         const submitted = await response.json();
         if (!response.ok) throw new Error(submitted?.error?.message || response.statusText);
@@ -408,21 +429,22 @@ TASK_UI_HTML = """<!doctype html>
       collectLogsEl.disabled = true;
       logCaptureStatusEl.textContent = "正在采集并脱敏设备日志…";
       try {
+        const logsRequest = {
+          device_id: deviceId,
+          max_lines: 500,
+          minimum_level: logLevelEl.value,
+          confirmed: true,
+          deadline_seconds: 60
+        };
         const response = await fetch("/v1/tasks/device.logs.collect/async", {
           method: "POST",
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": `Bearer ${API_TOKEN}`,
-            "Idempotency-Key": newIdempotencyKey()
+            "Idempotency-Key": await stableIdempotencyKey("/v1/tasks/device.logs.collect/async", logsRequest)
           },
-          body: JSON.stringify({
-            device_id: deviceId,
-            max_lines: 500,
-            minimum_level: logLevelEl.value,
-            confirmed: true,
-            deadline_seconds: 60
-          })
+          body: JSON.stringify(logsRequest)
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.error?.message || response.statusText);
@@ -444,15 +466,16 @@ TASK_UI_HTML = """<!doctype html>
       capturePerformanceEl.disabled = true;
       performanceStatusEl.textContent = "正在提交性能快照任务…";
       try {
+        const performanceRequest = { device_id: deviceId, deadline_seconds: 90 };
         const response = await fetch("/v1/tasks/device.performance.snapshot/async", {
           method: "POST",
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": `Bearer ${API_TOKEN}`,
-            "Idempotency-Key": newIdempotencyKey()
+            "Idempotency-Key": await stableIdempotencyKey("/v1/tasks/device.performance.snapshot/async", performanceRequest)
           },
-          body: JSON.stringify({ device_id: deviceId, deadline_seconds: 90 })
+          body: JSON.stringify(performanceRequest)
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.error?.message || response.statusText);
@@ -474,21 +497,22 @@ TASK_UI_HTML = """<!doctype html>
       collectDiagnosticBundleEl.disabled = true;
       diagnosticBundleStatusEl.textContent = "正在采集截图、UI Tree、脱敏日志和聚合性能…";
       try {
+        const diagnosticsRequest = {
+          device_id: deviceId,
+          max_log_lines: 500,
+          minimum_log_level: logLevelEl.value,
+          confirmed: true,
+          deadline_seconds: 120
+        };
         const response = await fetch("/v1/tasks/device.diagnostics.bundle/async", {
           method: "POST",
           headers: {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": `Bearer ${API_TOKEN}`,
-            "Idempotency-Key": newIdempotencyKey()
+            "Idempotency-Key": await stableIdempotencyKey("/v1/tasks/device.diagnostics.bundle/async", diagnosticsRequest)
           },
-          body: JSON.stringify({
-            device_id: deviceId,
-            max_log_lines: 500,
-            minimum_log_level: logLevelEl.value,
-            confirmed: true,
-            deadline_seconds: 120
-          })
+          body: JSON.stringify(diagnosticsRequest)
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload?.error?.message || response.statusText);
@@ -559,7 +583,7 @@ TASK_UI_HTML = """<!doctype html>
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": `Bearer ${API_TOKEN}`,
-            "Idempotency-Key": newIdempotencyKey()
+            "Idempotency-Key": await stableIdempotencyKey("/v1/tasks/agent.run/async", request)
           },
           body: JSON.stringify(request)
         });

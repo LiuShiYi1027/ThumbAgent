@@ -1,19 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import tempfile
+import threading
+import time
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from mobile_agent.agent import AgentObservationSummary
+from mobile_agent.agent import AgentObservationSummary, AgentRunner
 from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
+from mobile_agent.devices.fake import FakeDeviceAdapter
 from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.evidence.artifacts import ArtifactStore
+from mobile_agent.policy.engine import PolicyEngine
 from mobile_agent.providers import (
     HttpModelTransport,
     OpenAICompatiblePlanner,
     OpenAICompatiblePlannerConfig,
 )
+from mobile_agent.skills.open_app import OpenAppSkill
+from mobile_agent.skills.settings_navigate import SettingsScrollNavigateSkill
+from mobile_agent.tools.runtime import ToolRegistry, ToolRuntime
 
 
 class OpenAICompatiblePlannerTests(unittest.TestCase):
@@ -531,6 +542,59 @@ class SequencedTransport:
         return response
 
 
+class OpenAICompatiblePlannerThreadAbandonTests(unittest.IsolatedAsyncioTestCase):
+    """M4 跨层集成：Runner 取消阻塞式 decide 即放弃等待线程，且放弃假设成立。"""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+
+    async def test_cancelled_decide_abandons_thread_and_planner_stays_reusable(self) -> None:
+        """取消即放弃 decide 线程；线程只做纯 HTTP 读、不写 Planner 共享状态，
+        迟到结果不落地，Planner 之后仍可正常服务新决策。"""
+        release = threading.Event()
+        self.addCleanup(release.set)
+        transport = SlowTransport(release, delay_seconds=30.0)
+        planner = OpenAICompatiblePlanner(test_config(), transport)
+        adapter = FakeDeviceAdapter()
+        artifacts = ArtifactStore(Path(self.directory.name))
+        tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            planner,
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+        )
+        started_at = time.monotonic()
+
+        task = await runner.run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            cancellation_requested=lambda: time.monotonic() - started_at > 0.5,
+        )
+        elapsed = time.monotonic() - started_at
+
+        self.assertEqual("cancelled", task.status.value)
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual((), task.steps)
+
+        # 释放被放弃的线程：其迟到结果不得改写已取消任务的终态；
+        # decide 只做纯 HTTP 读（无设备副作用、无共享写入），Planner 仍可复用。
+        release.set()
+        join_deadline = time.monotonic() + 5.0
+        while transport.completed_calls == 0 and time.monotonic() < join_deadline:
+            await asyncio.sleep(0.05)
+        self.assertEqual(1, transport.completed_calls)
+        self.assertEqual("cancelled", task.status.value)
+
+        decision = planner.decide("open display settings", observation_summary(), 1)
+        self.assertEqual("settings.scroll_navigate", decision.skill_id)
+        self.assertEqual(2, len(transport.bodies))
+
+
 class FailingTransport:
     def __init__(self) -> None:
         self.calls = 0
@@ -544,6 +608,30 @@ class FailingTransport:
     ) -> dict[str, Any]:
         self.calls += 1
         raise OSError("network unavailable with secret test-secret-token")
+
+
+class SlowTransport:
+    """阻塞式 Transport：release 前挂起，用于复现「取消需等待 Provider 返回」（M4）。"""
+
+    def __init__(self, release: threading.Event, delay_seconds: float = 30.0) -> None:
+        self._release = release
+        self._delay_seconds = delay_seconds
+        self.bodies: list[dict[str, Any]] = []
+        self.completed_calls = 0
+
+    def post_json(
+        self,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Block until released or the delay elapses, then return a valid response."""
+
+        self.bodies.append(dict(body))
+        self._release.wait(self._delay_seconds)
+        self.completed_calls += 1
+        return valid_response()
 
 
 class BodyTimeoutResponse:

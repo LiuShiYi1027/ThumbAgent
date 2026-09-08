@@ -58,6 +58,8 @@ class AgentRunner:
     _OBSERVE_RETRYABLE_CODES = frozenset({"UI_TREE_INVALID", "OBSERVATION_FAILED"})
     _OBSERVE_MAX_ATTEMPTS = 3
     _OBSERVE_RETRY_DELAY_SECONDS = 0.3
+    # 模型调用是阻塞式同步 HTTP（urllib），等待期间以该间隔轮询取消/Deadline 探针。
+    _DECIDE_PROBE_INTERVAL_SECONDS = 0.5
 
     def __init__(
         self,
@@ -151,17 +153,8 @@ class AgentRunner:
                         raise
                     navigation = None
                 if navigation is not None:
-                    verified_node = None
-                    if acceptance is not None:
-                        # 验收观察与主循环观察同享瞬时故障有界重试。
-                        verification_observation = await self._observe_with_retry(
-                            device_id, cancellation_requested, deadline_exceeded
-                        )
-                        verified = self._verify_goal_acceptance(
-                            verification_observation, acceptance
-                        )
-                        verified_node = verified.to_dict() if verified else None
-                    completed_at = _now()
+                    # M5：导航捷径的设备副作用已发生，先落盘 shortcut_step 再验收；
+                    # 验收失败不终结任务，带着副作用证据回退模型主循环继续。
                     shortcut_step = TaskStep(
                         step_id=shortcut_step_id,
                         sequence=1,
@@ -169,36 +162,61 @@ class AgentRunner:
                         name="agent.shortcut",
                         status=TaskStatus.SUCCEEDED,
                         started_at=shortcut_step_started_at,
-                        completed_at=completed_at,
+                        completed_at=_now(),
                         result=navigation.to_dict(),
                         error=None,
                     )
+                    steps.append(shortcut_step)
                     if on_step is not None:
                         on_step(shortcut_step)
-                    return TaskRun(
-                        task_id=task_id,
-                        task_type="agent.run",
-                        device_id=device_id,
-                        goal=goal,
-                        status=TaskStatus.SUCCEEDED,
-                        started_at=task_started_at,
-                        completed_at=completed_at,
-                        steps=(shortcut_step,),
-                        evidence_summary={
-                            "rounds": 0,
-                            "planner_id": "runtime_shortcut",
-                            "shortcut": shortcut.value,
-                            "final_foreground_app": {
-                                "app_id": navigation.foreground_app_id,
-                                "activity": navigation.foreground_activity,
+                    verified_node = None
+                    acceptance_error: MobileAgentError | None = None
+                    if acceptance is not None:
+                        # 验收观察与主循环观察同享瞬时故障有界重试。
+                        verification_observation = await self._observe_with_retry(
+                            device_id, cancellation_requested, deadline_exceeded
+                        )
+                        try:
+                            verified = self._verify_goal_acceptance(
+                                verification_observation, acceptance
+                            )
+                            verified_node = verified.to_dict() if verified else None
+                        except MobileAgentError as error:
+                            # 仅验收未过（目标未出现/不唯一）回退模型主循环；
+                            # 观察故障、取消、Deadline 等其他错误仍立即终止。
+                            if error.code not in {"TARGET_NOT_FOUND", "TARGET_AMBIGUOUS"}:
+                                raise
+                            acceptance_error = error
+                    if acceptance_error is None:
+                        completed_at = _now()
+                        return TaskRun(
+                            task_id=task_id,
+                            task_type="agent.run",
+                            device_id=device_id,
+                            goal=goal,
+                            status=TaskStatus.SUCCEEDED,
+                            started_at=task_started_at,
+                            completed_at=completed_at,
+                            steps=tuple(steps),
+                            evidence_summary={
+                                "rounds": 0,
+                                "planner_id": "runtime_shortcut",
+                                "shortcut": shortcut.value,
+                                "final_foreground_app": {
+                                    "app_id": navigation.foreground_app_id,
+                                    "activity": navigation.foreground_activity,
+                                },
+                                "verified_node": verified_node,
                             },
-                            "verified_node": verified_node,
-                        },
-                        goal_spec=goal_spec,
-                        goal_acceptance=acceptance_payload,
-                        completion_source="runtime_shortcut",
-                        deadline_seconds=deadline_seconds,
-                    )
+                            goal_spec=goal_spec,
+                            goal_acceptance=acceptance_payload,
+                            completion_source="runtime_shortcut",
+                            deadline_seconds=deadline_seconds,
+                        )
+                    # 验收未过：shortcut_step 已保留在 steps 中；主循环首轮重新观察，
+                    # 模型看到导航后的最新页面后继续规划， shortcut 证据不丢失。
+            # 捷径回退时 steps 已含 shortcut_step，模型轮次序号顺延以保持单调唯一。
+            step_sequence_offset = len(steps)
             for round_index in range(1, max_rounds + 1):
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
                 step_started_at = _now()
@@ -212,7 +230,13 @@ class AgentRunner:
                 pending_round = round_index
                 pending_step_id = step_id
                 pending_step_started_at = step_started_at
-                decision = self._planner.decide(planner_goal, summary, round_index)
+                decision = await self._decide_with_control_probes(
+                    planner_goal,
+                    summary,
+                    round_index,
+                    cancellation_requested,
+                    deadline_exceeded,
+                )
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
                 last_decision = decision
                 self._validate_decision(decision)
@@ -258,7 +282,7 @@ class AgentRunner:
                 completed_at = _now()
                 completed_step = TaskStep(
                         step_id=step_id,
-                        sequence=round_index,
+                        sequence=step_sequence_offset + round_index,
                         kind="agent_round",
                         name="agent.round",
                         status=(
@@ -473,6 +497,42 @@ class AgentRunner:
                 message="任务已超过总执行时间预算",
                 suggested_action="提高任务 deadline 或缩小目标范围后重试",
             )
+
+    async def _decide_with_control_probes(
+        self,
+        goal: str,
+        summary: AgentObservationSummary,
+        round_index: int,
+        cancellation_requested: Callable[[], bool] | None,
+        deadline_exceeded: Callable[[], bool] | None,
+    ) -> AgentDecision:
+        """Run the blocking Planner call off the event loop, polling control probes.
+
+        Planner Protocol 保持同步接口（ITER-0064 M4）：阻塞 urllib 调用经
+        asyncio.to_thread 移出事件循环，等待期间轮询取消/Deadline 探针；
+        命中即放弃等待并终止任务，不再等线程返回。放弃等待是安全的：已核实
+        OpenAICompatiblePlanner / RuleBasedPlanner / MockLLMPlanner 的 decide
+        只做纯 HTTP 读或纯计算——不触发设备动作、不写 Planner 共享状态（仅读
+        config/transport/预置载荷），故线程的迟到结果可直接丢弃，不落地到任务报告。
+        """
+        decide_task = asyncio.create_task(
+            asyncio.to_thread(self._planner.decide, goal, summary, round_index)
+        )
+        try:
+            while True:
+                # asyncio.wait 事件驱动：任务完成即唤醒（快速 Planner 零额外延迟），
+                # 否则每 0.5s 醒一次探查控制面。
+                done, _ = await asyncio.wait(
+                    {decide_task}, timeout=self._DECIDE_PROBE_INTERVAL_SECONDS
+                )
+                if done:
+                    return decide_task.result()
+                self._raise_if_stopped(cancellation_requested, deadline_exceeded)
+        finally:
+            if not decide_task.done():
+                # 放弃等待：取消协程侧 Task；底层线程不可中断，纯 HTTP 调用
+                # 随自身超时/响应自然结束，其结果不再被读取。
+                decide_task.cancel()
 
     async def _observe_with_retry(
         self,

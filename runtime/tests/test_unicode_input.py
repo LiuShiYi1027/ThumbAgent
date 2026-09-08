@@ -7,8 +7,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mobile_agent.devices.fake import FakeDeviceAdapter
+from mobile_agent.domain.artifact import ArtifactWriter
 from mobile_agent.domain.device import ConnectionState, Device, Platform
 from mobile_agent.domain.errors import MobileAgentError
+from mobile_agent.domain.observation import Observation
 from mobile_agent.domain.unicode_input import (
     HELPER_IME_ID,
     HELPER_PACKAGE,
@@ -119,6 +121,98 @@ class DropAllInputAdapter(FakeDeviceAdapter):
 
     async def input_text(self, device_id: str, text: str) -> None:
         self.actions.append(("input.text", device_id, text))
+
+
+# 读回 dump 中目标节点缺席时的替代树（对应 e2e-output/20260901-205659 的
+# match_count=0 / actual_sha256=null 失败形状）：布局竞态期间 search_box 不在树中。
+_ABSENT_TREE_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
+    '<node text="" resource-id="transient_overlay" class="android.widget.TextView" '
+    'package="com.example.form" clickable="false" enabled="true" '
+    'visible-to-user="true" bounds="[0,0][2,1]"/></hierarchy>'
+).encode()
+
+
+class AbsentFirstReadbackAdapter(FakeDeviceAdapter):
+    """Simulate the uiautomator/layout race: injection lands, but the first
+    read-back dump misses the target node; it reappears on a later dump."""
+
+    def __init__(self, devices: list[Device] | None = None) -> None:
+        super().__init__(devices)
+        self._absent_next_dump = False
+        self.observe_count = 0
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        await super().input_text(device_id, text)
+        self._absent_next_dump = True
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        self.observe_count += 1
+        if self._absent_next_dump:
+            self._absent_next_dump = False
+            saved = self.custom_ui_xml
+            self.custom_ui_xml = _ABSENT_TREE_XML
+            try:
+                return await super().observe(device_id, artifacts)
+            finally:
+                self.custom_ui_xml = saved
+        return await super().observe(device_id, artifacts)
+
+
+class AbsentAllReadbackAdapter(FakeDeviceAdapter):
+    """Target node never reappears after injection (reread must stay bounded)."""
+
+    def __init__(self, devices: list[Device] | None = None) -> None:
+        super().__init__(devices)
+        self._injected = False
+        self.observe_count = 0
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        await super().input_text(device_id, text)
+        self._injected = True
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        self.observe_count += 1
+        if self._injected:
+            saved = self.custom_ui_xml
+            self.custom_ui_xml = _ABSENT_TREE_XML
+            try:
+                return await super().observe(device_id, artifacts)
+            finally:
+                self.custom_ui_xml = saved
+        return await super().observe(device_id, artifacts)
+
+
+class DropFirstAndAbsentFirstReadbackAdapter(FakeDeviceAdapter):
+    """First injection dropped AND first read-back dump misses the node: the
+    single read-only re-read reveals the loss, then the bounded re-injection lands."""
+
+    def __init__(self, devices: list[Device] | None = None) -> None:
+        super().__init__(devices)
+        self._dropped = False
+        self._absent_next_dump = False
+
+    async def input_text(self, device_id: str, text: str) -> None:
+        self.actions.append(("input.text", device_id, text))
+        if not self._dropped:
+            self._dropped = True
+            self._absent_next_dump = True
+            return  # 字符整体丢失：字段保持原文，且紧接着的 dump 缺席节点
+        if is_helper_ime(self.current_ime):
+            self.field_text += decode_modified_utf7(text)
+        else:
+            self.field_text += text
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        if self._absent_next_dump:
+            self._absent_next_dump = False
+            saved = self.custom_ui_xml
+            self.custom_ui_xml = _ABSENT_TREE_XML
+            try:
+                return await super().observe(device_id, artifacts)
+            finally:
+                self.custom_ui_xml = saved
+        return await super().observe(device_id, artifacts)
 
 
 class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
@@ -303,6 +397,51 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["success"])
         self.assertEqual("iPhone 17", adapter.field_text)
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(2, len(typed))
+
+    async def test_absent_node_readback_is_reread_once_and_succeeds(self) -> None:
+        """真机回归（e2e-output/20260901-205659）：注入成功但读回时刻节点缺席
+        （match_count=0 / actual_sha256=null）是布局竞态，settle 后只读重读一次命中即成功。"""
+        adapter = _configure_ready(AbsentFirstReadbackAdapter())
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(DEVICE_ID, SELECTOR, "你好", confirmed=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual("你好", adapter.field_text)
+        # 重读是只读操作：不得触发任何重复注入。
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(1, len(typed))
+        # 注入前观察 + 缺席读回 + 重读 = 恰好 3 次观察（重读预算一次）。
+        self.assertEqual(3, adapter.observe_count)
+
+    async def test_persistent_absent_node_fails_after_bounded_reread(self) -> None:
+        """节点持续缺席时重读保持有界：一次重读后失败，且不因缺席叠加注入重试。"""
+        adapter = _configure_ready(AbsentAllReadbackAdapter())
+        runtime = self._runtime(adapter)
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await runtime.unicode_text_input(DEVICE_ID, SELECTOR, "你好", confirmed=True)
+
+        self.assertEqual("TEXT_INPUT_NOT_VERIFIED", raised.exception.code)
+        self.assertEqual(0, raised.exception.details["match_count"])
+        self.assertIsNone(raised.exception.details["actual_sha256"])
+        typed = [a for a in adapter.actions if a[0] == "input.text"]
+        self.assertEqual(1, len(typed))
+        # 注入前观察 + 缺席读回 + 重读 = 3 次观察，重读预算不叠加。
+        self.assertEqual(3, adapter.observe_count)
+
+    async def test_absent_reread_then_lost_injection_uses_each_budget_once(self) -> None:
+        """缺席重读与「丢失重试一次」预算各用一次不叠加超限：重读揭示注入丢失后，
+        有界重试一次注入成功，总注入次数仍为 2。"""
+        adapter = _configure_ready(DropFirstAndAbsentFirstReadbackAdapter())
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(DEVICE_ID, SELECTOR, "你好", confirmed=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual("你好", adapter.field_text)
         typed = [a for a in adapter.actions if a[0] == "input.text"]
         self.assertEqual(2, len(typed))
 

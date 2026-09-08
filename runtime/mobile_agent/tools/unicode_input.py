@@ -34,6 +34,19 @@ from mobile_agent.ui.parser import UiHierarchyParser
 _INPUT_SETTLE_SECONDS = 0.5
 # 注入整体丢失后的单次重试间隔。
 _INPUT_RETRY_SETTLE_SECONDS = 1.0
+# 读回时刻节点缺席（match_count=0）后的单次只读重读 settle：
+# 覆盖 uiautomator dump 与布局/动画的竞态（真机 e2e-output/20260901-205659）。
+_READBACK_REREAD_SETTLE_SECONDS = 0.5
+
+
+def _node_absent(failure: MobileAgentError) -> bool:
+    """读回失败详情为「节点缺席」（match_count=0、actual_sha256=null）。
+
+    与内容不一致（tamper，actual 非空且不匹配）严格区分：后者立即失败、
+    绝不重读；缺席多为 dump/布局竞态，允许 settle 后只读重读一次。
+    """
+    details = failure.details or {}
+    return details.get("match_count") == 0 and details.get("actual_sha256") is None
 
 
 def _nothing_landed(failure: MobileAgentError, before_text: str) -> bool:
@@ -155,11 +168,25 @@ class UnicodeTextInputTool:
                     device_id, selector, before_text + text, evidence
                 )
             except MobileAgentError as failure:
-                if (
-                    failure.code != "TEXT_INPUT_NOT_VERIFIED"
-                    or not _nothing_landed(failure, before_text)
-                ):
+                if failure.code != "TEXT_INPUT_NOT_VERIFIED":
                     raise
+                if _node_absent(failure):
+                    # 节点缺席是读回竞态而非注入失败：settle 后只读重读一次
+                    # （重读只调 observe，不触发任何注入）；命中即成功。
+                    await asyncio.sleep(_READBACK_REREAD_SETTLE_SECONDS)
+                    try:
+                        await self._verify_readback(
+                            device_id, selector, before_text + text, evidence
+                        )
+                        return self._captured(
+                            match, text, helper_ime_id, previous_ime_id, evidence
+                        )
+                    except MobileAgentError as reread_failure:
+                        if reread_failure.code != "TEXT_INPUT_NOT_VERIFIED":
+                            raise
+                        failure = reread_failure
+                if not _nothing_landed(failure, before_text):
+                    raise failure
                 # 读回仍是原文 = 注入整体丢失（而非被篡改），settle 后有界重试一次。
                 await asyncio.sleep(_INPUT_RETRY_SETTLE_SECONDS)
                 await self._adapter.input_text(device_id, encode_modified_utf7(text))
@@ -169,6 +196,16 @@ class UnicodeTextInputTool:
         finally:
             await self._restore_input_method(device_id, previous_ime_id)
 
+        return self._captured(match, text, helper_ime_id, previous_ime_id, evidence)
+
+    @staticmethod
+    def _captured(
+        match: UiMatch,
+        text: str,
+        helper_ime_id: str,
+        previous_ime_id: str,
+        evidence: list[str],
+    ) -> UnicodeTextInput:
         return UnicodeTextInput(
             match=match,
             text_length=len(text),

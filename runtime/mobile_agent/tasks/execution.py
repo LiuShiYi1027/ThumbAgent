@@ -242,6 +242,8 @@ class _WorkItem:
     cancel_event: threading.Event
     pause_event: threading.Event
     resume_event: threading.Event
+    # queued-paused 任务被工作线程跳过后置位；resume 据此决定是否重新入队。
+    parked: bool = False
 
 
 class AsyncTaskExecutor:
@@ -369,7 +371,19 @@ class AsyncTaskExecutor:
                 )
             item.cancel_event.set()
             now = _now()
-            if execution.status is ExecutionStatus.QUEUED:
+            never_started = (
+                execution.status is ExecutionStatus.QUEUED
+                or (
+                    execution.status is ExecutionStatus.PAUSED
+                    and execution.started_at is None
+                )
+            )
+            if never_started:
+                # queued 与 queued-paused 均未产生设备副作用，取消立即收尾；
+                # parked 项不再等待 resume，直接从工作项索引中移除。
+                if item.parked:
+                    item.parked = False
+                    self._items.pop(task_id, None)
                 error = _cancelled_error()
                 item.completion_handler(
                     TaskRun(
@@ -423,7 +437,10 @@ class AsyncTaskExecutor:
             execution = self._store.get_execution(task_id)
             if execution.status in _TERMINAL or execution.status is ExecutionStatus.PAUSED:
                 return execution
-            if execution.status is not ExecutionStatus.RUNNING:
+            if execution.status not in {
+                ExecutionStatus.QUEUED,
+                ExecutionStatus.RUNNING,
+            }:
                 raise MobileAgentError(
                     code="TASK_STATE_CONFLICT",
                     category=ErrorCategory.EXECUTION,
@@ -439,18 +456,31 @@ class AsyncTaskExecutor:
                     message="任务不在当前 Runtime 的可暂停执行上下文中",
                 )
             item.pause_event.set()
-            updated = replace(execution, pause_requested=True)
+            if execution.status is ExecutionStatus.QUEUED:
+                # 排队任务本无轮次边界，暂停立即生效；执行器取任务时跳过
+                # paused 项，resume 时重新入队（ITER-0064）。
+                updated = replace(
+                    execution,
+                    status=ExecutionStatus.PAUSED,
+                    pause_requested=True,
+                )
+            else:
+                updated = replace(execution, pause_requested=True)
             self._store.save_execution(updated)
         self._append_event(updated, TaskEventType.PAUSE_REQUESTED, {})
+        if updated.status is ExecutionStatus.PAUSED:
+            self._append_event(updated, TaskEventType.PAUSED, {})
         return updated
 
     def resume(self, task_id: str) -> TaskExecution:
         """Resume a paused task; the agent re-observes before its next action.
 
-        暂停请求尚未到达边界时恢复只需撤回请求；已暂停时唤醒执行器，
-        task.resumed 事件由执行器在真正继续时发出。
+        暂停请求尚未到达边界时恢复只需撤回请求；running-paused 唤醒执行器，
+        task.resumed 事件由执行器在真正继续时发出；queued-paused 直接回到
+        queued 等待重新取用，task.resumed 事件在此处发出（ITER-0064）。
         """
 
+        queued_resumed: TaskExecution | None = None
         with self._lock:
             execution = self._store.get_execution(task_id)
             if execution.status in _TERMINAL:
@@ -464,11 +494,26 @@ class AsyncTaskExecutor:
                         message="任务不在当前 Runtime 的可恢复执行上下文中",
                     )
                 item.pause_event.clear()
-                item.resume_event.set()
-                updated = replace(execution, pause_requested=False)
-                self._store.save_execution(updated)
-                return updated
-            if execution.status is ExecutionStatus.RUNNING and execution.pause_requested:
+                if execution.started_at is None:
+                    # 从未进入 running：回到 queued；工作项若已被执行器跳过
+                    # （parked）则重新入队，否则仍在队列中等待取出。
+                    requeue = item.parked
+                    item.parked = False
+                    updated = replace(
+                        execution,
+                        status=ExecutionStatus.QUEUED,
+                        pause_requested=False,
+                    )
+                    self._store.save_execution(updated)
+                    if requeue:
+                        self._queue.put(item)
+                    queued_resumed = updated
+                else:
+                    item.resume_event.set()
+                    updated = replace(execution, pause_requested=False)
+                    self._store.save_execution(updated)
+                    return updated
+            elif execution.status is ExecutionStatus.RUNNING and execution.pause_requested:
                 item = self._items.get(task_id)
                 if item is not None:
                     item.pause_event.clear()
@@ -476,15 +521,34 @@ class AsyncTaskExecutor:
                 updated = replace(execution, pause_requested=False)
                 self._store.save_execution(updated)
                 return updated
-            raise MobileAgentError(
-                code="TASK_STATE_CONFLICT",
-                category=ErrorCategory.EXECUTION,
-                message="任务当前状态不能恢复",
-            )
+            else:
+                raise MobileAgentError(
+                    code="TASK_STATE_CONFLICT",
+                    category=ErrorCategory.EXECUTION,
+                    message="任务当前状态不能恢复",
+                )
+        assert queued_resumed is not None
+        self._append_event(
+            queued_resumed,
+            TaskEventType.RESUMED,
+            {"takeover": True, "resume_reason": "user"},
+        )
+        return queued_resumed
 
     def _worker_loop(self) -> None:
         while True:
             item = self._queue.get()
+            with self._lock:
+                current = self._store.get_execution(item.execution.task_id)
+                if (
+                    current.status is ExecutionStatus.PAUSED
+                    and not item.cancel_event.is_set()
+                ):
+                    # queued-paused：跳过执行但保留工作项索引，等待 resume
+                    # 重新入队；本次出队的 task_done 与后续重新入队配平。
+                    item.parked = True
+                    self._queue.task_done()
+                    continue
             try:
                 with self._lock:
                     current = self._store.get_execution(item.execution.task_id)

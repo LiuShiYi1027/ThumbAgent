@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
+import shutil
+import subprocess
 import unittest
 from email.message import Message
 from http import HTTPStatus
 from types import SimpleNamespace
 
+from mobile_agent.api.idempotency import stable_idempotency_key
 from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.web import TASK_UI_HTML
 
@@ -185,6 +189,114 @@ def _ui_get_handler(path: str) -> tuple[RuntimeRequestHandler, dict[str, object]
         {"status": status, "payload": payload}
     )
     return handler, captured
+
+
+def _extract_idempotency_block() -> str:
+    """提取内嵌 JS 中与服务端同算法的幂等键派生实现。"""
+
+    match = re.search(
+        r"// idempotency-key-derivation:start\n(?P<body>.*?)// idempotency-key-derivation:end",
+        TASK_UI_HTML,
+        re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("TASK_UI_HTML 缺少幂等键派生实现标记块")
+    return match.group("body")
+
+
+class WebUiIdempotencyKeyTests(unittest.TestCase):
+    """Web UI 幂等键：与服务端 stable_idempotency_key 同算法（webui- 前缀）。"""
+
+    def test_embedded_js_uses_stable_webui_derivation(self) -> None:
+        self.assertNotIn("newIdempotencyKey", TASK_UI_HTML)
+        block = _extract_idempotency_block()
+        self.assertIn("crypto.subtle.digest", block)
+        self.assertIn('"SHA-256"', block)
+        self.assertIn("webui-", block)
+        self.assertIn("TextEncoder", block)
+        # 与服务端 canonical JSON 对齐：键排序 + 紧凑分隔符
+        self.assertIn(".sort()", block)
+        # 5 个提交点都改为 await 派生稳定键（crypto.subtle.digest 是 async）
+        self.assertEqual(5, TASK_UI_HTML.count("await stableIdempotencyKey("))
+
+    @unittest.skipUnless(shutil.which("node"), "node 不可用，跳过跨语言一致性")
+    def test_js_derivation_matches_server_for_shared_vectors(self) -> None:
+        vectors = [
+            (
+                "/v1/tasks/agent.run/async",
+                {
+                    "goal": "打开设置",
+                    "device_id": "adb:001",
+                    "confirmed": True,
+                    "max_rounds": 6,
+                    "deadline_seconds": 600,
+                },
+            ),
+            (
+                "/v1/tasks/device.logs.collect/async",
+                {
+                    "device_id": "adb:001",
+                    "max_lines": 500,
+                    "minimum_level": "info",
+                    "confirmed": True,
+                    "deadline_seconds": 60,
+                },
+            ),
+            (
+                "/v1/tasks/device.performance.snapshot/async",
+                {"device_id": "adb:001", "deadline_seconds": 90},
+            ),
+            (
+                "/v1/tasks/local.data.cleanup/async",
+                {
+                    "approval_id": "approval_0123456789abcdef",
+                    "confirmed": True,
+                    "deadline_seconds": 120,
+                },
+            ),
+            (
+                "/v1/tasks/settings.scroll_navigate/async",
+                {
+                    "device_id": "adb:001",
+                    "target_selector": {
+                        "value": "亮度",
+                        "strategy": "text",
+                        "match": "contains",
+                    },
+                },
+            ),
+        ]
+        script = (
+            _extract_idempotency_block()
+            + "\nconst vectors = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
+            + "(async () => {\n"
+            + "  const out = [];\n"
+            + "  for (const { endpoint, params } of vectors) {\n"
+            + "    out.push(await stableIdempotencyKey(endpoint, params));\n"
+            + "    out.push(await stableIdempotencyKey(endpoint, params));\n"
+            + "  }\n"
+            + "  process.stdout.write(JSON.stringify(out));\n"
+            + "})().catch((error) => { console.error(error); process.exit(1); });\n"
+        )
+        completed = subprocess.run(
+            ["node", "-e", script],
+            input=json.dumps(
+                [{"endpoint": endpoint, "params": params} for endpoint, params in vectors]
+            ),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        js_keys = json.loads(completed.stdout)
+        self.assertEqual(2 * len(vectors), len(js_keys))
+        for index, (endpoint, params) in enumerate(vectors):
+            with self.subTest(endpoint=endpoint):
+                expected = stable_idempotency_key("webui", endpoint, params)
+                first, second = js_keys[2 * index : 2 * index + 2]
+                self.assertEqual(first, second, "同参数两次调用必须派生同一键")
+                self.assertEqual(expected, first)
+        self.assertNotEqual(js_keys[0], js_keys[2], "异参数必须派生异键")
 
 
 class _FakeWriter:

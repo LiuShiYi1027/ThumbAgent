@@ -565,6 +565,28 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         self.assertEqual("unknown_outcome", recovered.error["outcome"])
         self.assertEqual("task.completed", events[-1]["event_type"])
 
+    def test_sqlite_recovery_fails_queued_paused_execution_without_replay(self) -> None:
+        """queued 时暂停的执行（从未 running）重启后以 TASK_INTERRUPTED 失败。"""
+        store = SQLiteTaskExecutionStore(self.root / "queued-paused.db")
+        execution = TaskExecution(
+            task_id="task_00000000000000000000000000000006",
+            task_type="agent.run",
+            device_id="fake:android-001",
+            goal="queued paused",
+            status=ExecutionStatus.PAUSED,
+            submitted_at=_now(),
+            pause_requested=True,
+        )
+        store.save_execution(execution)
+
+        store.recover_incomplete_executions()
+
+        recovered = store.get_execution(execution.task_id)
+        events = store.list_execution_events(execution.task_id)
+        self.assertEqual(ExecutionStatus.FAILED, recovered.status)
+        self.assertEqual("TASK_INTERRUPTED", recovered.error["code"])
+        self.assertEqual("task.completed", events[-1]["event_type"])
+
     def test_sqlite_recovery_adopts_terminal_task_run_from_crash_window(self) -> None:
         """崩溃窗口：TaskRun 已终态落库而 execution 仍为 running 时，恢复必须
         采纳 TaskStore 终态，不得写入与之矛盾的 TASK_INTERRUPTED。"""
@@ -906,7 +928,67 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         self.assertNotIn("task.paused", event_types)
         self.assertNotIn("task.resumed", event_types)
 
-    def test_pause_on_queued_task_conflicts(self) -> None:
+    def test_queued_task_pauses_and_resume_requeues(self) -> None:
+        """queued 任务可直接暂停：执行器跳过 paused 任务，resume 回 queued 后正常执行。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        blocking = threading.Event()
+        release = threading.Event()
+        second_started = threading.Event()
+
+        async def blocking_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            blocking.set()
+            await asyncio.to_thread(release.wait)
+            return _task(task_id, "first", TaskStatus.SUCCEEDED)
+
+        async def second_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            second_started.set()
+            return _task(task_id, "second", TaskStatus.SUCCEEDED)
+
+        first = executor.submit("fake:android-001", "first", blocking_run, lambda task: None)
+        second = executor.submit("fake:android-001", "second", second_run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(blocking.wait(2), "first task did not start")
+        self.assertEqual(ExecutionStatus.QUEUED, executor.get(second.task_id).status)
+
+        paused = executor.pause(second.task_id)
+        self.assertEqual(ExecutionStatus.PAUSED, paused.status)
+        self.assertTrue(paused.pause_requested)
+
+        release.set()
+        first_done = _wait_for_status(executor, first.task_id, ExecutionStatus.SUCCEEDED)
+        self.assertIsNotNone(first_done, "first task did not finish")
+        # 留出执行器取出并跳过 paused 任务的窗口；暂停期间 second 不得启动
+        threading.Event().wait(0.2)
+        self.assertFalse(second_started.is_set(), "paused queued task started")
+        self.assertEqual(ExecutionStatus.PAUSED, executor.get(second.task_id).status)
+
+        resumed = executor.resume(second.task_id)
+        self.assertEqual(ExecutionStatus.QUEUED, resumed.status)
+        self.assertFalse(resumed.pause_requested)
+        self.assertTrue(second_started.wait(2), "resumed task did not run")
+        final = _wait_for_status(executor, second.task_id, ExecutionStatus.SUCCEEDED)
+        self.assertIsNotNone(final, "resumed task did not finish")
+        event_types = [
+            event["event_type"] for event in executor.list_events(second.task_id)
+        ]
+        self.assertIn("task.pause_requested", event_types)
+        self.assertIn("task.paused", event_types)
+        self.assertIn("task.resumed", event_types)
+
+    def test_resume_on_plain_queued_task_still_conflicts(self) -> None:
+        """未暂停的 queued 任务不能 resume；语义只对 queued-paused 开放。"""
         store = _NotifyingExecutionStore()
         executor = AsyncTaskExecutor(store)
         blocking = threading.Event()
@@ -930,22 +1012,60 @@ class AsyncTaskExecutionTests(unittest.TestCase):
         ) -> TaskRun:
             return _task(task_id, "second", TaskStatus.SUCCEEDED)
 
-        first = executor.submit("fake:android-001", "first", blocking_run, lambda task: None)
+        executor.submit("fake:android-001", "first", blocking_run, lambda task: None)
         second = executor.submit("fake:android-001", "second", second_run, lambda task: None)
         self.addCleanup(release.set)
 
         self.assertTrue(blocking.wait(2), "first task did not start")
         with self.assertRaises(MobileAgentError) as raised:
-            executor.pause(second.task_id)
-        self.assertEqual("TASK_STATE_CONFLICT", raised.exception.code)
-        with self.assertRaises(MobileAgentError) as resume_raised:
             executor.resume(second.task_id)
-        self.assertEqual("TASK_STATE_CONFLICT", resume_raised.exception.code)
+        self.assertEqual("TASK_STATE_CONFLICT", raised.exception.code)
+
+    def test_cancel_queued_paused_task_finishes_cancelled(self) -> None:
+        """queued-paused 任务取消：立即按取消收尾，执行器不再取用该任务。"""
+        store = _NotifyingExecutionStore()
+        executor = AsyncTaskExecutor(store)
+        blocking = threading.Event()
+        release = threading.Event()
+        second_started = threading.Event()
+
+        async def blocking_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            blocking.set()
+            await asyncio.to_thread(release.wait)
+            return _task(task_id, "first", TaskStatus.SUCCEEDED)
+
+        async def second_run(
+            task_id: str,
+            on_step: object,
+            cancelled: object,
+            deadline_exceeded: object,
+        ) -> TaskRun:
+            second_started.set()
+            return _task(task_id, "second", TaskStatus.SUCCEEDED)
+
+        first = executor.submit("fake:android-001", "first", blocking_run, lambda task: None)
+        second = executor.submit("fake:android-001", "second", second_run, lambda task: None)
+        self.addCleanup(release.set)
+
+        self.assertTrue(blocking.wait(2), "first task did not start")
+        executor.pause(second.task_id)
+        cancelled = executor.cancel(second.task_id)
+        self.assertEqual(ExecutionStatus.CANCELLED, cancelled.status)
+        self.assertTrue(cancelled.result_available)
+        self.assertEqual("TASK_CANCELLED", cancelled.error["code"])
 
         release.set()
-        self.assertTrue(store.terminal.wait(2), "queued tasks did not finish")
+        first_done = _wait_for_status(executor, first.task_id, ExecutionStatus.SUCCEEDED)
+        self.assertIsNotNone(first_done, "first task did not finish")
+        threading.Event().wait(0.2)
+        self.assertFalse(second_started.is_set(), "cancelled queued-paused task started")
         self.assertEqual(
-            ExecutionStatus.SUCCEEDED, executor.get(first.task_id).status
+            ExecutionStatus.CANCELLED, executor.get(second.task_id).status
         )
 
     def test_cancel_while_paused_finishes_cancelled(self) -> None:
