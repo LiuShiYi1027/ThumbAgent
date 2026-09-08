@@ -172,7 +172,12 @@ function Workbench() {
             devices={devices}
             availability={availability}
             busy={submitMutation.isPending}
-            onSubmit={setPendingIntent}
+            onSubmit={(intent) => {
+              // 新意图打开确认框前清掉上一次提交的失败状态，
+              // 否则旧错误会残留在新对话框里（react-query mutation 粘性）。
+              submitMutation.reset()
+              setPendingIntent(intent)
+            }}
           />
         ) : null}
 

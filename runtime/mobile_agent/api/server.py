@@ -32,6 +32,7 @@ def _interface_error(
     message: str,
     *,
     category: ErrorCategory = ErrorCategory.VALIDATION,
+    details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """接口层错误统一信封，形状与 MobileAgentError.to_dict 完全一致。"""
 
@@ -41,6 +42,7 @@ def _interface_error(
             category=category,
             message=message,
             outcome=ErrorOutcome.REJECTED,
+            details=details or {},
         ).to_dict()
     }
 
@@ -1076,9 +1078,14 @@ class RuntimeRequestHandler(BaseHTTPRequestHandler):
                 status, payload = HTTPStatus.NOT_FOUND, _interface_error(
                     "RESOURCE_NOT_FOUND", "资源不存在"
                 )
-        except (ValueError, json.JSONDecodeError):
+        except (ValueError, json.JSONDecodeError) as error:
+            # ValueError 消息携带有问题的字段名（如 "max_rounds"），随 details
+            # 透出——桌面端上次排查 INVLAID_ARGUMENT 时因 details 为空无法定位。
+            detail = str(error)
             status, payload = HTTPStatus.BAD_REQUEST, _interface_error(
-                "INVALID_ARGUMENT", "请求参数无效"
+                "INVALID_ARGUMENT",
+                "请求参数无效",
+                details={"field": detail} if detail else {},
             )
         except MobileAgentError as error:
             status, payload = HTTPStatus.SERVICE_UNAVAILABLE, {"error": error.to_dict()}
