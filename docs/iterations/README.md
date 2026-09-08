@@ -68,6 +68,7 @@
 | [ITER-0061](./0061-agent-working-memory-and-results/plan.md) | Agent Working Memory & Task Results | Completed | Agent 内核前置：跨轮工作记忆（scratchpad）与结构化任务结果（finish 携带 answer），解锁比价/回填/带回类意图 |
 | [ITER-0062](./0062-declarative-skill-dsl/plan.md) | Declarative Skill DSL & Registry | Completed | 声明式复合 Skill DSL + Skill Registry 持久化与管理面；首驱动场景 app.stability_test（ADR-0021 待确认） |
 | [ITER-0063](./0063-dsl-observation-skills/plan.md) | DSL Observation Skills | Completed | DSL 引用观察类内置 Skill 白名单（ADR-0021 修订一）；稳定性测试完整化：性能采样 + 崩溃/ANR 证据 |
+| [ITER-0064](./0064-agent-reliability-batch/plan.md) | Agent Reliability Batch | Planned | 存量可靠性收口：阻塞式模型调用、unicode 读回时机、queued 暂停、捷径副作用证据、Web UI 幂等键 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。
