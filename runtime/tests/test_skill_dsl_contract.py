@@ -13,6 +13,7 @@ from mobile_agent.domain.errors import MobileAgentError
 from mobile_agent.domain.skill_dsl import (
     IfStep,
     LoopStep,
+    SkillStep,
     ToolStep,
     parse_skill_dsl_document,
 )
@@ -82,12 +83,20 @@ def _valid_document() -> dict:
 
 
 class SkillDslContractSchemaTests(unittest.TestCase):
-    def test_schema_declares_control_flow_trio(self) -> None:
+    def test_schema_declares_control_flow_and_reference_kinds(self) -> None:
         schema = _load_schema()
         defs = schema["$defs"]
-        self.assertEqual({"tool_step", "loop_step", "if_step"}, set(defs))
+        self.assertEqual({"tool_step", "skill_step", "loop_step", "if_step"}, set(defs))
         items = schema["properties"]["steps"]["items"]
-        self.assertEqual(3, len(items["oneOf"]))
+        self.assertEqual(4, len(items["oneOf"]))
+
+    def test_skill_step_shape(self) -> None:
+        skill_step = _load_schema()["$defs"]["skill_step"]
+        self.assertEqual("skill", skill_step["properties"]["type"]["const"])
+        self.assertEqual(
+            {"type", "step_id", "skill_id", "arguments"}, set(skill_step["required"])
+        )
+        self.assertFalse(skill_step["additionalProperties"])
 
     def test_loop_requires_dual_bounds(self) -> None:
         loop = _load_schema()["$defs"]["loop_step"]
@@ -98,17 +107,19 @@ class SkillDslContractSchemaTests(unittest.TestCase):
         self.assertEqual(600, loop["properties"]["max_duration_seconds"]["maximum"])
         self.assertEqual(200, loop["properties"]["max_iterations"]["maximum"])
 
-    def test_control_bodies_contain_tool_steps_only(self) -> None:
+    def test_control_bodies_contain_action_steps_only(self) -> None:
         defs = _load_schema()["$defs"]
+        allowed = {"#/$defs/tool_step", "#/$defs/skill_step"}
         for holder, key in (
             (defs["loop_step"], "steps"),
             (defs["if_step"], "then"),
             (defs["if_step"], "else"),
         ):
-            self.assertEqual(
-                "#/$defs/tool_step",
-                holder["properties"][key]["items"]["$ref"],
-            )
+            members = {
+                entry["$ref"]
+                for entry in holder["properties"][key]["items"]["oneOf"]
+            }
+            self.assertEqual(allowed, members)
 
     def test_condition_is_status_only(self) -> None:
         condition = _load_schema()["$defs"]["if_step"]["properties"]["condition"]
@@ -124,6 +135,88 @@ class SkillDslContractSchemaTests(unittest.TestCase):
         content = generated.read_text()
         for marker in ("ToolStep", "LoopStep", "IfStep", "SkillDsl"):
             self.assertIn(marker, content)
+
+
+class SkillStepContractTests(unittest.TestCase):
+    def test_skill_step_parses_and_resolves_refs(self) -> None:
+        payload = _valid_document()
+        payload["steps"].insert(
+            1,
+            {
+                "type": "skill",
+                "step_id": "sample",
+                "skill_id": "device.performance.snapshot",
+                "arguments": {"app_id": "$inputs.app_id"},
+            },
+        )
+        document = parse_skill_dsl_document(payload)
+        step = document.steps[1]
+        self.assertIsInstance(step, SkillStep)
+        self.assertEqual("device.performance.snapshot", step.skill_id)
+
+    def test_loop_body_accepts_skill_steps_but_not_control_flow(self) -> None:
+        payload = _valid_document()
+        payload["steps"][1]["steps"].append(
+            {
+                "type": "skill",
+                "step_id": "loop_sample",
+                "skill_id": "device.logs.collect",
+                "arguments": {},
+            }
+        )
+        document = parse_skill_dsl_document(payload)
+        loop = document.steps[1]
+        self.assertIsInstance(loop.steps[-1], SkillStep)
+
+    def test_skill_step_rejects_bad_skill_id(self) -> None:
+        payload = _valid_document()
+        payload["steps"].append(
+            {
+                "type": "skill",
+                "step_id": "bad",
+                "skill_id": "not-a-skill",
+                "arguments": {},
+            }
+        )
+        with self.assertRaises(MobileAgentError) as raised:
+            parse_skill_dsl_document(payload)
+        self.assertEqual("skill_id", raised.exception.details["field"])
+
+    def test_non_whitelisted_skill_reference_rejected_at_derivation(self) -> None:
+        from mobile_agent.skills.dsl_risk import derive_skill_risk
+
+        for skill_id in (
+            "app.install",  # 写类内置 Skill 不在白名单
+            "custom.whatever",  # 自定义 Skill 不可引用
+        ):
+            payload = _valid_document()
+            payload["steps"].append(
+                {
+                    "type": "skill",
+                    "step_id": "ref",
+                    "skill_id": skill_id,
+                    "arguments": {},
+                }
+            )
+            document = parse_skill_dsl_document(payload)
+            with self.assertRaises(MobileAgentError, msg=skill_id) as raised:
+                derive_skill_risk(document)
+            self.assertEqual("SKILL_REFERENCE_NOT_ALLOWED", raised.exception.code)
+
+    def test_whitelisted_skill_reference_derives_medium_risk(self) -> None:
+        from mobile_agent.skills.dsl_risk import derive_skill_risk
+
+        payload = _valid_document()
+        payload["steps"] = [
+            {
+                "type": "skill",
+                "step_id": "sample",
+                "skill_id": "device.performance.snapshot",
+                "arguments": {"app_id": "$inputs.app_id"},
+            }
+        ]
+        document = parse_skill_dsl_document(payload)
+        self.assertEqual("medium", derive_skill_risk(document).value)
 
 
 class SkillDslParserTests(unittest.TestCase):

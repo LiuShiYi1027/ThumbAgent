@@ -11,12 +11,19 @@ export interface ToolStep {
   arguments: Record<string, unknown>;
 }
 
+export interface SkillStep {
+  type: "skill";
+  step_id: string;
+  skill_id: string;
+  arguments: Record<string, unknown>;
+}
+
 export interface LoopStep {
   type: "loop";
   step_id: string;
   max_duration_seconds: number;
   max_iterations: number;
-  steps: ToolStep[];
+  steps: Array<ToolStep | SkillStep>;
 }
 
 export interface IfStep {
@@ -27,8 +34,8 @@ export interface IfStep {
     field: "status";
     equals: "succeeded" | "failed";
   };
-  then: ToolStep[];
-  else?: ToolStep[];
+  then: Array<ToolStep | SkillStep>;
+  else?: Array<ToolStep | SkillStep>;
 }
 
 export interface SkillDsl {
@@ -47,5 +54,5 @@ export interface SkillDsl {
     minimum?: number;
     maximum?: number;
   }>;
-  steps: Array<ToolStep | LoopStep | IfStep>;
+  steps: Array<ToolStep | SkillStep | LoopStep | IfStep>;
 }

@@ -79,8 +79,23 @@
   稳定性测试等场景要求确定性遍历与固定采样节奏，模型规划不保证可复现；
   DSL 与 Agent 互补——DSL 管确定性编排，Agent 管开放式目标。
 
+## Amendment 1（2026-09-02，随 ITER-0063 立项确认）
+
+**Skill 级引用白名单**。ITER-0062 真机验收暴露：观察类工具全部是 Skill 中介
+（direct_invocation=False），DSL 步骤无法采样性能或采集日志，稳定性测试的
+核心产出缺失。修订执行边界决策 3：
+
+- DSL 步骤可引用**白名单内的内置观察类 Skill**（编译期常量：
+  `device.performance.snapshot`、`device.logs.collect`），以 `skill_step`
+  步骤类型表达；循环/分支体同样允许。
+- 不开放自定义 Skill 嵌套、不开放写类 Skill、白名单不接受文档或 REST 传入
+  扩展——扩充白名单需代码变更与本条款再审。
+- 被引用 Skill 仍走其既有 Skill 实现与 Policy 语义；派生风险取工具与被引用
+  Skill 组件的最大值（两者均 Medium → MEDIUM）。
+- 原决策 3 的其余部分（无递归、无任意表达式）不变。
+
 ## Follow-up
 
-- ITER-0062 落地本 ADR：DSL Contract Schema → 解释器 → Registry 持久化与
-  管理面 → `app.stability_test` 真机验收。
-- DSL 表达能力按真实需求拉动扩充；每新增一种控制流构造需重新审视执行边界。
+- ~~ITER-0062 落地本 ADR~~（已 Completed）。
+- Amendment 1 由 ITER-0063 落地；DSL 表达能力按真实需求拉动扩充，每新增一种
+  构造需重新审视执行边界。

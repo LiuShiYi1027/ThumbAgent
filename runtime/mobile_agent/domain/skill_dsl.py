@@ -34,8 +34,7 @@ MAX_LOOP_DURATION_SECONDS = 600
 MAX_LOOP_ITERATIONS = 200
 MAX_TIMEOUT_SECONDS = 1800
 
-StepType = Literal["tool", "loop", "if"]
-
+StepType = Literal["tool", "skill", "loop", "if"]
 
 def _invalid(field: str, message: str) -> MobileAgentError:    return MobileAgentError(
         code="SKILL_DSL_INVALID",
@@ -80,13 +79,30 @@ class ToolStep:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillStep:
+    """Reference a whitelisted built-in observation skill (ADR-0021 Amendment 1).
+
+    The whitelist itself is enforced by the skills layer (dsl_risk), not here;
+    this parser only validates document shape.
+    """
+
+    step_id: str
+    skill_id: str
+    arguments: dict[str, Any]
+
+    @property
+    def type(self) -> StepType:
+        return "skill"
+
+
+@dataclass(frozen=True, slots=True)
 class LoopStep:
     """Time-boxed bounded repetition over tool steps (dual bounds required)."""
 
     step_id: str
     max_duration_seconds: int
     max_iterations: int
-    steps: tuple[ToolStep, ...]
+    steps: tuple[ToolStep | SkillStep, ...]
 
     @property
     def type(self) -> StepType:
@@ -100,15 +116,15 @@ class IfStep:
     step_id: str
     condition_step: str
     condition_equals: Literal["succeeded", "failed"]
-    then_steps: tuple[ToolStep, ...]
-    else_steps: tuple[ToolStep, ...]
+    then_steps: tuple[ToolStep | SkillStep, ...]
+    else_steps: tuple[ToolStep | SkillStep, ...]
 
     @property
     def type(self) -> StepType:
         return "if"
 
 
-Step = ToolStep | LoopStep | IfStep
+Step = ToolStep | SkillStep | LoopStep | IfStep
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,14 +176,26 @@ def _parse_tool_step(payload: dict[str, Any]) -> ToolStep:
     return ToolStep(step_id=step_id, tool_id=tool_id, arguments=arguments)
 
 
-def _parse_body_steps(raw: Any, field: str) -> tuple[ToolStep, ...]:
+def _parse_skill_step(payload: dict[str, Any]) -> SkillStep:
+    step_id = _step_id(payload)
+    skill_id = payload.get("skill_id")
+    if not isinstance(skill_id, str) or not _SKILL_ID_RE.fullmatch(skill_id):
+        raise _invalid("skill_id", f"步骤 {step_id} 的 skill_id 必须是 domain.verb 形式")
+    arguments = _parse_arguments(payload.get("arguments"), f"{step_id}.arguments")
+    return SkillStep(step_id=step_id, skill_id=skill_id, arguments=arguments)
+
+
+def _parse_body_steps(raw: Any, field: str) -> tuple[ToolStep | SkillStep, ...]:
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_BODY_STEPS:
-        raise _invalid(field, f"{field} 必须是 1..{MAX_BODY_STEPS} 个工具步骤")
-    steps: list[ToolStep] = []
+        raise _invalid(field, f"{field} 必须是 1..{MAX_BODY_STEPS} 个动作步骤")
+    steps: list[ToolStep | SkillStep] = []
     for item in raw:
-        if not isinstance(item, dict) or item.get("type") != "tool":
-            raise _invalid(field, f"{field} 只允许工具步骤（不允许嵌套控制流）")
-        steps.append(_parse_tool_step(item))
+        if not isinstance(item, dict) or item.get("type") not in {"tool", "skill"}:
+            raise _invalid(field, f"{field} 只允许工具/技能引用步骤（不允许嵌套控制流）")
+        if item.get("type") == "tool":
+            steps.append(_parse_tool_step(item))
+        else:
+            steps.append(_parse_skill_step(item))
     return tuple(steps)
 
 
@@ -177,6 +205,8 @@ def _parse_step(payload: Any) -> Step:
     step_type = payload.get("type")
     if step_type == "tool":
         return _parse_tool_step(payload)
+    if step_type == "skill":
+        return _parse_skill_step(payload)
     if step_type == "loop":
         step_id = _step_id(payload)
         duration = payload.get("max_duration_seconds")
@@ -234,7 +264,7 @@ def _parse_step(payload: Any) -> Step:
             then_steps=_parse_body_steps(payload.get("then"), f"{step_id}.then"),
             else_steps=else_steps,
         )
-    raise _invalid("type", "步骤 type 只能是 tool / loop / if")
+    raise _invalid("type", "步骤 type 只能是 tool / skill / loop / if")
 
 
 def parse_skill_dsl_document(payload: Any) -> SkillDslDocument:
@@ -317,7 +347,9 @@ def parse_skill_dsl_document(payload: Any) -> SkillDslDocument:
 
     all_step_ids: list[str] = []
 
-    def _collect(step_list: tuple[Step, ...] | tuple[ToolStep, ...]) -> None:
+    def _collect(
+        step_list: tuple[Step, ...] | tuple[ToolStep | SkillStep, ...],
+    ) -> None:
         for step in step_list:
             all_step_ids.append(step.step_id)
             if isinstance(step, LoopStep):
