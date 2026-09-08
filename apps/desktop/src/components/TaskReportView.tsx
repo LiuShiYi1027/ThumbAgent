@@ -6,7 +6,14 @@ import type { AgentStepResult } from '@contracts/agent-step-result'
 import type { TaskEvent } from '@contracts/task-event'
 import type { TaskRun } from '@contracts/task-run'
 
-import { getTaskExecutionEvents, getTaskRun, stepScreenshotArtifactId } from '../api/client'
+import {
+  asCrashCheck,
+  asSamplingSeries,
+  getTaskExecutionEvents,
+  getTaskRun,
+  stepScreenshotArtifactId,
+  type SamplingSeriesPoint,
+} from '../api/client'
 import { ScreenshotImage } from './ScreenshotImage'
 import { StatusBadge, type BadgeTone } from './StatusBadge'
 
@@ -105,6 +112,106 @@ function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString()
 }
 
+/* ITER-0065: 稳定性报告——性能采样趋势（纯 SVG，mono 主题）。
+   数据形状由 client.ts 的 asSamplingSeries/asCrashCheck 在边界窄化。 */
+
+interface SamplingMetric {
+  key: string
+  label: string
+  className: string
+  pick: (point: SamplingSeriesPoint) => number
+  format: (value: number) => string
+}
+
+const samplingMetrics: SamplingMetric[] = [
+  {
+    key: 'cpu',
+    label: 'CPU',
+    className: 'sampling-line-cpu',
+    pick: (point) => point.cpu.total_usage_percent,
+    format: (value) => `${value.toFixed(1)}%`,
+  },
+  {
+    key: 'memory',
+    label: '内存',
+    className: 'sampling-line-memory',
+    pick: (point) => point.memory.used_percent,
+    format: (value) => `${value.toFixed(1)}%`,
+  },
+  {
+    key: 'battery',
+    label: '电池',
+    className: 'sampling-line-battery',
+    pick: (point) => point.battery.level_percent,
+    format: (value) => `${value.toFixed(0)}%`,
+  },
+]
+
+/** 紧凑 SVG 趋势图：CPU/内存/电池均为 0–100 百分比，共用一根轴。 */
+function SamplingSeriesChart({ points }: { points: SamplingSeriesPoint[] }) {
+  const width = 560
+  const height = 120
+  const padX = 10
+  const padY = 12
+  const xAt = (index: number): number =>
+    points.length === 1
+      ? width / 2
+      : padX + (index * (width - padX * 2)) / (points.length - 1)
+  const yAt = (value: number): number =>
+    padY + (1 - Math.min(100, Math.max(0, value)) / 100) * (height - padY * 2)
+  const latest = points[points.length - 1]
+  return (
+    <div className="sampling-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`性能采样趋势，共 ${points.length} 次采样`}
+        preserveAspectRatio="none"
+      >
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <line
+            key={tick}
+            className="sampling-grid"
+            x1={padX}
+            x2={width - padX}
+            y1={yAt(tick)}
+            y2={yAt(tick)}
+          />
+        ))}
+        {samplingMetrics.map((metric) => (
+          <polyline
+            key={metric.key}
+            className={`sampling-line ${metric.className}`}
+            points={points.map((point, index) => `${xAt(index)},${yAt(metric.pick(point))}`).join(' ')}
+          />
+        ))}
+        {points.map((point, index) => (
+          <rect
+            key={point.step_id}
+            className="sampling-dot"
+            x={xAt(index) - 2.5}
+            y={yAt(point.cpu.total_usage_percent) - 2.5}
+            width={5}
+            height={5}
+          />
+        ))}
+      </svg>
+      <div className="sampling-axis">
+        <span>{formatClock(points[0].captured_at)}</span>
+        <span>{formatClock(points[points.length - 1].captured_at)}</span>
+      </div>
+      <div className="sampling-legend">
+        {samplingMetrics.map((metric) => (
+          <span key={metric.key} className="sampling-legend-item">
+            <span className={`sampling-swatch ${metric.className}`} aria-hidden />
+            {metric.label} {metric.format(metric.pick(latest))}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function TaskReportView({ taskId }: { taskId: string }) {
   const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<string>>(new Set())
   const reportQuery = useQuery({
@@ -154,6 +261,9 @@ export function TaskReportView({ taskId }: { taskId: string }) {
   const takeoverIntervals = collectTakeoverIntervals(eventsQuery.data ?? [])
   // ITER-0061: surface the agent's final answer when the run produced one.
   const answer = report.result?.answer?.replace(/\s+/g, ' ').trim()
+  // ITER-0065: stability evidence; absent fields degrade to no block at all.
+  const samplingSeries = asSamplingSeries(report.evidence_summary.sampling_series)
+  const crashCheck = asCrashCheck(report.evidence_summary.crash_check)
 
   return (
     <section className="panel">
@@ -191,6 +301,41 @@ export function TaskReportView({ taskId }: { taskId: string }) {
         <div className="report-answer">
           <span className="report-answer-label">结论</span>
           <p className="report-answer-text">{answer}</p>
+        </div>
+      ) : null}
+      {crashCheck ? (
+        <div className="report-crash-check">
+          {crashCheck.signatures.length === 0 ? (
+            <StatusBadge
+              tone="ok"
+              label={`未检测到崩溃/ANR 签名（检查 ${crashCheck.checked_lines} 行）`}
+            />
+          ) : (
+            <>
+              <StatusBadge
+                tone="error"
+                label={`检测到 ${crashCheck.signatures.length} 个崩溃/ANR 签名`}
+              />
+              <ul className="crash-signature-list">
+                {crashCheck.signatures.map((signature, index) => (
+                  <li key={`${signature.kind}-${index}`}>
+                    <span className="crash-signature-kind">
+                      {signature.kind === 'crash' ? '崩溃' : 'ANR'}
+                    </span>
+                    <span className="mono">{signature.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      ) : null}
+      {samplingSeries ? (
+        <div className="report-sampling">
+          <span className="report-sampling-label">
+            性能采样序列（{samplingSeries.length} 次）
+          </span>
+          <SamplingSeriesChart points={samplingSeries} />
         </div>
       ) : null}
       <ol className="step-list">

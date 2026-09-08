@@ -1,4 +1,5 @@
 import type { Device } from '@contracts/device'
+import type { DevicePerformanceSnapshot } from '@contracts/device-performance-snapshot'
 import type { RuntimeReadiness } from '@contracts/runtime-readiness'
 import type { TaskEvent } from '@contracts/task-event'
 import type { TaskExecution } from '@contracts/task-execution'
@@ -203,6 +204,100 @@ export function latestScreenshotFromEvents(events: TaskEvent[]): string | null {
     }
   }
   return null
+}
+
+/** Canonical object guard for this package's boundary narrowing. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/* ITER-0065: DSL 稳定性任务把性能采样序列与崩溃判定写入自由形态的
+   evidence_summary（task-run schema 为宽松 object）。在 API 边界窄化一次，
+   组件消费命名类型，不让 any 泄漏进渲染层。 */
+
+export interface SamplingSeriesPoint {
+  step_id: string
+  captured_at: string
+  cpu: DevicePerformanceSnapshot['cpu']
+  memory: DevicePerformanceSnapshot['memory']
+  battery: DevicePerformanceSnapshot['battery']
+  system: DevicePerformanceSnapshot['system']
+}
+
+export interface CrashSignature {
+  kind: 'crash' | 'anr'
+  summary: string
+}
+
+export interface CrashCheckSummary {
+  checked_lines: number
+  signatures: CrashSignature[]
+}
+
+type SnapshotSlice = Omit<SamplingSeriesPoint, 'step_id' | 'captured_at'>
+
+function asSnapshotSlice(value: Record<string, unknown>): SnapshotSlice | null {
+  const { cpu, memory, battery, system } = value
+  if (!isRecord(cpu) || !isRecord(memory) || !isRecord(battery) || !isRecord(system)) {
+    return null
+  }
+  if (
+    typeof cpu.total_usage_percent !== 'number' ||
+    typeof memory.used_percent !== 'number' ||
+    typeof battery.level_percent !== 'number' ||
+    typeof system.uptime_seconds !== 'number'
+  ) {
+    return null
+  }
+  return {
+    cpu: cpu as DevicePerformanceSnapshot['cpu'],
+    memory: memory as DevicePerformanceSnapshot['memory'],
+    battery: battery as DevicePerformanceSnapshot['battery'],
+    system: system as DevicePerformanceSnapshot['system'],
+  }
+}
+
+/** 窄化 evidence_summary.sampling_series；元素不符即丢弃，全部不符返回 null。 */
+export function asSamplingSeries(value: unknown): SamplingSeriesPoint[] | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+  const points: SamplingSeriesPoint[] = []
+  for (const entry of value) {
+    if (!isRecord(entry)) {
+      continue
+    }
+    const slice = asSnapshotSlice(entry)
+    if (
+      slice &&
+      typeof entry.step_id === 'string' &&
+      typeof entry.captured_at === 'string'
+    ) {
+      points.push({ step_id: entry.step_id, captured_at: entry.captured_at, ...slice })
+    }
+  }
+  return points.length > 0 ? points : null
+}
+
+/** 窄化 evidence_summary.crash_check；形状不符返回 null（旧任务报告降级）。 */
+export function asCrashCheck(value: unknown): CrashCheckSummary | null {
+  if (!isRecord(value) || typeof value.checked_lines !== 'number') {
+    return null
+  }
+  if (!Array.isArray(value.signatures)) {
+    return null
+  }
+  const signatures: CrashSignature[] = []
+  for (const entry of value.signatures) {
+    if (
+      isRecord(entry) &&
+      (entry.kind === 'crash' || entry.kind === 'anr') &&
+      typeof entry.summary === 'string'
+    ) {
+      signatures.push({ kind: entry.kind, summary: entry.summary })
+    }
+  }
+  return { checked_lines: value.checked_lines, signatures }
 }
 
 /** After-action screenshot artifact id of one persisted task step. */

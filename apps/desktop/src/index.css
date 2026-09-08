@@ -790,6 +790,132 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* ITER-0065: stability evidence — crash verdict & sampling series */
+
+.report-crash-check {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--panel-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.crash-signature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.crash-signature-list .mono {
+  word-break: break-all;
+}
+
+.crash-signature-kind {
+  font-weight: 700;
+  color: var(--error);
+  margin-right: 6px;
+}
+
+.report-sampling {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--panel-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-sampling-label {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.sampling-chart svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+.sampling-grid {
+  stroke: var(--border-soft);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+
+.sampling-line {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.sampling-line-cpu {
+  stroke: var(--ink);
+}
+
+.sampling-line-memory {
+  stroke: var(--text-secondary);
+  stroke-dasharray: 5 3;
+}
+
+.sampling-line-battery {
+  stroke: var(--text-faint);
+  stroke-dasharray: 1.5 3;
+}
+
+.sampling-dot {
+  fill: var(--panel);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.sampling-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sampling-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.sampling-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sampling-swatch {
+  display: inline-block;
+  width: 16px;
+  border-top: 1.5px solid var(--ink);
+}
+
+.sampling-swatch.sampling-line-memory {
+  border-top-style: dashed;
+  border-top-color: var(--text-secondary);
+}
+
+.sampling-swatch.sampling-line-battery {
+  border-top-style: dotted;
+  border-top-color: var(--text-faint);
+}
+
 .step-list li {
   padding: 10px 0;
   border-bottom: 1px solid var(--border-soft);
