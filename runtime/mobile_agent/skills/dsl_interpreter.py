@@ -30,6 +30,11 @@ run_dsl_skill never raises MobileAgentError for expected failures: they are
 returned as DslSkillResult(status="failed", error=...). On a preflight
 failure caused by an unregistered tool, derived_risk cannot be computed and
 stays LOW in the result; the error field carries the real cause.
+
+ITER-0065: settled skill-step records carry an output_summary distilled from
+the invoker result through a fixed per-skill key whitelist
+(_SKILL_OUTPUT_SUMMARY_KEYS), so stability reporting sees aggregate snapshots
+and crash verdicts without raw log content ever entering DslStepRecord.
 """
 
 from __future__ import annotations
@@ -69,6 +74,9 @@ class DslStepRecord:
 
     tool_id 为 None 表示 loop/if 容器或 skill 引用步骤；skill 步骤时
     tool_id=None 且 skill_id 有值，容器记录两者均为 None。
+    output_summary（ITER-0065）只出现在成功的白名单 skill 步骤上：按
+    _SKILL_OUTPUT_SUMMARY_KEYS 从 invoker 结果透传的聚合摘要键，其余情况
+    一律为 None（tool 步骤、容器步骤、失败步骤）。
     """
 
     step_id: str
@@ -76,6 +84,28 @@ class DslStepRecord:
     status: StepStatus
     error_code: str | None = None
     skill_id: str | None = None
+    output_summary: dict[str, Any] | None = None
+
+
+# output_summary 白名单：skill 步骤结果只透传稳定性报告呈现所需的聚合键。
+# 性能快照保留 snapshot 原样（聚合 cpu/memory/battery/system，无进程细节）；
+# 日志采集保留崩溃判定与 Artifact 元数据，原始日志文本永不进入记录。
+_SKILL_OUTPUT_SUMMARY_KEYS: dict[str, tuple[str, ...]] = {
+    "device.performance.snapshot": ("snapshot",),
+    "device.logs.collect": ("crash_check", "artifact"),
+}
+
+
+def _skill_output_summary(
+    skill_id: str, result: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Distill an invoker result to the whitelisted summary keys; None if none."""
+
+    keys = _SKILL_OUTPUT_SUMMARY_KEYS.get(skill_id)
+    if keys is None:
+        return None
+    summary = {key: result[key] for key in keys if key in result}
+    return summary or None
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,7 +321,7 @@ async def run_dsl_skill(
         # Skill 引用步骤：preflight 已保证 invoker 存在且 skill_id 在白名单内。
         assert skill_invoker is not None
         try:
-            await skill_invoker(step.skill_id, device_id, arguments)
+            output = await skill_invoker(step.skill_id, device_id, arguments)
         except MobileAgentError as error:
             return (
                 DslStepRecord(
@@ -300,7 +330,13 @@ async def run_dsl_skill(
                 error,
             )
         return (
-            DslStepRecord(step.step_id, None, "succeeded", skill_id=step.skill_id),
+            DslStepRecord(
+                step.step_id,
+                None,
+                "succeeded",
+                skill_id=step.skill_id,
+                output_summary=_skill_output_summary(step.skill_id, output),
+            ),
             None,
         )
 

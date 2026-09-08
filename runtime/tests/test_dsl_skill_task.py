@@ -458,5 +458,172 @@ class DslSkillTaskRunnerBoundaryTests(unittest.TestCase):
         self.assertEqual([], self.adapter.actions)
 
 
+def _stability_document() -> dict:
+    """采样型 DSL 文档：循环内性能采样 + 循环后日志采集（ITER-0065）。"""
+
+    return {
+        "schema_version": "1.0.0",
+        "skill_id": "custom.stability_probe",
+        "skill_version": "1.0.0",
+        "name": "Stability probe",
+        "description": "Sample performance each iteration, then collect logs.",
+        "inputs": [
+            {"name": "app_id", "type": "string", "required": True, "max_length": 128}
+        ],
+        "steps": [
+            {
+                "type": "loop",
+                "step_id": "traverse",
+                "max_duration_seconds": 600,
+                "max_iterations": 2,
+                "steps": [
+                    {
+                        "type": "skill",
+                        "step_id": "sample_performance",
+                        "skill_id": "device.performance.snapshot",
+                        "arguments": {},
+                    }
+                ],
+            },
+            {
+                "type": "skill",
+                "step_id": "collect_logs",
+                "skill_id": "device.logs.collect",
+                "arguments": {"max_lines": 500},
+            },
+        ],
+    }
+
+
+class _FakeObservationInvoker:
+    """返回构造样本的观察 Skill 假实现；crash_check=False 模拟旧结果形状。"""
+
+    def __init__(self, crash_check: bool = True) -> None:
+        self.snapshot_count = 0
+        self._crash_check = crash_check
+
+    async def __call__(
+        self, skill_id: str, device_id: str, arguments: dict
+    ) -> dict:
+        if skill_id == "device.performance.snapshot":
+            self.snapshot_count += 1
+            return {
+                "skill_call_id": f"skillcall_perf_{self.snapshot_count}",
+                "snapshot": {
+                    "captured_at": f"2026-09-08T10:00:0{self.snapshot_count}Z",
+                    "cpu": {"total_usage_percent": 10.0 + self.snapshot_count},
+                    "memory": {
+                        "total_bytes": 1000,
+                        "free_bytes": 400,
+                        "used_percent": 60.0,
+                    },
+                    "battery": {
+                        "level_percent": 80.0,
+                        "temperature_celsius": 31.0,
+                        "status": "discharging",
+                        "plugged": "none",
+                    },
+                    "system": {
+                        "uptime_seconds": 100.0,
+                        "load_average_1m": 1.0,
+                        "load_average_5m": 0.9,
+                        "load_average_15m": 0.8,
+                    },
+                },
+                "artifact": {"artifact_id": f"artifact_perf_{self.snapshot_count}"},
+            }
+        if skill_id == "device.logs.collect":
+            payload = {
+                "skill_call_id": "skillcall_logs",
+                "artifact": {"artifact_id": "artifact_logs"},
+            }
+            if self._crash_check:
+                payload["crash_check"] = {
+                    "checked_lines": 500,
+                    "signatures": [
+                        {
+                            "kind": "crash",
+                            "summary": "FATAL EXCEPTION in com.example.app",
+                        }
+                    ],
+                }
+            return payload
+        raise AssertionError(f"unexpected skill_id {skill_id}")
+
+
+class DslSkillTaskEvidenceSummaryTests(unittest.TestCase):
+    """evidence_summary 的 sampling_series / crash_check 汇入（ITER-0065）。"""
+
+    def setUp(self) -> None:
+        self.directory = TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.adapter = FakeDeviceAdapter()
+        self.tools = ToolRuntime(
+            self.adapter,
+            ArtifactStore(Path(self.directory.name)),
+            ToolRegistry(),
+            PolicyEngine(),
+        )
+
+    def _run(self, document: dict, skill_invoker=None) -> object:
+        runner = DslSkillTaskRunner(self.tools, skill_invoker)
+        return asyncio.run(
+            runner.run(
+                "task_" + "1" * 32,
+                DEVICE_ID,
+                parse_skill_dsl_document(document),
+                document_sha256="e" * 64,
+                inputs={"app_id": "com.android.settings"},
+                confirmed=True,
+                deadline_seconds=600.0,
+            )
+        )
+
+    def test_sampling_series_and_crash_check_in_evidence_summary(self) -> None:
+        invoker = _FakeObservationInvoker()
+        task = self._run(_stability_document(), invoker)
+
+        self.assertEqual(TaskStatus.SUCCEEDED, task.status)
+        evidence = task.evidence_summary
+        series = evidence["sampling_series"]
+        self.assertEqual(2, len(series))
+        for index, sample in enumerate(series, start=1):
+            self.assertEqual("sample_performance", sample["step_id"])
+            self.assertEqual(f"2026-09-08T10:00:0{index}Z", sample["captured_at"])
+            self.assertEqual(
+                {"total_usage_percent": 10.0 + index}, sample["cpu"]
+            )
+            self.assertEqual(60.0, sample["memory"]["used_percent"])
+            self.assertEqual(80.0, sample["battery"]["level_percent"])
+            self.assertEqual(100.0, sample["system"]["uptime_seconds"])
+        self.assertEqual(
+            {
+                "checked_lines": 500,
+                "signatures": [
+                    {"kind": "crash", "summary": "FATAL EXCEPTION in com.example.app"}
+                ],
+            },
+            evidence["crash_check"],
+        )
+
+    def test_crash_check_absent_when_collect_result_lacks_it(self) -> None:
+        invoker = _FakeObservationInvoker(crash_check=False)
+        task = self._run(_stability_document(), invoker)
+
+        self.assertEqual(TaskStatus.SUCCEEDED, task.status)
+        evidence = task.evidence_summary
+        self.assertEqual(2, len(evidence["sampling_series"]))
+        # 旧结果形状（无 crash_check 字段）优雅降级：键缺省而非空对象。
+        self.assertNotIn("crash_check", evidence)
+
+    def test_new_keys_absent_without_observation_steps(self) -> None:
+        task = self._run(_document(iterations=1))
+
+        self.assertEqual(TaskStatus.SUCCEEDED, task.status)
+        evidence = task.evidence_summary
+        self.assertNotIn("sampling_series", evidence)
+        self.assertNotIn("crash_check", evidence)
+
+
 if __name__ == "__main__":
     unittest.main()

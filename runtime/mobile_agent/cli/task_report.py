@@ -229,6 +229,9 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
                 f"CPU={cpu.get('total_usage_percent', '-')}% / "
                 f"memory={memory.get('used_percent', '-')}%"
             )
+    # ITER-0065：DSL 稳定性报告字段；缺省/畸形时整块不渲染（旧报告兼容）。
+    lines.extend(_sampling_series_lines(summary.get("sampling_series")))
+    lines.extend(_crash_check_lines(summary.get("crash_check")))
     deleted_count = summary.get("deleted_count")
     deleted_bytes = summary.get("deleted_bytes")
     if (
@@ -244,6 +247,68 @@ def _evidence_lines(task: dict[str, Any]) -> list[str]:
             f"verification={summary.get('verification', '-')}"
         )
     return lines or ["(no evidence summary)"]
+
+
+def _sampling_series_lines(value: Any) -> list[str]:
+    """Render sampling_series as a compact per-sample trend table (ITER-0065)."""
+
+    if not isinstance(value, list):
+        return []
+    rows = [item for item in value if isinstance(item, dict)]
+    if not rows:
+        return []
+    lines = [f"Sampling trend ({len(rows)} samples):"]
+    for item in rows:
+        cpu = item.get("cpu")
+        memory = item.get("memory")
+        battery = item.get("battery")
+        cpu_percent = cpu.get("total_usage_percent") if isinstance(cpu, dict) else None
+        memory_percent = (
+            memory.get("used_percent") if isinstance(memory, dict) else None
+        )
+        battery_level = (
+            battery.get("level_percent") if isinstance(battery, dict) else None
+        )
+        temperature = (
+            battery.get("temperature_celsius") if isinstance(battery, dict) else None
+        )
+        battery_text = f"{battery_level if battery_level is not None else '-'}%"
+        if isinstance(temperature, int | float) and not isinstance(temperature, bool):
+            battery_text += f" / {temperature} C"
+        lines.append(
+            f"  {item.get('step_id', '-')} @ {item.get('captured_at', '-')}  "
+            f"CPU {cpu_percent if cpu_percent is not None else '-'}%  "
+            f"MEM {memory_percent if memory_percent is not None else '-'}%  "
+            f"BAT {battery_text}"
+        )
+    return lines
+
+
+def _crash_check_lines(value: Any) -> list[str]:
+    """Render crash_check as a one-line verdict plus signature list (ITER-0065).
+
+    措辞遵循「未检测到签名」而非「无崩溃」：签名模式是保守子集，未命中不
+    等于无崩溃。
+    """
+
+    if not isinstance(value, dict):
+        return []
+    signatures = value.get("signatures")
+    if not isinstance(signatures, list):
+        return []
+    checked = value.get("checked_lines")
+    checked_text = (
+        checked if isinstance(checked, int) and not isinstance(checked, bool) else "-"
+    )
+    if not signatures:
+        return [f"崩溃判定: 未检测到崩溃/ANR 签名（检查 {checked_text} 行）"]
+    lines = [f"崩溃判定: 检测到 {len(signatures)} 个签名（检查 {checked_text} 行）"]
+    for signature in signatures:
+        if isinstance(signature, dict):
+            lines.append(
+                f"  - [{signature.get('kind', '-')}] {signature.get('summary', '-')}"
+            )
+    return lines
 
 
 def _artifact_availability_counts(value: Any) -> dict[str, int]:

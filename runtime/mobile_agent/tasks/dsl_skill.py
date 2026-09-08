@@ -9,6 +9,12 @@ ITER-0063 (ADR-0021 Amendment 1): documents may reference whitelisted built-in
 observation skills (skill steps). build_dsl_skill_invoker assembles the
 execution closures for exactly those two ids; the task runner forwards the
 invoker to the interpreter.
+
+ITER-0065: evidence_summary gains stability-reporting fields distilled from
+step-record output_summary values — sampling_series (one entry per succeeded
+device.performance.snapshot step) and crash_check (from the last
+device.logs.collect step carrying one); both keys are absent when the
+document produced no such outputs, keeping legacy report shapes untouched.
 """
 
 from __future__ import annotations
@@ -109,6 +115,50 @@ def build_dsl_skill_invoker(runtime: RuntimeService) -> SkillInvoker:
         raise skill_reference_not_allowed(skill_id)
 
     return invoke
+
+
+def _sampling_series(
+    step_records: tuple[DslStepRecord, ...]
+) -> list[dict[str, Any]]:
+    """每个成功的性能采样步骤一条趋势记录，按执行顺序排列（ITER-0065）。"""
+
+    series: list[dict[str, Any]] = []
+    for record in step_records:
+        if record.skill_id != "device.performance.snapshot":
+            continue
+        summary = record.output_summary
+        if not isinstance(summary, dict):
+            continue
+        snapshot = summary.get("snapshot")
+        if not isinstance(snapshot, dict):
+            continue
+        series.append(
+            {
+                "step_id": record.step_id,
+                "captured_at": snapshot.get("captured_at"),
+                "cpu": snapshot.get("cpu"),
+                "memory": snapshot.get("memory"),
+                "battery": snapshot.get("battery"),
+                "system": snapshot.get("system"),
+            }
+        )
+    return series
+
+
+def _crash_check(step_records: tuple[DslStepRecord, ...]) -> dict[str, Any] | None:
+    """取最后一个携带 crash_check 的日志采集步骤结果；无则缺省（ITER-0065）。"""
+
+    verdict: dict[str, Any] | None = None
+    for record in step_records:
+        if record.skill_id != "device.logs.collect":
+            continue
+        summary = record.output_summary
+        if not isinstance(summary, dict):
+            continue
+        candidate = summary.get("crash_check")
+        if isinstance(candidate, dict):
+            verdict = candidate
+    return verdict
 
 
 class DslSkillTaskRunner:
@@ -284,10 +334,18 @@ class DslSkillTaskRunner:
             for record in step_records
         ]
         failed = [record["step_id"] for record in records if record["status"] == "failed"]
-        return {
+        evidence: dict[str, Any] = {
             "document_sha256": document_sha256,
             "derived_risk": result.derived_risk.value,
             "step_count": len(records),
             "failed_step_ids": failed,
             "step_records": records,
         }
+        # ITER-0065：稳定性报告字段。无对应产出时键缺省，旧形状报告不受影响。
+        sampling_series = _sampling_series(step_records)
+        if sampling_series:
+            evidence["sampling_series"] = sampling_series
+        crash_check = _crash_check(step_records)
+        if crash_check is not None:
+            evidence["crash_check"] = crash_check
+        return evidence

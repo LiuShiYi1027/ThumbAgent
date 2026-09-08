@@ -349,3 +349,143 @@ class TaskReportCliTests(unittest.IsolatedAsyncioTestCase):
         report = render_task_report(task, [])
 
         self.assertNotIn("Answer:", report)
+
+    def test_renders_sampling_series_trend_and_clean_crash_verdict(self) -> None:
+        task = {
+            "task_id": "task_stability",
+            "task_type": "skill.dsl.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "app.stability_test@1.1.0",
+            "started_at": "2026-09-08T10:00:00Z",
+            "completed_at": "2026-09-08T10:01:00Z",
+            "steps": [],
+            "evidence_summary": {
+                "document_sha256": "f" * 64,
+                "sampling_series": [
+                    {
+                        "step_id": "sample_performance",
+                        "captured_at": "2026-09-08T10:00:01Z",
+                        "cpu": {"total_usage_percent": 12.5},
+                        "memory": {"used_percent": 60.0},
+                        "battery": {
+                            "level_percent": 80.0,
+                            "temperature_celsius": 31.0,
+                        },
+                        "system": {"uptime_seconds": 100.0},
+                    },
+                    {
+                        "step_id": "sample_performance",
+                        "captured_at": "2026-09-08T10:00:31Z",
+                        "cpu": {"total_usage_percent": 15.0},
+                        "memory": {"used_percent": 61.5},
+                        "battery": {
+                            "level_percent": 79.0,
+                            "temperature_celsius": 31.5,
+                        },
+                        "system": {"uptime_seconds": 130.0},
+                    },
+                ],
+                "crash_check": {"checked_lines": 500, "signatures": []},
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn("Sampling trend (2 samples):", report)
+        self.assertIn(
+            "sample_performance @ 2026-09-08T10:00:01Z  "
+            "CPU 12.5%  MEM 60.0%  BAT 80.0% / 31.0 C",
+            report,
+        )
+        self.assertIn(
+            "sample_performance @ 2026-09-08T10:00:31Z  "
+            "CPU 15.0%  MEM 61.5%  BAT 79.0% / 31.5 C",
+            report,
+        )
+        self.assertIn("崩溃判定: 未检测到崩溃/ANR 签名（检查 500 行）", report)
+
+    def test_renders_crash_signatures_verdict_with_summaries(self) -> None:
+        task = {
+            "task_id": "task_stability",
+            "task_type": "skill.dsl.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "app.stability_test@1.1.0",
+            "started_at": "2026-09-08T10:00:00Z",
+            "completed_at": "2026-09-08T10:01:00Z",
+            "steps": [],
+            "evidence_summary": {
+                "document_sha256": "f" * 64,
+                "crash_check": {
+                    "checked_lines": 500,
+                    "signatures": [
+                        {
+                            "kind": "crash",
+                            "summary": "FATAL EXCEPTION in com.example.app",
+                        },
+                        {"kind": "anr", "summary": "ANR in com.example.app"},
+                    ],
+                },
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn("崩溃判定: 检测到 2 个签名", report)
+        self.assertIn("[crash] FATAL EXCEPTION in com.example.app", report)
+        self.assertIn("[anr] ANR in com.example.app", report)
+        # 有签名时不渲染采样趋势块（本报告无 sampling_series）。
+        self.assertNotIn("Sampling trend", report)
+
+    def test_legacy_report_without_new_fields_renders_without_stability_blocks(
+        self,
+    ) -> None:
+        task = {
+            "task_id": "task_legacy",
+            "task_type": "skill.dsl.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "custom.smoke_check@1.0.0",
+            "started_at": "2026-09-01T10:00:00Z",
+            "completed_at": "2026-09-01T10:01:00Z",
+            "steps": [],
+            "evidence_summary": {
+                "document_sha256": "f" * 64,
+                "derived_risk": "low",
+                "step_count": 2,
+                "failed_step_ids": [],
+                "step_records": [],
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertIn("Mobile Agent Task Report", report)
+        self.assertNotIn("Sampling trend", report)
+        self.assertNotIn("崩溃判定", report)
+
+    def test_malformed_new_fields_degrade_without_rendering(self) -> None:
+        task = {
+            "task_id": "task_malformed",
+            "task_type": "skill.dsl.run",
+            "status": "succeeded",
+            "device_id": "fake:android-001",
+            "goal": "custom.probe@1.0.0",
+            "started_at": "2026-09-08T10:00:00Z",
+            "completed_at": "2026-09-08T10:01:00Z",
+            "steps": [],
+            "evidence_summary": {
+                "sampling_series": "not-a-list",
+                "crash_check": {"checked_lines": "bad"},
+            },
+            "error": None,
+        }
+
+        report = render_task_report(task, [])
+
+        self.assertNotIn("Sampling trend", report)
+        self.assertNotIn("崩溃判定", report)

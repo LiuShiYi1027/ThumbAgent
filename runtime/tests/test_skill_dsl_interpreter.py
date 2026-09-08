@@ -54,9 +54,14 @@ def _skill_step(
 class _RecordingInvoker:
     """记录调用的 SkillInvoker 假实现；可配置每次调用抛出同一个错误。"""
 
-    def __init__(self, error: MobileAgentError | None = None) -> None:
+    def __init__(
+        self,
+        error: MobileAgentError | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, str, dict]] = []
         self.error = error
+        self.payload = payload
 
     async def __call__(
         self, skill_id: str, device_id: str, arguments: dict[str, Any]
@@ -64,6 +69,8 @@ class _RecordingInvoker:
         self.calls.append((skill_id, device_id, dict(arguments)))
         if self.error is not None:
             raise self.error
+        if self.payload is not None:
+            return dict(self.payload)
         return {"status": "ok"}
 
 
@@ -589,6 +596,193 @@ class DslInterpreterSkillStepTests(unittest.IsolatedAsyncioTestCase):
         # 3 条体内记录 + 1 条循环容器记录，on_step 全覆盖。
         self.assertEqual(4, len(self.on_step_records))
         self.assertEqual(list(result.step_records), self.on_step_records)
+
+
+def _performance_snapshot_payload() -> dict[str, Any]:
+    """device.performance.snapshot Skill 结果的构造样本（含白名单外键）。"""
+
+    return {
+        "schema_version": "1.0.0",
+        "skill_call_id": "skillcall_perf",
+        "skill_id": "device.performance.snapshot",
+        "device_id": DEVICE_ID,
+        "success": True,
+        "status": "succeeded",
+        "snapshot": {
+            "captured_at": "2026-09-08T10:00:01Z",
+            "cpu": {"total_usage_percent": 12.5},
+            "memory": {"total_bytes": 1000, "free_bytes": 400, "used_percent": 60.0},
+            "battery": {
+                "level_percent": 80.0,
+                "temperature_celsius": 31.0,
+                "status": "discharging",
+                "plugged": "none",
+            },
+            "system": {
+                "uptime_seconds": 100.0,
+                "load_average_1m": 1.0,
+                "load_average_5m": 0.9,
+                "load_average_15m": 0.8,
+            },
+        },
+        "evidence_refs": ["artifact_perf"],
+        "artifact": {"artifact_id": "artifact_perf"},
+        "started_at": "2026-09-08T10:00:00Z",
+        "completed_at": "2026-09-08T10:00:01Z",
+    }
+
+
+def _logs_collect_payload(with_crash_check: bool = True) -> dict[str, Any]:
+    """device.logs.collect Skill 结果的构造样本（crash_check 可选）。"""
+
+    payload: dict[str, Any] = {
+        "schema_version": "1.0.0",
+        "skill_call_id": "skillcall_logs",
+        "skill_id": "device.logs.collect",
+        "device_id": DEVICE_ID,
+        "success": True,
+        "status": "succeeded",
+        "captured_bytes": 1024,
+        "redaction_count": 3,
+        "truncated": False,
+        "evidence_refs": ["artifact_logs"],
+        "artifact": {"artifact_id": "artifact_logs"},
+        "started_at": "2026-09-08T10:01:00Z",
+        "completed_at": "2026-09-08T10:01:01Z",
+    }
+    if with_crash_check:
+        payload["crash_check"] = {
+            "checked_lines": 500,
+            "signatures": [
+                {"kind": "crash", "summary": "FATAL EXCEPTION in com.example.app"}
+            ],
+        }
+    return payload
+
+
+class DslInterpreterOutputSummaryTests(unittest.IsolatedAsyncioTestCase):
+    """DslStepRecord.output_summary 白名单透传（ITER-0065）。"""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.adapter = FakeDeviceAdapter()
+        self.runtime = ToolRuntime(
+            self.adapter,
+            ArtifactStore(Path(self.directory.name)),
+            ToolRegistry(),
+            PolicyEngine(),
+        )
+
+    async def _run(
+        self, document: SkillDslDocument, skill_invoker: SkillInvoker
+    ):
+        return await run_dsl_skill(
+            document,
+            device_id=DEVICE_ID,
+            inputs={},
+            confirmed=True,
+            tools=self.runtime,
+            skill_invoker=skill_invoker,
+        )
+
+    async def test_performance_snapshot_summary_keeps_snapshot_key_verbatim(
+        self,
+    ) -> None:
+        payload = _performance_snapshot_payload()
+        invoker = _RecordingInvoker(payload=payload)
+        document = _document([_skill_step("snap", "device.performance.snapshot")])
+
+        result = await self._run(document, invoker)
+
+        self.assertEqual("succeeded", result.status)
+        record = result.step_records[0]
+        # 白名单只透传 snapshot 键原样；skill_call_id/artifact/时间戳等全部丢弃。
+        self.assertEqual({"snapshot": payload["snapshot"]}, record.output_summary)
+
+    async def test_logs_collect_summary_keeps_crash_check_and_artifact(self) -> None:
+        payload = _logs_collect_payload()
+        invoker = _RecordingInvoker(payload=payload)
+        document = _document(
+            [_skill_step("collect", "device.logs.collect", {"max_lines": 500})]
+        )
+
+        result = await self._run(document, invoker)
+
+        record = result.step_records[0]
+        self.assertEqual(
+            {
+                "crash_check": payload["crash_check"],
+                "artifact": payload["artifact"],
+            },
+            record.output_summary,
+        )
+
+    async def test_logs_collect_summary_without_crash_check_keeps_artifact(
+        self,
+    ) -> None:
+        payload = _logs_collect_payload(with_crash_check=False)
+        invoker = _RecordingInvoker(payload=payload)
+        document = _document(
+            [_skill_step("collect", "device.logs.collect", {"max_lines": 500})]
+        )
+
+        result = await self._run(document, invoker)
+
+        record = result.step_records[0]
+        self.assertEqual({"artifact": payload["artifact"]}, record.output_summary)
+
+    async def test_output_summary_none_when_result_has_no_whitelisted_keys(
+        self,
+    ) -> None:
+        invoker = _RecordingInvoker(payload={"status": "ok"})
+        document = _document([_skill_step("snap", "device.performance.snapshot")])
+
+        result = await self._run(document, invoker)
+
+        self.assertIsNone(result.step_records[0].output_summary)
+
+    async def test_failed_skill_step_has_no_output_summary(self) -> None:
+        invoker = _RecordingInvoker(error=_invoker_error())
+        document = _document([_skill_step("snap", "device.performance.snapshot")])
+
+        result = await self._run(document, invoker)
+
+        record = result.step_records[0]
+        self.assertEqual("failed", record.status)
+        self.assertIsNone(record.output_summary)
+
+    async def test_tool_and_container_steps_have_no_output_summary(self) -> None:
+        invoker = _RecordingInvoker(payload=_performance_snapshot_payload())
+        document = _document(
+            [
+                _tool_step("home", "navigation.home"),
+                {
+                    "type": "loop",
+                    "step_id": "repeat",
+                    "max_duration_seconds": 600,
+                    "max_iterations": 2,
+                    "steps": [_skill_step("snap", "device.performance.snapshot")],
+                },
+            ]
+        )
+
+        result = await self._run(document, invoker)
+
+        self.assertEqual("succeeded", result.status)
+        by_step: dict[str, list[DslStepRecord]] = {}
+        for record in result.step_records:
+            by_step.setdefault(record.step_id, []).append(record)
+        # tool 步骤与 loop 容器始终无 output_summary。
+        self.assertIsNone(by_step["home"][0].output_summary)
+        self.assertIsNone(by_step["repeat"][0].output_summary)
+        # 循环体内的 skill 步骤每次迭代都携带白名单摘要。
+        self.assertEqual(2, len(by_step["snap"]))
+        for record in by_step["snap"]:
+            self.assertEqual(
+                {"snapshot": _performance_snapshot_payload()["snapshot"]},
+                record.output_summary,
+            )
 
 
 if __name__ == "__main__":
