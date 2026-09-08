@@ -1,8 +1,9 @@
 # ITER-0063 DSL Observation Skills（DSL 观察能力 + 稳定性测试完整化）
 
-> 文档状态：Draft
-> 迭代状态：Planned
+> 文档状态：Final
+> 迭代状态：Completed
 > 创建日期：2026-09-02
+> 完成日期：2026-09-02
 > 关联：[ADR-0021 修订](../../adr/0021-declarative-skill-dsl-registry.md) · [ITER-0062 复盘（跟进项 1/4）](../0062-declarative-skill-dsl/retrospective.md) · [能力路线图 §4.4](../../product/capability-roadmap.md)
 
 ## 背景

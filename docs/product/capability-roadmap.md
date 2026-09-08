@@ -39,6 +39,7 @@ GUI 动作      input.tap@1 · input.text@1（ASCII 快路径）· input.swipe@1
 通知          notifications.read@1（有界脱敏快照）
 Runtime 本地  local.data.cleanup（非设备 Capability）
 Agent 内核    跨轮工作记忆 scratchpad · finish 结构化 answer · 捷径谓词守卫（ITER-0061）
+复合 Skill    声明式 DSL + Registry 管理面 + 观察类 Skill 引用（ITER-0062/0063）
 ```
 
 ## 4. 候选清单
