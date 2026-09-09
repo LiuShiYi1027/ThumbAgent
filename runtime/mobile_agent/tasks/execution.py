@@ -579,6 +579,18 @@ class AsyncTaskExecutor:
                     }
                     if step.error is not None:
                         payload["error_code"] = step.error.get("code", "")
+                    # Agent 轮次的模型决策依据（reason）与工作记忆（scratchpad）随事件
+                    # 透出，执行中时间线即可展示「模型在想什么」；两者本已持久化在
+                    # TaskRun 中，不扩大数据面。长度有界防止异常载荷。
+                    if isinstance(step.result, dict):
+                        decision = step.result.get("decision")
+                        if isinstance(decision, dict):
+                            reason = decision.get("reason")
+                            if isinstance(reason, str) and reason:
+                                payload["reason"] = reason[:500]
+                            scratchpad = decision.get("scratchpad")
+                            if isinstance(scratchpad, str) and scratchpad:
+                                payload["scratchpad"] = scratchpad[:1024]
                     screenshot_artifact_id = _step_screenshot_artifact_id(step.result)
                     if screenshot_artifact_id is not None:
                         payload["screenshot_artifact_id"] = screenshot_artifact_id

@@ -167,12 +167,26 @@ export function ExecutionView({
           }
           const failed =
             event.event_type === 'task.step_completed' && event.payload.status === 'failed'
+          const reason =
+            event.event_type === 'task.step_completed' &&
+            typeof event.payload.reason === 'string' &&
+            event.payload.reason !== ''
+              ? event.payload.reason
+              : null
+          const scratchpad =
+            event.event_type === 'task.step_completed' &&
+            typeof event.payload.scratchpad === 'string' &&
+            event.payload.scratchpad !== ''
+              ? event.payload.scratchpad
+              : null
           return (
             <li key={event.event_id} className={failed ? 'event-failed' : ''}>
               <span className="event-label">{eventLabel(event, roundCounter)}</span>
               <span className="event-time">
                 {new Date(event.occurred_at).toLocaleTimeString()}
               </span>
+              {reason ? <p className="event-reason">{reason}</p> : null}
+              {scratchpad ? <p className="event-scratchpad">{scratchpad}</p> : null}
             </li>
           )
         })}

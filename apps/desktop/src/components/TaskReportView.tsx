@@ -381,6 +381,12 @@ export function TaskReportView({ taskId }: { taskId: string }) {
                     <span className="mono">{formatArguments(agentStep.decision.arguments)}</span>
                   </div>
                   <div>依据：{agentStep.decision.reason}</div>
+                  {agentStep.decision.scratchpad ? (
+                    <div>
+                      工作记忆：
+                      <span className="mono">{agentStep.decision.scratchpad}</span>
+                    </div>
+                  ) : null}
                   {agentStep.action_feedback ? (
                     <div>
                       页面进展：

@@ -90,6 +90,41 @@ class AsyncTaskExecutionTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6], [event["sequence"] for event in events]
         )
 
+    def test_step_completed_events_carry_decision_reason(self) -> None:
+        """Agent 轮次事件携带模型决策依据（执行中时间线展示思考过程）。"""
+        store = _NotifyingExecutionStore()
+        runtime = RuntimeService(
+            FakeDeviceAdapter(),
+            ArtifactStore(self.root / "artifacts"),
+            task_execution_store=store,
+            navigation_shortcuts_enabled=False,
+        )
+
+        status, payload = runtime.submit_agent_task_sync(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+
+        self.assertEqual(202, status.value)
+        task_id = payload["execution"]["task_id"]
+        self.assertTrue(store.terminal.wait(2), "asynchronous task did not finish")
+        events = runtime.list_task_execution_events(task_id)
+        step_events = [
+            event for event in events if event["event_type"] == "task.step_completed"
+        ]
+        self.assertTrue(step_events)
+        self.assertTrue(
+            any(
+                isinstance(event["payload"].get("reason"), str)
+                and event["payload"]["reason"]
+                for event in step_events
+            ),
+            "step_completed 事件未携带 decision.reason",
+        )
+        # 无 scratchpad 时键缺省，不渲染空工作记忆
+        for event in step_events:
+            scratchpad = event["payload"].get("scratchpad")
+            self.assertFalse(isinstance(scratchpad, str) and scratchpad == "")
+
     def test_step_completed_events_carry_screenshot_artifact_reference(self) -> None:
         """轮次完成事件携带动作后截图 Artifact ID，且可经内容通道取回 PNG。"""
         store = _NotifyingExecutionStore()
