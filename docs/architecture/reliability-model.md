@@ -1,7 +1,7 @@
 # 可靠性与执行语义
 
 > 状态：Active
-> 更新日期：2026-07-14
+> 更新日期：2026-09-21
 
 ## 1. 目标
 
@@ -68,6 +68,12 @@ Task deadline 在暂停期间继续计时：到期自动恢复并按超时收尾
 - 设备 Session 未变化。
 
 采用有上限的指数退避并加入 jitter。V1 默认最多重试 2 次；设备写动作默认 0 次。
+
+ITER-0066：`uiautomator dump` 成功但解析后语义候选数为 0 的 hierarchy 记为
+`UI_TREE_EMPTY`（`known_failure`，`retryable=true`）。只读重试纳入观察瞬时预算
+（最多 3 次 observe，空树 settle 0.5s）；耗尽后终止任务，不把空摘要交给 Planner，
+不记 `unknown_outcome`，也不升级为 `NO_PROGRESS`。截图与空 UI 树 Artifact 保留在
+失败 step 的 `error.details` 引用中。
 
 ## 6. 超时
 

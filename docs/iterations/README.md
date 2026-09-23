@@ -1,7 +1,7 @@
 # 迭代索引
 
 > 状态：Active
-> 更新日期：2026-08-24
+> 更新日期：2026-09-21
 
 | 迭代 | 名称 | 状态 | 目标 |
 | --- | --- | --- | --- |
@@ -70,6 +70,7 @@
 | [ITER-0063](./0063-dsl-observation-skills/plan.md) | DSL Observation Skills | Completed | DSL 引用观察类内置 Skill 白名单（ADR-0021 修订一）；稳定性测试完整化：性能采样 + 崩溃/ANR 证据 |
 | [ITER-0064](./0064-agent-reliability-batch/plan.md) | Agent Reliability Batch | Completed | 存量可靠性收口：阻塞式模型调用、unicode 读回时机、queued 暂停、捷径副作用证据、Web UI 幂等键 |
 | [ITER-0065](./0065-stability-reporting/plan.md) | Stability Reporting | Completed | 稳定性报告呈现：采样序列趋势 + 崩溃/ANR 签名判定 + E2E 操作手册 |
+| [ITER-0066](./0066-observation-empty-hierarchy/plan.md) | Observation Empty Hierarchy | Completed | 空 UI 树检测与有界只读恢复：可解释失败，不再把空观察交给模型空转 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

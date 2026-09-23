@@ -1,7 +1,7 @@
 # 错误与诊断规范
 
-> 状态：Active
-> 更新日期：2026-07-08
+> 状态：Active  
+> 更新日期：2026-09-21
 
 ## 1. 目标
 
@@ -62,6 +62,8 @@ CONFIRMATION_REQUIRED
 ACTION_TIMEOUT
 ACTION_OUTCOME_UNKNOWN
 OBSERVATION_FAILED
+UI_TREE_INVALID
+UI_TREE_EMPTY
 LOG_CAPTURE_EMPTY
 LOG_CAPTURE_FAILED
 PERFORMANCE_SNAPSHOT_FAILED
@@ -166,6 +168,11 @@ HTTP 状态不替代领域错误码。
 - Task 预算与取消状态
 
 Policy 拒绝、输入错误和 unknown outcome 默认不可自动重试。
+
+`UI_TREE_EMPTY` 表示 dump 成功但可见语义候选为 0（骨架树或空 hierarchy）。
+观察阶段只读重试耗尽后以 `known_failure` 终止任务，不把空摘要交给 Planner，
+也不记 `NO_PROGRESS`。details 只允许 observation_id、截图 Artifact id 与节点计数
+（node_count / semantic_candidate_count / locatable_node_count）。
 
 Agent 页面定位和 `finish` 验证中，若 Runtime 能确定错误发生在设备动作派发前，可将该轮记为
 failed 并继续规划；不得将可能已产生副作用的错误按此方式恢复。`MODEL_UNAVAILABLE.details.failure_kind`

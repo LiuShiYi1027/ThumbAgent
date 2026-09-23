@@ -1,7 +1,7 @@
 # Mobile Agent 能力路线图（候选清单与分级治理）
 
 > 文档状态：Draft
-> 更新日期：2026-08-31
+> 更新日期：2026-09-21
 > 关联：[产品定位](./positioning.md) · [Capability 模型](../architecture/capability-model.md) · [客户端测试场景覆盖盘点](./testing-scenario-coverage.md) · [ADR-0018](../adr/0018-programmatic-navigation-shortcuts.md) · [ITER-0058 复盘](../iterations/0058-programmatic-navigation/retrospective.md)
 
 ## 1. 目的
@@ -134,6 +134,8 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 - ~~ITER-0062~~：Skill 扩展与管理已交付（声明式 DSL + Registry 持久化 + REST 管理面 +
   `skill.dsl.run` 异步任务 + `app.stability_test` 官方 DSL Skill，ADR-0021 Accepted，
   真机验收见 [ITER-0062 复盘](../iterations/0062-declarative-skill-dsl/retrospective.md)）。
-- 其后按真实任务暴露的需求拉动：候选池见 §4.1（A 档设备动作）；候选仅在真实场景
-  重复出现时进入排期。
-- 每次迭代接入 1–2 个候选，保持评审粒度。
+- ~~ITER-0066~~：空 UI 树检测与有界只读恢复已交付。真实 App 页 dump 出骨架树时
+  不再把空 `ui_summary` 交给 Planner；重试耗尽以 `UI_TREE_EMPTY` 可解释失败。
+  真机设置页回归通过；京东空 dump 在荣耀登录页未复现（见
+  [ITER-0066 复盘](../iterations/0066-observation-empty-hierarchy/retrospective.md)）。
+- A 档设备动作仍按真实场景重复出现时再拉动，每次 1–2 个候选。

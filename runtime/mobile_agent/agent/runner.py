@@ -29,6 +29,12 @@ from mobile_agent.agent.shortcuts import match_navigation_shortcut
 from mobile_agent.skills.app_navigation import AppNavigateSkill
 from mobile_agent.skills.settings_navigate import SettingsScrollNavigateSkill
 from mobile_agent.tools.runtime import ToolRuntime
+from mobile_agent.ui.hierarchy import (
+    hierarchy_is_empty,
+    is_semantic_candidate,
+    locatable_node_count,
+    semantic_candidate_count,
+)
 from mobile_agent.ui.locator import UiLocator
 from mobile_agent.ui.model import UiNode, UiSelector
 from mobile_agent.ui.parser import UiHierarchyParser
@@ -53,11 +59,16 @@ class AgentRunner:
         }
     )
     # 转场动画期间 uiautomator 可能 dump 出无法解析或 bounds 非法的 UI Tree；
-    # 这两类观察错误是瞬时的，允许有界重试。DEVICE_OFFLINE / DEVICE_SESSION_CHANGED
-    # 等连接性错误不在此列，必须立即终止任务（ITER-0033 语义）。
-    _OBSERVE_RETRYABLE_CODES = frozenset({"UI_TREE_INVALID", "OBSERVATION_FAILED"})
+    # 这两类观察错误是瞬时的，允许有界重试。连接性错误仍立即终止（ITER-0033）。
+    # ITER-0066：dump 成功但无语义节点同样只读重试，耗尽后以 UI_TREE_EMPTY 失败。
+    _OBSERVE_RETRYABLE_CODES = frozenset(
+        {"UI_TREE_INVALID", "OBSERVATION_FAILED", "UI_TREE_EMPTY"}
+    )
     _OBSERVE_MAX_ATTEMPTS = 3
     _OBSERVE_RETRY_DELAY_SECONDS = 0.3
+    _OBSERVE_EMPTY_RETRY_DELAY_SECONDS = 0.5
+    # 语义点击/滑动依赖当前 hierarchy；空树上不得派发（观察层漏判时的守卫）。
+    _HIERARCHY_REQUIRED_TOOLS = frozenset({"input.tap_element", "input.swipe"})
     # 模型调用是阻塞式同步 HTTP（urllib），等待期间以该间隔轮询取消/Deadline 探针。
     _DECIDE_PROBE_INTERVAL_SECONDS = 0.5
 
@@ -548,7 +559,9 @@ class AgentRunner:
         attempts = 0
         while True:
             try:
-                return await self._adapter.observe(device_id, self._artifacts)
+                observation = await self._adapter.observe(device_id, self._artifacts)
+                self._raise_if_hierarchy_unusable(observation)
+                return observation
             except MobileAgentError as error:
                 attempts += 1
                 if (
@@ -558,7 +571,12 @@ class AgentRunner:
                 ):
                     raise
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
-                await asyncio.sleep(self._OBSERVE_RETRY_DELAY_SECONDS)
+                delay = (
+                    self._OBSERVE_EMPTY_RETRY_DELAY_SECONDS
+                    if error.code == "UI_TREE_EMPTY"
+                    else self._OBSERVE_RETRY_DELAY_SECONDS
+                )
+                await asyncio.sleep(delay)
 
     def _summarize_observation(
         self,
@@ -584,14 +602,12 @@ class AgentRunner:
         candidates: list[tuple[int, int, int, int, dict[str, Any]]] = []
         seen: set[tuple[str, str, str, str]] = set()
         for node in nodes:
-            if not node.visible:
+            if not is_semantic_candidate(node):
                 continue
             text = redact_ui_text(node.text.strip())
             content_description = redact_ui_text(node.content_description.strip())
             resource_id = node.resource_id.strip()
             hint = redact_ui_text(node.hint.strip())
-            if not text and not content_description and not hint:
-                continue
             key = (text, content_description, resource_id, hint)
             if key in seen:
                 continue
@@ -724,6 +740,8 @@ class AgentRunner:
                 result["verified_node"] = verified.to_dict() if verified else None
             return result
         if decision.decision_type is AgentDecisionType.RUN_TOOL:
+            if decision.tool_id in self._HIERARCHY_REQUIRED_TOOLS:
+                self._raise_if_hierarchy_unusable(observation)
             action = await self._tools.execute(
                 decision.tool_id,
                 device_id,
@@ -967,6 +985,30 @@ class AgentRunner:
             "error_code": error.code,
             "details": dict(error.details),
         }
+
+    def _raise_if_hierarchy_unusable(self, observation: Observation) -> None:
+        """Reject an Observation whose UI tree has no semantic candidates.
+
+        Dump/XML 损坏仍抛出 Parser 的 UI_TREE_INVALID；骨架树则升为 UI_TREE_EMPTY。
+        details 只含计数与 Artifact id，不含节点文本。
+        """
+        nodes = self._nodes_from_observation(observation)
+        if not hierarchy_is_empty(nodes):
+            return
+        raise MobileAgentError(
+            code="UI_TREE_EMPTY",
+            category=ErrorCategory.DEVICE,
+            message="当前页无法取得可用的界面结构",
+            retryable=True,
+            suggested_action="等待页面加载完成后重试，或暂停任务后在设备上离开该页面",
+            details={
+                "observation_id": observation.observation_id,
+                "screenshot_artifact_id": observation.screen.screenshot.artifact_id,
+                "node_count": len(nodes),
+                "semantic_candidate_count": semantic_candidate_count(nodes),
+                "locatable_node_count": locatable_node_count(nodes),
+            },
+        )
 
     def _nodes_from_observation(self, observation: Observation) -> list[UiNode]:
         path = self._artifacts.resolve(observation.ui_tree.artifact.relative_path)

@@ -1015,13 +1015,15 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             step_properties["result"]["oneOf"],
         )
 
-    def _runner_for(self, adapter: DeviceAdapter) -> AgentRunner:
+    def _runner_for(
+        self, adapter: DeviceAdapter, planner: Planner | None = None
+    ) -> AgentRunner:
         artifacts = ArtifactStore(Path(self.directory.name))
         tools = ToolRuntime(adapter, artifacts, ToolRegistry(), PolicyEngine())
         return AgentRunner(
             adapter,
             artifacts,
-            RuleBasedPlanner(),
+            planner if planner is not None else RuleBasedPlanner(),
             tools,
             SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
             # 这些用例验证 Planner 决策循环本身，关闭导航捷径避免目标被接管。
@@ -1110,6 +1112,141 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
         assert task.error is not None
         self.assertEqual("DEVICE_SESSION_CHANGED", task.error["code"])
         self.assertEqual(1, adapter.observe_calls)
+
+    async def test_empty_hierarchy_recovers_after_transient_skeleton_dump(self) -> None:
+        """骨架树在有界重试内变为有语义节点时，任务继续且 Planner 只在恢复后调用。"""
+        adapter = _EmptyThenPopulatedAdapter(empty_observations=1)
+        planner = _CountingPlanner(RuleBasedPlanner())
+
+        task = await self._runner_for(adapter, planner).run(
+            "fake:android-001", "open display settings", confirmed=True
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertGreaterEqual(adapter.observe_calls, 2)
+        self.assertGreaterEqual(planner.calls, 1)
+
+    async def test_persistent_empty_hierarchy_fails_without_planning(self) -> None:
+        """持续空树以 UI_TREE_EMPTY 失败，不进入 Planner，也不记 NO_PROGRESS。"""
+        adapter = _EmptyThenPopulatedAdapter(empty_observations=None)
+        planner = _CountingPlanner(RuleBasedPlanner())
+
+        task = await self._runner_for(adapter, planner).run(
+            "fake:android-001", "open display settings", confirmed=True, max_rounds=3
+        )
+
+        self.assertEqual("failed", task.status.value)
+        assert task.error is not None
+        self.assertEqual("UI_TREE_EMPTY", task.error["code"])
+        self.assertNotEqual("NO_PROGRESS", task.error["code"])
+        self.assertEqual(3, adapter.observe_calls)
+        self.assertEqual(0, planner.calls)
+        self.assertEqual(1, len(task.steps))
+        assert task.steps[0].error is not None
+        details = task.steps[0].error["details"]
+        self.assertRegex(details["observation_id"], r"^obs_[a-f0-9]{32}$")
+        self.assertRegex(details["screenshot_artifact_id"], r"^artifact_[a-f0-9]{32}$")
+        self.assertEqual(0, details["semantic_candidate_count"])
+        self.assertEqual(0, details["locatable_node_count"])
+        self.assertIsInstance(details["node_count"], int)
+        self.assertNotIn("ui_xml", details)
+        self.assertNotIn("text", details)
+
+    async def test_empty_hierarchy_retry_respects_cancellation(self) -> None:
+        adapter = _EmptyThenPopulatedAdapter(empty_observations=None)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            max_rounds=3,
+            cancellation_requested=lambda: adapter.observe_calls >= 1,
+        )
+
+        self.assertEqual("cancelled", task.status.value)
+        self.assertEqual(1, adapter.observe_calls)
+
+    async def test_empty_hierarchy_retry_respects_deadline(self) -> None:
+        adapter = _EmptyThenPopulatedAdapter(empty_observations=None)
+
+        task = await self._runner_for(adapter).run(
+            "fake:android-001",
+            "open display settings",
+            confirmed=True,
+            max_rounds=3,
+            deadline_exceeded=lambda: adapter.observe_calls >= 1,
+        )
+
+        self.assertEqual("timed_out", task.status.value)
+        self.assertEqual(1, adapter.observe_calls)
+
+    async def test_tap_element_rejected_on_empty_hierarchy_before_dispatch(self) -> None:
+        """观察层漏判时，语义点击仍不得到达 Adapter。"""
+        adapter = FakeDeviceAdapter()
+        adapter.custom_ui_xml = _SKELETON_UI_XML
+        runner = self._runner_for(adapter)
+        observation = await adapter.observe(
+            "fake:android-001", ArtifactStore(Path(self.directory.name))
+        )
+        decision = AgentDecision(
+            decision_id="decision_empty_tap",
+            decision_type=AgentDecisionType.RUN_TOOL,
+            skill_id="",
+            tool_id="input.tap_element",
+            arguments={
+                "selector": {
+                    "strategy": "text",
+                    "value": "Display",
+                    "match": "contains",
+                    "resolve_clickable_ancestor": True,
+                }
+            },
+            reason="Click a label that is not in the empty tree.",
+            planner_id="guard.test",
+        )
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await runner._run_decision(
+                "fake:android-001",
+                observation,
+                decision,
+                confirmed=True,
+                acceptance=None,
+            )
+
+        self.assertEqual("UI_TREE_EMPTY", raised.exception.code)
+        self.assertFalse(
+            any(action[0] == "input.tap" for action in adapter.actions)
+        )
+
+    async def test_back_is_allowed_on_empty_hierarchy(self) -> None:
+        """返回不依赖当前树，空树上仍可派发。"""
+        adapter = FakeDeviceAdapter()
+        adapter.custom_ui_xml = _SKELETON_UI_XML
+        runner = self._runner_for(adapter)
+        observation = await adapter.observe(
+            "fake:android-001", ArtifactStore(Path(self.directory.name))
+        )
+        decision = AgentDecision(
+            decision_id="decision_empty_back",
+            decision_type=AgentDecisionType.RUN_TOOL,
+            skill_id="",
+            tool_id="navigation.back",
+            arguments={},
+            reason="Leave the page that has no UI tree.",
+            planner_id="guard.test",
+        )
+
+        result = await runner._run_decision(
+            "fake:android-001",
+            observation,
+            decision,
+            confirmed=True,
+            acceptance=None,
+        )
+
+        self.assertIn("action_result", result)
+        self.assertIn(("navigation.back", "fake:android-001"), adapter.actions)
 
     async def test_agent_runner_accepts_max_rounds_twelve(self) -> None:
         """轮次预算上限校准后，12 是合法输入且任务在演示 Planner 预算内完成。"""
@@ -1562,6 +1699,58 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("input.swipe", decision.tool_id)
         self.assertEqual("down", decision.arguments["direction"])
+
+
+_SKELETON_UI_XML = (
+    b'<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">'
+    b'<node text="" resource-id="" class="android.widget.FrameLayout" '
+    b'package="com.example.app" clickable="false" enabled="true" '
+    b'visible-to-user="true" bounds="[0,0][2,3]"/></hierarchy>'
+)
+
+
+class _CountingPlanner:
+    """Record how many times decide() runs; used to prove empty trees skip the Planner."""
+
+    def __init__(self, inner: Planner) -> None:
+        self._inner = inner
+        self.calls = 0
+
+    @property
+    def planner_id(self) -> str:
+        return self._inner.planner_id
+
+    def decide(
+        self, goal: str, observation: AgentObservationSummary, round_index: int
+    ) -> AgentDecision:
+        self.calls += 1
+        return self._inner.decide(goal, observation, round_index)
+
+
+class _EmptyThenPopulatedAdapter:
+    """First N observes return a skeleton dump; afterwards delegate to FakeDeviceAdapter.
+
+    empty_observations=None means every observe stays empty.
+    """
+
+    def __init__(self, empty_observations: int | None) -> None:
+        self.observe_calls = 0
+        self._empty_observations = empty_observations
+        self._inner = FakeDeviceAdapter()
+
+    async def observe(self, device_id: str, artifacts: ArtifactWriter) -> Observation:
+        self.observe_calls += 1
+        if (
+            self._empty_observations is None
+            or self.observe_calls <= self._empty_observations
+        ):
+            self._inner.custom_ui_xml = _SKELETON_UI_XML
+        else:
+            self._inner.custom_ui_xml = None
+        return await self._inner.observe(device_id, artifacts)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 class _FlakyObserveAdapter:
