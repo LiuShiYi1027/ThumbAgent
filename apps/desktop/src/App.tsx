@@ -6,7 +6,7 @@ import { MonitorSmartphone, RefreshCw, Settings } from 'lucide-react'
 import type { TaskExecution } from '@contracts/task-execution'
 
 import { getBridgeStatus } from './api/bridge'
-import { getDevices, getHealth, getReadiness, submitAgentTask } from './api/client'
+import { getDevices, getHealth, getReadiness, submitAgentTask, submitStabilityTest } from './api/client'
 import { ConfirmTaskDialog } from './components/ConfirmTaskDialog'
 import { DeviceScreenPanel } from './components/DeviceScreenPanel'
 import { DeviceTable } from './components/DeviceTable'
@@ -78,7 +78,14 @@ function Workbench() {
 
   const submitMutation = useMutation({
     mutationFn: (intent: TaskIntent) =>
-      submitAgentTask(intent.deviceId, intent.goal, intent.idempotencyKey, intent.maxRounds),
+      intent.kind === 'agent'
+        ? submitAgentTask(intent.deviceId, intent.goal, intent.idempotencyKey, intent.maxRounds)
+        : submitStabilityTest(
+            intent.deviceId,
+            intent.appId,
+            intent.idempotencyKey,
+            intent.durationSeconds,
+          ),
     onSuccess: (execution) => {
       setPendingIntent(null)
       setFinishedExecution(null)

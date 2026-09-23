@@ -35,6 +35,9 @@ export function getDevices(): Promise<DeviceListResponse> {
 }
 
 const AGENT_RUN_ASYNC_PATH = '/v1/tasks/agent.run/async'
+const SKILL_DSL_RUN_ASYNC_PATH = '/v1/tasks/skill.dsl.run/async'
+const STABILITY_SKILL_ID = 'app.stability_test'
+const STABILITY_SKILL_VERSION = '1.1.0'
 // Fixed V1 submission budget, matching the /ui prototype defaults.
 const AGENT_MAX_ROUNDS = 12
 const AGENT_DEADLINE_SECONDS = 600
@@ -74,6 +77,35 @@ export async function submitAgentTask(
       confirmed: true,
       max_rounds: maxRounds,
       deadline_seconds: AGENT_DEADLINE_SECONDS,
+    },
+    idempotencyKey,
+  )
+  return payload.execution
+}
+
+/**
+ * Submit the official stability-test skill. The desktop hard-codes the skill
+ * id and version; callers cannot name an arbitrary DSL document.
+ */
+export async function submitStabilityTest(
+  deviceId: string,
+  appId: string,
+  idempotencyKey: string,
+  durationSeconds: number = 120,
+): Promise<TaskExecution> {
+  const payload = await runtimeApiPost<ExecutionResponse>(
+    SKILL_DSL_RUN_ASYNC_PATH,
+    {
+      device_id: deviceId,
+      skill_id: STABILITY_SKILL_ID,
+      skill_version: STABILITY_SKILL_VERSION,
+      inputs: {
+        app_id: appId,
+        duration_seconds: durationSeconds,
+        max_actions: 20,
+      },
+      confirmed: true,
+      deadline_seconds: durationSeconds + 60,
     },
     idempotencyKey,
   )

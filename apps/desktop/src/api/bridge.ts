@@ -29,9 +29,10 @@ export function runtimeApiGetBytes(path: string): Promise<string> {
 
 /**
  * Authenticated POST against the local Runtime. The sidecar only forwards
- * whitelisted paths (task submit/cancel, model settings save); everything
- * else is rejected. For task submission, `idempotencyKey` carries the
- * per-confirmation key so retries of the same user intent dedupe server-side.
+ * whitelisted paths (agent submit, the official DSL skill task, task
+ * controls, and model settings save); everything else is rejected. For task
+ * submission, `idempotencyKey` carries the per-confirmation key so retries
+ * of the same user intent dedupe server-side.
  */
 export function runtimeApiPost<T>(
   path: string,

@@ -31,6 +31,7 @@ const MAX_API_BODY_BYTES: usize = 16 * 1024;
 /// Agent task submission, task cancel/pause/resume and model settings save.
 /// Everything else stays GET-only.
 const AGENT_RUN_ASYNC_PATH: &str = "/v1/tasks/agent.run/async";
+const SKILL_DSL_RUN_ASYNC_PATH: &str = "/v1/tasks/skill.dsl.run/async";
 const TASK_EXECUTIONS_PREFIX: &str = "/v1/task-executions/";
 /// Control actions mirror the Runtime routes (ITER-0053 pause/resume).
 const TASK_CONTROL_SUFFIXES: [&str; 3] = ["/cancel", "/pause", "/resume"];
@@ -285,7 +286,8 @@ impl Sidecar {
             return Err("请求体大小无效".to_string());
         }
         let (port, token) = self.ready_endpoint()?;
-        let idempotency_key = (path == AGENT_RUN_ASYNC_PATH)
+        // 异步任务创建都要求 Idempotency-Key。取消/暂停和模型设置不走这条。
+        let idempotency_key = (path == AGENT_RUN_ASYNC_PATH || path == SKILL_DSL_RUN_ASYNC_PATH)
             .then(|| {
                 resolve_idempotency_key(idempotency_key)
                     .map_err(|error| format!("幂等键无效：{error}"))
@@ -684,6 +686,7 @@ fn parse_api_response(
 fn validate_api_post_path(path: &str) -> Result<(), String> {
     validate_api_path(path)?;
     if path == AGENT_RUN_ASYNC_PATH
+        || path == SKILL_DSL_RUN_ASYNC_PATH
         || path == MODEL_PROVIDER_CONFIG_PATH
         || is_task_control_path(path)
     {
@@ -948,6 +951,7 @@ mod tests {
     #[test]
     fn post_path_whitelist_accepts_only_submit_and_task_controls() {
         assert!(validate_api_post_path(AGENT_RUN_ASYNC_PATH).is_ok());
+        assert!(validate_api_post_path(SKILL_DSL_RUN_ASYNC_PATH).is_ok());
         for suffix in TASK_CONTROL_SUFFIXES {
             assert!(validate_api_post_path(&format!(
                 "/v1/task-executions/task_0123456789abcdef0123456789abcdef{suffix}"
@@ -1323,6 +1327,48 @@ mod tests {
             Some("task_0123456789abcdef0123456789abcdef")
         );
         // 前端确认流程的键原样透出，同一流程内重试因此在服务端去重。
+        assert!(request_text.contains(&format!("Idempotency-Key: {key}\r\n")));
+    }
+
+    #[test]
+    fn api_post_forwards_idempotency_key_for_dsl_skill_run() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 512];
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if String::from_utf8_lossy(&request).contains("\"skill_id\"") {
+                    break;
+                }
+            }
+            let request_text = String::from_utf8_lossy(&request).to_string();
+            let body = b"{\"task_id\":\"task_0123456789abcdef0123456789abcdef\"}";
+            let response = format!(
+                "HTTP/1.0 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.write_all(body).unwrap();
+            request_text
+        });
+        let sidecar = ready_sidecar(port);
+        let payload = serde_json::json!({
+            "device_id": "adb:emulator-5554",
+            "skill_id": "app.stability_test",
+            "skill_version": "1.1.0"
+        });
+        let key = "desktop-9f2c1a4e-7b3d-4e5f-8a6b-0c1d2e3f4a5b";
+        sidecar
+            .api_post(SKILL_DSL_RUN_ASYNC_PATH, &payload, Some(key))
+            .unwrap();
+        let request_text = server.join().unwrap();
         assert!(request_text.contains(&format!("Idempotency-Key: {key}\r\n")));
     }
 

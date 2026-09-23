@@ -462,6 +462,11 @@ body {
   gap: 12px;
 }
 
+.composer-modes {
+  display: flex;
+  gap: 8px;
+}
+
 .composer-field {
   display: flex;
   flex-direction: column;

@@ -27,10 +27,12 @@ export function ConfirmTaskDialog({
   return (
     <div className="dialog-backdrop" role="presentation">
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-        <h2 id="confirm-title">确认执行 Agent 任务</h2>
+        <h2 id="confirm-title">
+          {intent.kind === 'stability' ? '确认执行稳定性测试' : '确认执行 Agent 任务'}
+        </h2>
         <dl className="dialog-facts">
-          <dt>目标</dt>
-          <dd>{intent.goal}</dd>
+          <dt>{intent.kind === 'stability' ? '应用' : '目标'}</dt>
+          <dd>{intent.kind === 'stability' ? intent.appId : intent.goal}</dd>
           <dt>设备</dt>
           <dd>
             {device ? `${device.name}（Android ${device.os_version}）` : intent.deviceId}
@@ -40,8 +42,9 @@ export function ConfirmTaskDialog({
         <div className="dialog-risk">
           <AlertTriangle size={15} aria-hidden />
           <p>
-            Agent 将在该设备上自主执行点击、滑动和文本输入等 Medium
-            风险动作。每一步决策仍受 Tool 白名单、设备能力和安全策略约束；你可以随时取消任务。
+            {intent.kind === 'stability'
+              ? '将启动该应用并在约 2 分钟内上滑、下滑和返回，同时采集性能采样与一段脱敏日志。到时间后任务结束，已采集的采样会留在报告里。'
+              : 'Agent 将在该设备上自主执行点击、滑动和文本输入等 Medium 风险动作。每一步决策仍受 Tool 白名单、设备能力和安全策略约束；你可以随时取消任务。'}
           </p>
         </div>
         {error ? <p className="error-detail">{error}</p> : null}
