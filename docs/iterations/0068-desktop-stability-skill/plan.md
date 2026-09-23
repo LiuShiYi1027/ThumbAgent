@@ -1,8 +1,9 @@
 # ITER-0068 Desktop Stability Skill（桌面稳定性测试入口）
 
-> 文档状态：Draft
-> 迭代状态：Active
+> 文档状态：Active
+> 迭代状态：Completed
 > 创建日期：2026-09-22
+> 完成日期：2026-09-23
 > 关联：[ITER-0062](../0062-declarative-skill-dsl/plan.md) · [ITER-0065](../0065-stability-reporting/plan.md)
 
 ## 背景

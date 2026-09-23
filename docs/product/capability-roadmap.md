@@ -141,6 +141,7 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
 - ~~ITER-0067~~：真实 App 搜索提交已交付。真机 `submit=search` 通过；价格交卷
   deferred（模型搜完后继续操作，预算耗尽）。见
   [ITER-0067 复盘](../iterations/0067-real-app-answer-baseline/retrospective.md)。
-- **ITER-0068**（进行中）：桌面工作台提交官方稳定性测试，并沿用既有采样报告。
-  见 [ITER-0068 计划](../iterations/0068-desktop-stability-skill/plan.md)。
+- ~~ITER-0068~~：桌面工作台提交官方稳定性测试已交付（真机点击收口，采样曲线渲染；
+  短时时间盒与 deadline 不匹配导致 timed_out 观感问题单独立项）。见
+  [ITER-0068 复盘](../iterations/0068-desktop-stability-skill/retrospective.md)。
   A 档设备动作仍按真实场景重复出现时再拉动，每次 1–2 个候选。
