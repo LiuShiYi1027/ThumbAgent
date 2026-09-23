@@ -222,6 +222,11 @@ class RuntimeApiClient:
                 "selector": arguments["selector"],
                 "text": arguments["text"],
                 "confirmed": arguments["confirmed"],
+                **(
+                    {"submit": arguments["submit"]}
+                    if arguments.get("submit") is not None
+                    else {}
+                ),
             },
         )
 

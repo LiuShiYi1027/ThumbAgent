@@ -42,6 +42,10 @@ class DeviceAdapter(Protocol):
 
     async def press_home(self, device_id: str) -> None: ...
 
+    async def press_enter(self, device_id: str) -> None:
+        """Send KEYCODE_ENTER. Only the Unicode Skill may call this after verified input."""
+        ...
+
     async def tap(self, device_id: str, x: int, y: int) -> None: ...
 
     async def swipe(

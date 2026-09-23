@@ -138,4 +138,9 @@ pm grant/revoke 等权限操作（绕过系统授权模型）
   不再把空 `ui_summary` 交给 Planner；重试耗尽以 `UI_TREE_EMPTY` 可解释失败。
   真机设置页回归通过；京东空 dump 在荣耀登录页未复现（见
   [ITER-0066 复盘](../iterations/0066-observation-empty-hierarchy/retrospective.md)）。
-- A 档设备动作仍按真实场景重复出现时再拉动，每次 1–2 个候选。
+- ~~ITER-0067~~：真实 App 搜索提交已交付。真机 `submit=search` 通过；价格交卷
+  deferred（模型搜完后继续操作，预算耗尽）。见
+  [ITER-0067 复盘](../iterations/0067-real-app-answer-baseline/retrospective.md)。
+- **ITER-0068**（进行中）：桌面工作台提交官方稳定性测试，并沿用既有采样报告。
+  见 [ITER-0068 计划](../iterations/0068-desktop-stability-skill/plan.md)。
+  A 档设备动作仍按真实场景重复出现时再拉动，每次 1–2 个候选。

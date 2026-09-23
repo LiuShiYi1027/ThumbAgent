@@ -29,9 +29,12 @@ class UnicodeTextInputSkill:
         selector: dict[str, Any],
         text: str,
         confirmed: bool = False,
+        submit: str | None = None,
     ) -> UnicodeInputResult:
         started_at = _now()
-        captured = await self._tool.execute(device_id, selector, text, confirmed)
+        captured = await self._tool.execute(
+            device_id, selector, text, confirmed, submit
+        )
         node = captured.match.target_node
         return UnicodeInputResult(
             skill_call_id=f"skillcall_{uuid.uuid4().hex}",
@@ -50,4 +53,5 @@ class UnicodeTextInputSkill:
             evidence_refs=captured.evidence_refs,
             started_at=started_at,
             completed_at=_now(),
+            submitted=captured.submitted,
         )

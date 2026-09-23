@@ -262,6 +262,54 @@ class UnicodeTextInputSkillTests(unittest.IsolatedAsyncioTestCase):
         set_actions = [a for a in adapter.actions if a[0] == "input.ime.set"]
         self.assertEqual(("input.ime.set", DEVICE_ID, DEFAULT_IME), set_actions[-1])
         self.assertEqual(DEFAULT_IME, adapter.current_ime)
+        self.assertNotIn("input.enter", kinds)
+
+    async def test_submit_search_sends_enter_before_ime_restore(self) -> None:
+        adapter = _ready_adapter()
+        runtime = self._runtime(adapter)
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, SELECTOR, "你好世界", confirmed=True, submit="search"
+        )
+
+        self.assertEqual("search", result["submitted"])
+        kinds = [a[0] for a in adapter.actions]
+        self.assertIn("input.enter", kinds)
+        self.assertLess(kinds.index("input.enter"), max(i for i, k in enumerate(kinds) if k == "input.ime.set"))
+        self.assertEqual(DEFAULT_IME, adapter.current_ime)
+        self.assertTrue(adapter.search_submitted)
+
+    async def test_invalid_submit_rejected_before_device_action(self) -> None:
+        adapter = _ready_adapter()
+        runtime = self._runtime(adapter)
+
+        with self.assertRaises(MobileAgentError) as raised:
+            await runtime.unicode_text_input(
+                DEVICE_ID, SELECTOR, "你好世界", confirmed=True, submit="go"
+            )
+
+        self.assertEqual("INVALID_ARGUMENT", raised.exception.code)
+        self.assertEqual([], adapter.actions)
+
+    async def test_readback_falls_back_when_hint_selector_misses_rebuilt_field(self) -> None:
+        """输入后页面重建导致原 hint 选择器 miss，但文本已在唯一输入框上。"""
+        adapter = _ready_adapter()
+        adapter.field_hint = "搜索、提问或输入网址"
+        adapter.hint_rebuilds_on_input = True
+        runtime = self._runtime(adapter)
+        selector = {
+            "strategy": "hint",
+            "value": "搜索、提问或输入网址",
+            "match": "exact",
+        }
+
+        result = await runtime.unicode_text_input(
+            DEVICE_ID, selector, "你好世界", confirmed=True
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual("你好世界", adapter.field_text)
+        self.assertEqual("", adapter.field_hint)
 
     async def test_autocomplete_text_view_is_accepted_as_editable(self) -> None:
         """AutoCompleteTextView（EditText 平台子类，MagicOS 搜索框实际形态）可输入。"""

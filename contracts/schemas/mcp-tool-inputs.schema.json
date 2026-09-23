@@ -181,6 +181,10 @@
         "confirmed": {
           "const": true,
           "description": "The MCP host must explain that the default input method is temporarily switched to the controlled helper and restored afterwards, then obtain explicit user confirmation."
+        },
+        "submit": {
+          "const": "search",
+          "description": "After verified Unicode input, press the field IME search/enter action once. Omitted means type only."
         }
       }
     },

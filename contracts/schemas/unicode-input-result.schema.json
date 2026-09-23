@@ -68,6 +68,10 @@
       "items": { "type": "string", "pattern": "^artifact_[a-f0-9]{32}$" }
     },
     "started_at": { "type": "string", "format": "date-time" },
-    "completed_at": { "type": "string", "format": "date-time" }
+    "completed_at": { "type": "string", "format": "date-time" },
+    "submitted": {
+      "const": "search",
+      "description": "Present only when the request asked to submit the field IME search action after verified input."
+    }
   }
 }

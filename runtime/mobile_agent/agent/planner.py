@@ -298,6 +298,15 @@ def parse_llm_decision_payload(payload: object, planner_id: str) -> AgentDecisio
                         "text_type": type(arguments.get("text")).__name__,
                     },
                 )
+            if "submit" in arguments and arguments.get("submit") != "search":
+                raise _model_output_invalid(
+                    "Planner 输出的 submit 仅支持 search",
+                    {
+                        "payload_keys": _sorted_keys(payload),
+                        "argument_keys": _sorted_keys(arguments),
+                        "submit_type": type(arguments.get("submit")).__name__,
+                    },
+                )
         elif (
             not isinstance(arguments.get("target_selector"), dict)
             or not isinstance(arguments.get("expected_selector"), dict)

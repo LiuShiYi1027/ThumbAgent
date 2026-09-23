@@ -184,6 +184,10 @@ class SessionTrackingDeviceAdapter:
         await self._validate_binding(device_id)
         await self._adapter.press_home(device_id)
 
+    async def press_enter(self, device_id: str) -> None:
+        await self._validate_binding(device_id)
+        await self._adapter.press_enter(device_id)
+
     async def tap(self, device_id: str, x: int, y: int) -> None:
         await self._validate_binding(device_id)
         await self._adapter.tap(device_id, x, y)

@@ -13,7 +13,11 @@
       "device_id": { "type": "string", "minLength": 1 },
       "selector": { "$ref": "../../../../contracts/schemas/ui-selector.schema.json" },
       "text": { "type": "string", "minLength": 1, "maxLength": 256 },
-      "confirmed": { "type": "boolean" }
+      "confirmed": { "type": "boolean" },
+      "submit": {
+        "const": "search",
+        "description": "After verified input, press the field IME search/enter action once."
+      }
     }
   },
   "output_schema": {

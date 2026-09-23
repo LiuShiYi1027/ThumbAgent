@@ -24,6 +24,8 @@ class UnicodeInputContractTest(unittest.TestCase):
             self.assertIn(field, schema["required"], field)
         # 文本原文不得进入结果，仅记录长度与 SHA-256（沿用 ActionResult 隐私先例）。
         self.assertNotIn("text", schema["properties"])
+        self.assertEqual("search", schema["properties"]["submitted"]["const"])
+        self.assertNotIn("submitted", schema["required"])
         self.assertEqual(1, schema["properties"]["text_length"]["minimum"])
         self.assertEqual(256, schema["properties"]["text_length"]["maximum"])
         ime = schema["properties"]["ime"]
@@ -52,6 +54,8 @@ class UnicodeInputContractTest(unittest.TestCase):
         self.assertEqual(256, tool["properties"]["text"]["maxLength"])
         # 高风险动作必须显式确认，不允许默认值。
         self.assertTrue(tool["properties"]["confirmed"]["const"])
+        self.assertEqual("search", tool["properties"]["submit"]["const"])
+        self.assertNotIn("submit", tool["required"])
 
     def test_generated_typescript_in_sync(self) -> None:
         generated = (

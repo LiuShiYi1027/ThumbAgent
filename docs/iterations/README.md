@@ -71,6 +71,8 @@
 | [ITER-0064](./0064-agent-reliability-batch/plan.md) | Agent Reliability Batch | Completed | 存量可靠性收口：阻塞式模型调用、unicode 读回时机、queued 暂停、捷径副作用证据、Web UI 幂等键 |
 | [ITER-0065](./0065-stability-reporting/plan.md) | Stability Reporting | Completed | 稳定性报告呈现：采样序列趋势 + 崩溃/ANR 签名判定 + E2E 操作手册 |
 | [ITER-0066](./0066-observation-empty-hierarchy/plan.md) | Observation Empty Hierarchy | Completed | 空 UI 树检测与有界只读恢复：可解释失败，不再把空观察交给模型空转 |
+| [ITER-0067](./0067-real-app-answer-baseline/plan.md) | Real App Answer Baseline | Completed | 真实 App 搜索提交与 finish answer：真机价格交卷 deferred |
+| [ITER-0068](./0068-desktop-stability-skill/plan.md) | Desktop Stability Skill | Active | 桌面工作台提交官方稳定性测试并查看既有报告 |
 
 迭代粒度、节奏、门禁和交付要求见[迭代开发规范](../engineering/iteration-process.md)；目录和文档
 格式见[文档规范](../documentation-guide.md)。

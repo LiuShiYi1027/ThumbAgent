@@ -325,7 +325,12 @@ class AgentRunner:
                     current_action_feedback if isinstance(current_action_feedback, dict) else None
                 )
                 self._raise_if_stopped(cancellation_requested, deadline_exceeded)
-                if decision.decision_type is AgentDecisionType.RUN_SKILL:
+                # Unicode 输入是循环中的一步（搜索后还要观察结果并 finish）。
+                # settings.scroll_navigate 仍按 Preview Skill 终态收尾。
+                if (
+                    decision.decision_type is AgentDecisionType.RUN_SKILL
+                    and decision.skill_id != "input.unicode_text"
+                ):
                     skill_result = round_result.get("skill_result")
                     return TaskRun(
                         task_id=task_id,
@@ -804,7 +809,11 @@ class AgentRunner:
                     message="Planner 输出缺少有效 selector 或 text",
                 )
             return await self._unicode_text_input.invoke(
-                device_id, selector, text, confirmed=confirmed
+                device_id,
+                selector,
+                text,
+                confirmed=confirmed,
+                submit=arguments.get("submit") if isinstance(arguments.get("submit"), str) else None,
             )
         target = arguments.get("target_selector")
         expected = arguments.get("expected_selector")

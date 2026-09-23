@@ -12,6 +12,7 @@ from mobile_agent.domain.unicode_input import (
     is_helper_ime,
     normalize_for_verification,
     text_digest,
+    validate_ime_submit,
     validate_unicode_text,
 )
 from runtime.tests.utf7ref import reference_decode_modified_utf7
@@ -103,6 +104,14 @@ class UnicodeTextValidationTests(unittest.TestCase):
     def test_ascii_with_space_is_unicode_path(self) -> None:
         # 含空格的 ASCII 走 unicode 通道（input.text 不支持空格）。
         self.assertEqual("hello world", validate_unicode_text("hello world"))
+
+    def test_ime_submit_accepts_search_or_none(self) -> None:
+        self.assertIsNone(validate_ime_submit(None))
+        self.assertEqual("search", validate_ime_submit("search"))
+        for bad in ("go", "done", "", 1):
+            with self.assertRaises(MobileAgentError) as ctx:
+                validate_ime_submit(bad)
+            self.assertEqual("INVALID_ARGUMENT", ctx.exception.code, repr(bad))
 
 
 class VerificationHelpersTests(unittest.TestCase):

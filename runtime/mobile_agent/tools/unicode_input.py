@@ -21,11 +21,12 @@ from mobile_agent.domain.unicode_input import (
     is_helper_ime,
     normalize_for_verification,
     text_digest,
+    validate_ime_submit,
     validate_unicode_text,
 )
 from mobile_agent.evidence.artifacts import ArtifactStore
 from mobile_agent.policy.engine import PolicyEngine
-from mobile_agent.tools.runtime import ToolRegistry, locate_editable_target
+from mobile_agent.tools.runtime import ToolRegistry, _is_editable_node, locate_editable_target
 from mobile_agent.ui.locator import UiLocator
 from mobile_agent.ui.model import UiMatch, UiSelector
 from mobile_agent.ui.parser import UiHierarchyParser
@@ -37,6 +38,8 @@ _INPUT_RETRY_SETTLE_SECONDS = 1.0
 # 读回时刻节点缺席（match_count=0）后的单次只读重读 settle：
 # 覆盖 uiautomator dump 与布局/动画的竞态（真机 e2e-output/20260901-205659）。
 _READBACK_REREAD_SETTLE_SECONDS = 0.5
+# 搜索提交（KEYCODE_ENTER）后的短 settle，让 IME action 送达后再恢复输入法。
+_SUBMIT_SETTLE_SECONDS = 0.3
 
 
 def _node_absent(failure: MobileAgentError) -> bool:
@@ -73,6 +76,7 @@ class UnicodeTextInput:
     helper_ime_id: str
     previous_ime_id: str
     evidence_refs: tuple[str, ...]
+    submitted: str | None = None
 
 
 class UnicodeTextInputTool:
@@ -100,9 +104,11 @@ class UnicodeTextInputTool:
         selector_payload: dict[str, Any],
         text: str,
         confirmed: bool,
+        submit: str | None = None,
     ) -> UnicodeTextInput:
         # 校验与敏感拦截先于任何设备动作（ADR-0019）。
         text = validate_unicode_text(text)
+        submit = validate_ime_submit(submit)
         if not isinstance(selector_payload, dict):
             raise MobileAgentError(
                 code="INVALID_ARGUMENT",
@@ -178,8 +184,9 @@ class UnicodeTextInputTool:
                         await self._verify_readback(
                             device_id, selector, before_text + text, evidence
                         )
+                        await self._submit_if_requested(device_id, submit)
                         return self._captured(
-                            match, text, helper_ime_id, previous_ime_id, evidence
+                            match, text, helper_ime_id, previous_ime_id, evidence, submit
                         )
                     except MobileAgentError as reread_failure:
                         if reread_failure.code != "TEXT_INPUT_NOT_VERIFIED":
@@ -193,10 +200,20 @@ class UnicodeTextInputTool:
                 await self._verify_readback(
                     device_id, selector, before_text + text, evidence
                 )
+            await self._submit_if_requested(device_id, submit)
         finally:
             await self._restore_input_method(device_id, previous_ime_id)
 
-        return self._captured(match, text, helper_ime_id, previous_ime_id, evidence)
+        return self._captured(
+            match, text, helper_ime_id, previous_ime_id, evidence, submit
+        )
+
+    async def _submit_if_requested(self, device_id: str, submit: str | None) -> None:
+        if submit is None:
+            return
+        # 只发一次，不重试（搜索提交 unsafe）。
+        await self._adapter.press_enter(device_id)
+        await asyncio.sleep(_SUBMIT_SETTLE_SECONDS)
 
     @staticmethod
     def _captured(
@@ -205,6 +222,7 @@ class UnicodeTextInputTool:
         helper_ime_id: str,
         previous_ime_id: str,
         evidence: list[str],
+        submitted: str | None = None,
     ) -> UnicodeTextInput:
         return UnicodeTextInput(
             match=match,
@@ -213,6 +231,7 @@ class UnicodeTextInputTool:
             helper_ime_id=helper_ime_id,
             previous_ime_id=previous_ime_id,
             evidence_refs=tuple(evidence),
+            submitted=submitted,
         )
 
     async def _resolve_helper(self, device_id: str) -> str:
@@ -262,8 +281,19 @@ class UnicodeTextInputTool:
         nodes = self._parser.parse(
             self._artifacts.resolve(after.ui_tree.artifact.relative_path).read_bytes()
         )
-        matches = self._locator.find_all(nodes, selector)
         expected = normalize_for_verification(expected_text)
+        matches = self._locator.find_all(nodes, selector)
+        if len(matches) != 1:
+            # 真机夸克：输入后页面重建，原 hint 选择器 miss，但文本已在唯一
+            # 可编辑框上（e2e-output/iter0067-20260921-214227）。按期望文本回退。
+            text_matches = [
+                node
+                for node in nodes
+                if _is_editable_node(node)
+                and normalize_for_verification(node.effective_text) == expected
+            ]
+            if len(matches) == 0 and len(text_matches) == 1:
+                matches = text_matches
         actual = (
             normalize_for_verification(matches[0].effective_text)
             if len(matches) == 1

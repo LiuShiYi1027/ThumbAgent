@@ -48,6 +48,9 @@ class UnavailableDeviceAdapter:
     async def press_home(self, device_id: str) -> None:
         self._raise()
 
+    async def press_enter(self, device_id: str) -> None:
+        self._raise()
+
     async def tap(self, device_id: str, x: int, y: int) -> None:
         self._raise()
 

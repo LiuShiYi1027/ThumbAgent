@@ -34,6 +34,7 @@
 | `e2e_live_agent_settings.py` | 稳定验收 | 真实模型 Agent 主链路：自然语言目标 → 模型规划 → 设备动作 → Runtime 终态验证 | `local/model-provider.json`（gitignored）+ 密钥环境变量；默认中文目标（中文 ROM），`--en` 走捷径英文目标，`--battery` 强制模型循环；`--rounds`/`--deadline` 可调预算 | 无残留写动作 |
 | `e2e_live_agent_answer_about.py` | 稳定验收 | Agent 内核 answer 带回确定性场景（关于手机 → 型号），同时是捷径谓词守卫的活体探针 | 同上模型配置 | 无残留写动作 |
 | `e2e_iter0066.py` | 稳定验收 | ITER-0066：设置页 Agent 回归 + 京东 Observation 空树分类（空则断言 `UI_TREE_EMPTY`） | 真机在线；京东已安装（空树探测）。未登录时登录页可能 `FLAG_SECURE`，观察记 deferred 而非失败 | 结束按 Home |
+| `e2e_iter0067.py` | 稳定验收 | ITER-0067：夸克搜索并带回答案（`succeeded` + `planner_finish` + 非空 answer） | 真机在线、夸克已装、Helper IME、`local/model-provider.json` | 结束按 Home |
 
 「稳定验收」场景应与代码同步维护，失败视为回归；「探索性」场景依赖
 特定商业 App 版本，失败先核对 App 改版，不直接视为产品回归。

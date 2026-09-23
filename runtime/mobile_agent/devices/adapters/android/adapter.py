@@ -415,6 +415,11 @@ class AndroidDeviceAdapter:
     async def press_home(self, device_id: str) -> None:
         await self._key_event(device_id, "3")
 
+    async def press_enter(self, device_id: str) -> None:
+        # KEYCODE_ENTER only. Not a general key injection API; Unicode Skill
+        # calls this after verified search-box input (ITER-0067).
+        await self._key_event(device_id, "66")
+
     async def tap(self, device_id: str, x: int, y: int) -> None:
         serial = self._serial_from_device_id(device_id)
         result = await self._runner.run(

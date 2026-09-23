@@ -29,6 +29,10 @@ _ASCII_FAST_PATH = re.compile(r"[A-Za-z0-9._-]{1,64}")
 # 敏感数字形态：验证码（4-8 位）与手机号（11+ 位），与 input.text@1 拦截一致。
 _SENSITIVE_DIGITS = (re.compile(r"\d{4,8}"), re.compile(r"\d{11,}"))
 
+# 搜索框 IME 提交：只允许 search。对应固定 KEYCODE_ENTER，不是通用按键面。
+IME_SUBMIT_SEARCH = "search"
+_ALLOWED_IME_SUBMIT = frozenset({IME_SUBMIT_SEARCH})
+
 # 直传字符集：可打印 ASCII，排除 '&'（Modified UTF-7 移位符）、空格与 '%'
 # （`input text` 的设备端解析对二者有歧义，一律进 base64 块）。
 _DIRECT_CHARS = frozenset(
@@ -70,6 +74,20 @@ def validate_unicode_text(raw: object) -> str:
             category=ErrorCategory.VALIDATION,
             message="纯 ASCII 文本应走 input.text 快路径",
             suggested_action="改用 input.text，不触发 IME 切换",
+        )
+    return raw
+
+
+def validate_ime_submit(raw: object) -> str | None:
+    """Return the IME submit action, or None when the caller omitted submit."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw not in _ALLOWED_IME_SUBMIT:
+        raise MobileAgentError(
+            code="INVALID_ARGUMENT",
+            category=ErrorCategory.VALIDATION,
+            message="无效的 submit 参数，仅支持 search",
         )
     return raw
 
@@ -168,6 +186,7 @@ class UnicodeInputResult:
     started_at: str
     completed_at: str
     field_resource_id: str | None = None
+    submitted: str | None = None
     schema_version: str = "1.0.0"
     skill_id: str = "input.unicode_text"
     skill_version: str = "1.0.0"
@@ -179,7 +198,7 @@ class UnicodeInputResult:
         }
         if self.field_resource_id is not None:
             field["resource_id"] = self.field_resource_id
-        return {
+        payload: dict[str, Any] = {
             "schema_version": self.schema_version,
             "skill_call_id": self.skill_call_id,
             "skill_id": self.skill_id,
@@ -200,3 +219,6 @@ class UnicodeInputResult:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
         }
+        if self.submitted is not None:
+            payload["submitted"] = self.submitted
+        return payload

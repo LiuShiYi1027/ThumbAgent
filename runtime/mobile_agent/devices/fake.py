@@ -40,6 +40,7 @@ def _fake_ui_xml(
     field_text: str = "",
     field_class: str = "android.widget.EditText",
     field_hint: str = "",
+    search_submitted: bool = False,
 ) -> bytes:
     if app_id == "com.android.settings" and activity == ".MainActivity":
         body = (
@@ -68,11 +69,19 @@ def _fake_ui_xml(
         # 测试内容不含 XML 特殊字符，直接内联进属性值。
         # 真实 uiautomator 行为：输入框为空时 text 属性等于 hint，故此处同样输出。
         shown_text = field_text if field_text else field_hint
+        extra = ""
+        if search_submitted:
+            extra = (
+                '<node text="¥7999" resource-id="result_price" '
+                'class="android.widget.TextView" package="com.example.form" '
+                'clickable="false" enabled="true" visible-to-user="true" bounds="[0,1][2,2]"/>'
+            )
         body = (
             f'<node text="{shown_text}" hint="{field_hint}" resource-id="search_box" '
             f'class="{field_class}" '
             'package="com.example.form" clickable="true" enabled="true" '
             'visible-to-user="true" bounds="[0,0][2,1]"/>'
+            f"{extra}"
         )
     return f'<?xml version="1.0" encoding="UTF-8"?><hierarchy rotation="0">{body}</hierarchy>'.encode()
 
@@ -95,6 +104,8 @@ class FakeDeviceAdapter:
         self.field_text = ""
         self.field_class = "android.widget.EditText"
         self.field_hint = ""
+        self.hint_rebuilds_on_input = False
+        self.search_submitted = False
         self._installed_apps = {"com.android.settings", "com.example.fake"}
         self._running_apps = {"com.example.fake"}
         self._stopped_apps: set[str] = set()
@@ -158,6 +169,7 @@ class FakeDeviceAdapter:
                 self.field_text,
                 self.field_class,
                 self.field_hint,
+                self.search_submitted,
             ),
             ".xml",
         )
@@ -222,6 +234,11 @@ class FakeDeviceAdapter:
         self.foreground_activity = ".Launcher"
         self.actions.append(("navigation.home", device_id))
 
+    async def press_enter(self, device_id: str) -> None:
+        self.actions.append(("input.enter", device_id))
+        if self.foreground_app == "com.example.form":
+            self.search_submitted = True
+
     async def tap(self, device_id: str, x: int, y: int) -> None:
         self.actions.append(("input.tap", device_id, x, y))
         if (
@@ -243,6 +260,8 @@ class FakeDeviceAdapter:
             self.field_text += decode_modified_utf7(text)
         else:
             self.field_text += text
+        if self.hint_rebuilds_on_input:
+            self.field_hint = ""
 
     async def current_input_method(self, device_id: str) -> str:
         self.actions.append(("input.ime.current", device_id))

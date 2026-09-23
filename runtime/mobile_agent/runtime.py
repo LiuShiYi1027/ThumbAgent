@@ -1525,6 +1525,7 @@ class RuntimeService:
         selector: dict[str, Any],
         text: str,
         confirmed: bool = False,
+        submit: str | None = None,
     ) -> dict[str, Any]:
         """Input verified Unicode text into one editable field under Session and Lease."""
 
@@ -1537,7 +1538,7 @@ class RuntimeService:
         ), self._adapter.bind_session(device_id, session_id):
             return (
                 await self._unicode_text_input.invoke(
-                    device_id, selector, text, confirmed
+                    device_id, selector, text, confirmed, submit
                 )
             ).to_dict()
 
@@ -2497,12 +2498,13 @@ class RuntimeService:
         selector: dict[str, Any],
         text: str,
         confirmed: bool = False,
+        submit: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         """Synchronous interface wrapper for the Unicode text input Skill."""
 
         try:
             result = asyncio.run(
-                self.unicode_text_input(device_id, selector, text, confirmed)
+                self.unicode_text_input(device_id, selector, text, confirmed, submit)
             )
             return HTTPStatus.OK, {"result": result}
         except MobileAgentError as error:

@@ -161,6 +161,7 @@ locked unauthorized usb:1-1
         )
         back = ("-s", "serial-1", "shell", "input", "keyevent", "4")
         home = ("-s", "serial-1", "shell", "input", "keyevent", "3")
+        enter = ("-s", "serial-1", "shell", "input", "keyevent", "66")
         tap = ("-s", "serial-1", "shell", "input", "touchscreen", "tap", "10", "20")
         text = ("-s", "serial-1", "shell", "input", "text", "'hello_1'")
         swipe = (
@@ -180,6 +181,7 @@ locked unauthorized usb:1-1
                 launch: result(launch),
                 back: result(back),
                 home: result(home),
+                enter: result(enter),
                 tap: result(tap),
                 text: result(text),
                 swipe: result(swipe),
@@ -190,11 +192,12 @@ locked unauthorized usb:1-1
         await adapter.launch_app("adb:serial-1", "com.android.settings")
         await adapter.press_back("adb:serial-1")
         await adapter.press_home("adb:serial-1")
+        await adapter.press_enter("adb:serial-1")
         await adapter.tap("adb:serial-1", 10, 20)
         await adapter.input_text("adb:serial-1", "hello_1")
         await adapter.swipe("adb:serial-1", 100, 900, 100, 300, 250)
 
-        self.assertEqual([launch, back, home, tap, text, swipe], [call[1] for call in process.calls])
+        self.assertEqual([launch, back, home, enter, tap, text, swipe], [call[1] for call in process.calls])
 
     async def test_launch_rejects_invalid_package_before_process_call(self) -> None:
         process = FakeProcessRunner({})

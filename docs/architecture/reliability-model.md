@@ -75,6 +75,10 @@ ITER-0066：`uiautomator dump` 成功但解析后语义候选数为 0 的 hierar
 不记 `unknown_outcome`，也不升级为 `NO_PROGRESS`。截图与空 UI 树 Artifact 保留在
 失败 step 的 `error.details` 引用中。
 
+ITER-0067：`input.unicode_text` 的可选 `submit=search` 在读回成功后发送一次固定
+KEYCODE_ENTER。该提交是 `unsafe`，不得自动重试；失败不补发第二次 Enter。Agent
+不能把 Enter 当通用 Tool 调用。
+
 ## 6. 超时
 
 - Process timeout：底层命令预算。

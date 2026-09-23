@@ -18,7 +18,7 @@ from mobile_agent.agent import (
     UnavailablePlanner,
     parse_llm_decision_payload,
 )
-from mobile_agent.agent.planner import MAX_AGENT_ROUNDS
+from mobile_agent.agent.planner import MAX_AGENT_ROUNDS, Planner
 from mobile_agent.agent.shortcuts import match_navigation_shortcut
 from mobile_agent.devices.base import DeviceAdapter
 from mobile_agent.devices.fake import FakeDeviceAdapter
@@ -393,6 +393,83 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             ("input.ime.set", "fake:android-001", "com.example.ime/.DefaultIme"),
             set_actions[-1],
         )
+        self.assertNotIn("input.enter", [a[0] for a in adapter.actions])
+
+    async def test_agent_unicode_search_submit_finishes_with_answer(self) -> None:
+        """ITER-0067：输入并 submit=search 后，结果页 finish 携带 answer。"""
+        adapter = FakeDeviceAdapter()
+        adapter.foreground_app = "com.example.form"
+        adapter.foreground_activity = ".MainActivity"
+        adapter.field_text = ""
+        adapter.installed_imes = (
+            "com.example.ime/.DefaultIme",
+            f"{HELPER_PACKAGE}/{HELPER_PACKAGE}.UnicodeImeService",
+        )
+        adapter.enabled_imes = ["com.example.ime/.DefaultIme"]
+        adapter.current_ime = "com.example.ime/.DefaultIme"
+        artifacts = ArtifactStore(Path(self.directory.name))
+        registry = ToolRegistry()
+        policy = PolicyEngine()
+        tools = ToolRuntime(adapter, artifacts, registry, policy)
+        unicode_skill = UnicodeTextInputSkill(
+            UnicodeTextInputTool(adapter, artifacts, registry, policy)
+        )
+        payloads = [
+            {
+                "decision_type": "run_skill",
+                "skill_id": "input.unicode_text",
+                "arguments": {
+                    "selector": {
+                        "strategy": "resource_id",
+                        "value": "search_box",
+                        "match": "exact",
+                    },
+                    "text": "iPhone 17 价格",
+                    "submit": "search",
+                },
+                "reason": "Type the query and submit search.",
+                "confidence": 0.85,
+            },
+            {
+                "decision_type": "finish",
+                "arguments": {
+                    "expected_selector": {
+                        "strategy": "resource_id",
+                        "value": "result_price",
+                        "match": "exact",
+                    },
+                    "answer": "¥7999",
+                },
+                "reason": "The result page shows the price.",
+                "confidence": 0.9,
+            },
+        ]
+        runner = AgentRunner(
+            adapter,
+            artifacts,
+            MockLLMPlanner(payloads),
+            tools,
+            SettingsScrollNavigateSkill(tools, OpenAppSkill(tools)),
+            navigation_shortcuts_enabled=False,
+            unicode_text_input=unicode_skill,
+        )
+
+        task = await runner.run(
+            "fake:android-001",
+            "在搜索框搜索 iPhone 17 价格并带回答案",
+            confirmed=True,
+        )
+
+        self.assertEqual("succeeded", task.status.value)
+        self.assertEqual("planner_finish", task.completion_source)
+        self.assertEqual({"answer": "¥7999"}, task.result)
+        skill_result = task.steps[0].result["skill_result"]
+        self.assertEqual("search", skill_result["submitted"])
+        kinds = [a[0] for a in adapter.actions]
+        self.assertIn("input.enter", kinds)
+        enter_at = kinds.index("input.enter")
+        restore_at = max(i for i, kind in enumerate(kinds) if kind == "input.ime.set")
+        self.assertLess(enter_at, restore_at)
 
     def test_llm_unicode_skill_payload_requires_selector_and_text(self) -> None:
         valid = {
@@ -413,6 +490,11 @@ class AgentRunnerTests(unittest.IsolatedAsyncioTestCase):
             {"selector": {"strategy": "resource_id", "value": "search_box"}},
             {"text": "你好"},
             {"target_selector": {}, "expected_selector": {}},
+            {
+                "selector": {"strategy": "resource_id", "value": "search_box"},
+                "text": "你好",
+                "submit": "go",
+            },
         ):
             with self.subTest(arguments=bad_arguments):
                 with self.assertRaises(MobileAgentError) as raised:
@@ -1789,6 +1871,9 @@ class _FlakyObserveAdapter:
 
     async def press_home(self, device_id: str) -> None:
         await self._inner.press_home(device_id)
+
+    async def press_enter(self, device_id: str) -> None:
+        await self._inner.press_enter(device_id)
 
     async def tap(self, device_id: str, x: int, y: int) -> None:
         await self._inner.tap(device_id, x, y)

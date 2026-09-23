@@ -67,9 +67,17 @@ QUARK_ACCEPTANCE = {
 # 带回价格。验收只断言前台到达京东（UI 状态）；answer 正确性由人工核对报告，
 # 不做数据自动断言（V1 语义，见迭代 plan）。
 JD_GOAL = "打开京东，搜索 iPhone 17，把 iPhone 17 的价格带回来"
-JD_ACCEPTANCE = {
-    "foreground_app_id": "com.jingdong.app.mall",
-}
+# 带回答案类场景必须 acceptance=None：前台/UI 断言会在 run_skill 成功后短路任务
+# （runtime_acceptance 提前判完成），模型来不及 finish 携带 answer。
+# 完成判定改由 planner_finish（模型 finish 携带 expected_selector + answer），
+# answer 正确性由人工核对报告（V1 不做数据自动断言，见 ITER-0061 plan）。
+JD_ACCEPTANCE = None
+# 内核等价替代场景：夸克搜索「iPhone 17 价格」并带回答案。京东搜索结果页
+# （ProductListActivity）在部分 ROM 上使 uiautomator dump 持续返回空（实测
+# 小米 2509FPN0BC），内核验收改用页面结构更简单的夸克；京东场景保留待
+# Observation 健壮性跟进（见 ITER-0061 复盘）。
+QUARK_PRICE_GOAL = "打开夸克浏览器，搜索 iPhone 17 价格，把找到的价格带回来"
+QUARK_PRICE_ACCEPTANCE = None
 
 
 def _arg_value(flag: str, default: str) -> str:
@@ -115,6 +123,8 @@ async def main() -> int:
     started = datetime.now()
     if "--jd" in sys.argv:
         goal, acceptance = JD_GOAL, JD_ACCEPTANCE
+    elif "--quark-price" in sys.argv:
+        goal, acceptance = QUARK_PRICE_GOAL, QUARK_PRICE_ACCEPTANCE
     elif "--quark" in sys.argv:
         goal, acceptance = QUARK_GOAL, QUARK_ACCEPTANCE
     elif "--battery" in sys.argv:

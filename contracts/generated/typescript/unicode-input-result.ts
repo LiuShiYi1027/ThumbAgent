@@ -32,4 +32,5 @@ export interface UnicodeInputResult {
   evidence_refs: string[];
   started_at: string;
   completed_at: string;
+  submitted?: "search";
 }
