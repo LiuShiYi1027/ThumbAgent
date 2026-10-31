@@ -1019,7 +1019,9 @@ mod tests {
             }),
         };
         let payload = serde_json::json!({"device_id": "adb:emulator-5554", "goal": "打开系统设置"});
-        let value = sidecar.api_post(AGENT_RUN_ASYNC_PATH, &payload, None).unwrap();
+        let value = sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &payload, None)
+            .unwrap();
         let request_text = server.join().unwrap();
         assert_eq!(
             value.pointer("/task_id").and_then(|v| v.as_str()),
@@ -1054,9 +1056,13 @@ mod tests {
             }),
         };
         let oversized = serde_json::json!({"goal": "x".repeat(MAX_API_BODY_BYTES)});
-        assert!(sidecar.api_post(AGENT_RUN_ASYNC_PATH, &oversized, None).is_err());
+        assert!(sidecar
+            .api_post(AGENT_RUN_ASYNC_PATH, &oversized, None)
+            .is_err());
         let small = serde_json::json!({"goal": "ok"});
-        assert!(sidecar.api_post("/v1/tasks/agent.run", &small, None).is_err());
+        assert!(sidecar
+            .api_post("/v1/tasks/agent.run", &small, None)
+            .is_err());
     }
 
     #[test]

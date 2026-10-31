@@ -29,10 +29,7 @@ async fn runtime_api_get(
 }
 
 #[tauri::command]
-async fn runtime_api_get_bytes(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+async fn runtime_api_get_bytes(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let sidecar = Arc::clone(&state.sidecar);
     tauri::async_runtime::spawn_blocking(move || sidecar.api_get_bytes(&path))
         .await

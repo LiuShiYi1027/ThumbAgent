@@ -3,7 +3,7 @@
   "skill_id": "app.stability_test",
   "skill_version": "1.1.0",
   "name": "应用稳定性遍历压测（显式采样版）",
-  "description": "启动目标应用后在时间盒内确定性遍历（上滑/下滑/返回），每次迭代末尾经白名单 skill 引用显式采集一次 device.performance.snapshot（采样节奏=每迭代一次，上限 200 个采样点）；循环结束后采集 device.logs.collect（max_lines=500）作为崩溃/ANR 判定证据，最后重新拉起目标应用收尾。与 0062 的 1.0.0 差异：1.0.0 观察仅靠 ToolRuntime 隐式 Observation（device.performance.capture 为 direct_invocation=false 不可经 DSL 调用）；1.1.0 经 ADR-0021 修订一白名单 skill 引用获得显式性能采样与收尾日志。duration_seconds/max_actions 为调用方声明的遍历预算；loop 固定 600 秒/200 次双上限为绝对天花板，实际时间盒由任务 deadline_seconds 控制。",
+  "description": "启动目标应用后在时间盒内确定性遍历（上滑/下滑/返回），每次迭代末尾经白名单 skill 引用显式采集一次 device.performance.snapshot（采样节奏=每迭代一次，上限 200 个采样点）；循环结束后采集 device.logs.collect（max_lines=500）作为崩溃/ANR 判定证据，最后重新拉起目标应用收尾。与 0062 的 1.0.0 差异：1.0.0 观察仅靠 ToolRuntime 隐式 Observation（device.performance.capture 为 direct_invocation=false 不可经 DSL 调用）；1.1.0 经 ADR-0021 修订一白名单 skill 引用获得显式性能采样与收尾日志。duration_seconds/max_actions 为调用方的遍历预算，分别收紧循环的时长与迭代上限；loop 固定 600 秒/200 次双上限为绝对天花板。任一请求预算或文档上限到达即正常结束遍历并执行收尾。",
   "timeout_seconds": 900,
   "inputs": [
     {
@@ -19,7 +19,7 @@
       "required": false,
       "minimum": 1,
       "maximum": 600,
-      "description": "请求的遍历时长预算（秒）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 600 秒，实际时间盒由任务 deadline_seconds 控制"
+      "description": "请求的遍历时长预算（秒）。与文档内 600 秒绝对上限取较小值；到达后停止新迭代并执行收尾"
     },
     {
       "name": "max_actions",
@@ -27,7 +27,7 @@
       "required": false,
       "minimum": 1,
       "maximum": 200,
-      "description": "请求的遍历迭代预算（次）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 200 次"
+      "description": "请求的遍历迭代预算（次）。与文档内 200 次绝对上限取较小值；到达后停止遍历并执行收尾"
     }
   ],
   "steps": [

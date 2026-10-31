@@ -94,6 +94,11 @@ V1 Agent 默认 deadline 为 600 秒，可配置范围 1–1800 秒，从任务�
 ITER-0037 的异步日志快照使用相同 Task deadline，默认 60 秒。取消或 Deadline 发生在 ADB 调用
 期间时不强杀设备命令；调用返回后停止后续步骤，并保留已经生成的 Artifact 与完成步骤证据。
 
+官方 `app.stability_test` 的 `duration_seconds` 与 `max_actions` 分别是遍历时长和迭代预算，
+与文档内 600 秒 / 200 次绝对上限取较小值。任一预算到达即正常结束遍历，继续执行日志采集和
+应用恢复；这与 Task deadline 超时不同。Task deadline 必须额外覆盖启动、收尾和证据采集时间，
+桌面默认使用 `duration_seconds + 60` 秒，避免把正常的遍历预算结束误报为任务超时。
+
 ITER-0041 起，非流式 OpenAI-compatible 请求按 `response_headers`、`response_body` 和
 `response_decode` 记录可观察失败阶段，并记录毫秒耗时、尝试与重试次数。标准库 Transport 无法可靠
 拆分 DNS、TCP、TLS 和首 Token，因此报告不得声称这些更细阶段。Provider 重试仍只发生在当前任务、

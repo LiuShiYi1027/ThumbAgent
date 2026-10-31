@@ -23,6 +23,7 @@ from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest import mock
 
 from mobile_agent.api.server import RuntimeRequestHandler
 from mobile_agent.devices.fake import FakeDeviceAdapter
@@ -186,17 +187,19 @@ class StabilityTestV11TaskTests(unittest.TestCase):
     def _submit(self, body: dict) -> dict:
         return _post(self.runtime, "/v1/tasks/skill.dsl.run/async", body)
 
-    def _run_stability(self, version: str) -> dict:
+    def _run_stability(self, version: str, **input_overrides: int) -> dict:
+        inputs = {
+            "app_id": TARGET_APP,
+            "duration_seconds": 600,
+            "max_actions": 200,
+            **input_overrides,
+        }
         captured = self._submit(
             {
                 "device_id": DEVICE_ID,
                 "skill_id": "app.stability_test",
                 "skill_version": version,
-                "inputs": {
-                    "app_id": TARGET_APP,
-                    "duration_seconds": 600,
-                    "max_actions": 200,
-                },
+                "inputs": inputs,
                 "confirmed": True,
             }
         )
@@ -308,6 +311,42 @@ class StabilityTestV11TaskTests(unittest.TestCase):
         )
         # 结构化收尾：设备回到目标应用前台。
         self.assertEqual(TARGET_APP, self.adapter.foreground_app)
+
+    def test_v11_action_budget_stops_loop_and_preserves_wrapup(self) -> None:
+        task = self._run_stability("1.1.0", max_actions=2)
+
+        self.assertEqual("succeeded", task["status"])
+        self.assertEqual(
+            [
+                "app.launch",
+                *["input.swipe", "input.swipe", "navigation.back", "device.performance.capture"] * 2,
+                "device.logs.capture",
+                "app.launch",
+            ],
+            [action[0] for action in self.adapter.actions],
+        )
+        self.assertEqual(2, len(task["evidence_summary"]["sampling_series"]))
+        self.assertIn("crash_check", task["evidence_summary"])
+
+    def test_v11_duration_budget_stops_loop_and_preserves_wrapup(self) -> None:
+        clock = mock.patch(
+            "mobile_agent.skills.dsl_interpreter.monotonic",
+            side_effect=[100.0, 100.0, 100.5] + [102.0] * 1000,
+        )
+        with clock:
+            task = self._run_stability("1.1.0", duration_seconds=1)
+
+        self.assertEqual("succeeded", task["status"])
+        self.assertEqual(
+            [
+                "app.launch",
+                *["input.swipe", "input.swipe", "navigation.back", "device.performance.capture"] * 2,
+                "device.logs.capture",
+                "app.launch",
+            ],
+            [action[0] for action in self.adapter.actions],
+        )
+        self.assertIn("crash_check", task["evidence_summary"])
 
     def test_v11_medium_risk_requires_confirmation(self) -> None:
         captured = self._submit(

@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Any, Literal
 
@@ -358,7 +358,8 @@ async def run_dsl_skill(
             if error is not None:
                 return failed_result(error)
         elif isinstance(step, LoopStep):
-            if await _run_loop(step, run_action_step, emit, aborted):
+            effective_step = _apply_requested_loop_budget(document, step, bound_inputs)
+            if await _run_loop(effective_step, run_action_step, emit, aborted):
                 return failed_result(_boundary_aborted_error())
             # 循环体失败按契约被容忍；循环到达任一上限即视为成功完成。
             emit(DslStepRecord(step.step_id, None, "succeeded"))
@@ -415,6 +416,30 @@ def _boundary_aborted_error() -> MobileAgentError:
 ActionStepRunner = Callable[
     [ToolStep | SkillStep], Awaitable[tuple[DslStepRecord, MobileAgentError | None]]
 ]
+
+
+def _apply_requested_loop_budget(
+    document: SkillDslDocument, step: LoopStep, bound_inputs: dict[str, Any]
+) -> LoopStep:
+    """Apply the official stability skill's validated traversal budget.
+
+    The document limits remain absolute ceilings; omitted inputs preserve them.
+    Other DSL documents keep their declared loop semantics unchanged.
+    """
+
+    if document.skill_id != "app.stability_test":
+        return step
+    return replace(
+        step,
+        max_duration_seconds=min(
+            step.max_duration_seconds,
+            bound_inputs.get("duration_seconds", step.max_duration_seconds),
+        ),
+        max_iterations=min(
+            step.max_iterations,
+            bound_inputs.get("max_actions", step.max_iterations),
+        ),
+    )
 
 
 async def _run_loop(

@@ -3,7 +3,7 @@
   "skill_id": "app.stability_test",
   "skill_version": "1.0.0",
   "name": "应用稳定性遍历压测",
-  "description": "启动目标应用后在时间盒内执行确定性遍历（上滑/下滑/返回），结束后重新拉起目标应用形成结构化收尾。DSL 不支持把输入绑定到循环上限：duration_seconds 与 max_actions 是调用方声明并经 preflight 校验的遍历预算，文档内 loop 固定 600 秒 / 200 次双上限作为绝对天花板，实际时间盒由任务的 deadline_seconds 控制。device.performance.capture 为 direct_invocation=false（TOOL_REQUIRES_SKILL），DSL 步骤无法使用；观察覆盖由 ToolRuntime 每个步骤前后的 Observation 隐式提供。",
+  "description": "启动目标应用后在时间盒内执行确定性遍历（上滑/下滑/返回），结束后重新拉起目标应用形成结构化收尾。duration_seconds 与 max_actions 是调用方声明并经 preflight 校验的遍历预算，分别收紧循环的时长与迭代上限；文档内 loop 固定 600 秒 / 200 次双上限作为绝对天花板。任一请求预算或文档上限到达即正常结束遍历并执行收尾。device.performance.capture 为 direct_invocation=false（TOOL_REQUIRES_SKILL），DSL 步骤无法使用；观察覆盖由 ToolRuntime 每个步骤前后的 Observation 隐式提供。",
   "timeout_seconds": 900,
   "inputs": [
     {
@@ -19,7 +19,7 @@
       "required": false,
       "minimum": 1,
       "maximum": 600,
-      "description": "请求的遍历时长预算（秒）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 600 秒，实际时间盒由任务 deadline_seconds 控制"
+      "description": "请求的遍历时长预算（秒）。与文档内 600 秒绝对上限取较小值；到达后停止新迭代并执行收尾"
     },
     {
       "name": "max_actions",
@@ -27,7 +27,7 @@
       "required": false,
       "minimum": 1,
       "maximum": 200,
-      "description": "请求的遍历迭代预算（次）。仅作 preflight 校验的声明值；循环绝对上限固定为文档内 200 次"
+      "description": "请求的遍历迭代预算（次）。与文档内 200 次绝对上限取较小值；到达后停止遍历并执行收尾"
     }
   ],
   "steps": [
