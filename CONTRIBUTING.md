@@ -58,6 +58,7 @@ make typecheck
 make test
 make test-contract
 make test-integration
+make test-e2e-emulator  # 显式 Android Emulator E2E；不进默认快速测试
 make check
 make run
 ```

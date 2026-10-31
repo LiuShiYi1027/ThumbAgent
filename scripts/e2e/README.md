@@ -49,6 +49,25 @@ python3 scripts/e2e/e2e_settings_unicode_input.py
 python3 scripts/e2e/e2e_jd_search.py 搜索框 "iPhone 17"
 ```
 
+## Android Emulator 标准基线
+
+```bash
+make test-e2e-emulator
+```
+
+该入口使用独立的 `ThumbAgent_API_36` AVD 和本机已安装的
+`system-images;android-36;google_apis;arm64-v8a` 镜像。缺少镜像时脚本会给出安装命令，
+不会自动联网下载，也不会使用或清空个人 AVD。
+
+基线覆盖设备发现与 readiness、打开系统设置、显示设置导航、截图/UI Tree Observation、
+2 轮稳定性 REST 任务和最终前台验证。每次输出写入
+`e2e-output/emulator-baseline/<timestamp>/`，包括 `summary.json`、分场景结果、任务报告、
+事件和 Emulator 日志。
+
+测试 AVD 未运行时，脚本使用 `-wipe-data -no-snapshot-save` 启动并在结束后关闭它；
+已运行时复用，不清空也不关闭。动态端口避免占用其他 Emulator。该命令属于显式
+`device_e2e`，不进入 `make check`，也不代表国产 ROM 兼容性。
+
 退出码 0 为通过，非 0 为失败；产物（截图、UI Tree、节点摘要）写入
 `e2e-output/<时间戳>/`，该目录已 gitignore，不入库。
 

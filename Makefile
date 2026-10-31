@@ -2,7 +2,7 @@ PYTHON ?= python3.11
 PYTHONPATH := runtime
 CARGO ?= $(shell command -v cargo 2>/dev/null || echo $(HOME)/.cargo/bin/cargo)
 
-.PHONY: format lint typecheck test test-contract test-integration check check-desktop contracts check-contracts run run-mcp
+.PHONY: format lint typecheck test test-contract test-integration test-e2e-emulator check check-desktop contracts check-contracts run run-mcp
 
 format:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/quality.py format
@@ -22,6 +22,9 @@ test-contract:
 test-integration:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest runtime.tests.test_runtime_service -v
 
+
+test-e2e-emulator:
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/e2e/e2e_emulator_baseline.py
 contracts:
 	$(PYTHON) scripts/generate_ts_contracts.py
 
